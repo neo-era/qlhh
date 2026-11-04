@@ -59,6 +59,7 @@
         setOffline(false);
       } catch (e) { last = { ok: false, code: 'NETWORK', error: 'Không kết nối được máy chủ' }; setOffline(true); }
       if (last.ok || !RETRY.includes(last.code)) break;
+      if (last.code === 'NETWORK' && i >= 1) break;   // mất mạng: báo sau ~1 s, không quay 31 s
       if (i < tries - 1) { await new Promise(r => setTimeout(r, wait)); wait *= 2; }
     }
     if (last.code === 'AUTH_INVALID' || last.code === 'AUTH_EXPIRED') { if (action !== 'auth.login') expire(); }
@@ -74,7 +75,7 @@
     writeChain = p.catch(() => {});
     return p;
   }
-  function expire(msg) { if (S.user) IDB.del(cacheKey()); SS.del('qlhh-s:' + S.co.id); S.session = null; S.user = null; S.data = null; S.version = 0; toast(msg || 'Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại'); renderLogin(); }
+  function expire(msg) { if (S.user) IDB.del(cacheKey()); IDB.del('sess:' + S.co.id); S.session = null; S.user = null; S.data = null; S.version = 0; toast(msg || 'Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại'); renderLogin(); }
 
   // ---------------- đăng nhập ----------------
   async function startLogin() {
@@ -97,14 +98,14 @@
     const r = await call('auth.login', { idToken: p.get('id_token') }, 3);
     if (!r.ok) { renderLogin(); toast('Đăng nhập thất bại: ' + (r.error || r.code)); return true; }
     S.session = r.data.session; S.user = { email: r.data.email, vaiTro: r.data.vaiTro, hoTen: r.data.hoTen };
-    SS.set('qlhh-s:' + co.id, JSON.stringify({ session: S.session, user: S.user }));
+    await IDB.set('sess:' + co.id, { session: S.session, user: S.user });
     countUse();
     await boot();
     return true;
   }
   async function logout() {
     if (S.co && S.user) await IDB.del(cacheKey());
-    SS.del('qlhh-s:' + S.co.id); S.session = null; S.user = null; S.data = null; S.version = 0;
+    await IDB.del('sess:' + S.co.id); S.session = null; S.user = null; S.data = null; S.version = 0;
     renderLogin(); toast('Đã đăng xuất và xoá dữ liệu lưu trên máy');
   }
 
@@ -126,7 +127,7 @@
     if (r.data.today) S.today = r.data.today;
     if (r.data.me && S.user && r.data.me.vaiTro !== S.user.vaiTro) {   // QT vừa đổi vai trò của mình
       if (r.data.me.vaiTro !== 'QUAN_TRI') await IDB.del(cacheKey());
-      S.user = { ...S.user, ...r.data.me }; SS.set('qlhh-s:' + S.co.id, JSON.stringify({ session: S.session, user: S.user })); S.data = null; S.version = 0;
+      S.user = { ...S.user, ...r.data.me }; IDB.set('sess:' + S.co.id, { session: S.session, user: S.user }); S.data = null; S.version = 0;
       toast('Vai trò của anh/chị đã đổi thành ' + (ROLE[S.user.vaiTro] || S.user.vaiTro)); renderShell(); return sync();
     }
     if (!r.data.unchanged) {
@@ -142,7 +143,8 @@
   // ---------------- khung ----------------
   function applyCo() {
     document.documentElement.style.setProperty('--co', S.co.mau);
-    $('meta[name=theme-color]').setAttribute('content', S.co.mau);
+    const dark = document.documentElement.dataset.theme === 'dark' || (!document.documentElement.dataset.theme && matchMedia('(prefers-color-scheme: dark)').matches);
+    $('meta[name=theme-color]').setAttribute('content', dark ? '#0b1220' : S.co.mau);
   }
   const ROUTES = [
     { id: 'hang', ten: 'Danh mục hàng', icon: 'box' },
@@ -200,8 +202,8 @@
       $('#mCo', d).onclick = () => { d.close(); switchCo(); }; $('#mTheme', d).onclick = toggleTheme; $('#mOut', d).onclick = () => { d.close(); logout(); };
     });
   }
-  function header(title, actions = '', search = false) {
-    return `<div class="mtop">${title === 'Danh mục hàng' ? '' : `<a class="btn ghost iconbtn" href="#/hang" aria-label="Quay lại">${ic('back')}</a>`}<h1>${title}</h1><span class="cobadge">${esc(S.co.ten)}</span></div>
+  function header(title, actions = '', search = false, addId = '') {
+    return `<div class="mtop">${title === 'Danh mục hàng' ? '' : `<a class="btn ghost iconbtn" href="#/hang" aria-label="Quay lại">${ic('back')}</a>`}<h1>${title}</h1><span class="cobadge">${esc(S.co.ten)}</span>${addId ? `<button class="btn pri iconbtn" type="button" id="${addId}" aria-label="Thêm">${ic('plus')}</button>` : ''}</div>
       ${search ? `<label class="msearch">${ic('search')}<span class="sr">Tìm hàng</span><input id="qm" type="search" inputmode="search" placeholder="Tìm mã, tên, quy cách…" value="${esc(S.q)}" autocomplete="off"></label>` : ''}
       <div class="top"><h1>${title}</h1><span class="cobadge">${esc(S.co.ten)}</span>${search ? `<label class="search">${ic('search')}<span class="sr">Tìm hàng</span><input id="qd" type="search" placeholder="Tìm mã, tên, quy cách… (Ctrl K)" value="${esc(S.q)}" autocomplete="off"></label>` : ''}${actions}</div>
       ${S.offline ? `<div class="banner" role="status">${ic('warn')} Đang ngoại tuyến — chỉ xem dữ liệu đã lưu, chưa ghi được.</div>` : ''}`;
@@ -212,6 +214,7 @@
     const m = $('#main'); if (!m) return;
     $$('.nav a,.bnav a').forEach(a => a.toggleAttribute('aria-current', a.getAttribute('href') === '#/' + route()));
     $$('.nav a[aria-current],.bnav a[aria-current]').forEach(a => a.setAttribute('aria-current', 'page'));
+    const mb = $('#moreBtn'); if (mb) mb.toggleAttribute('aria-current', ['nhom', 'nguoidung'].includes(route()));
     if (!S.data) { m.innerHTML = header('Đang tải…') + `<div class="card">${'<div class="skel"></div>'.repeat(6)}</div>`; return; }
     ({ hang: viewItems, ncc: viewSuppliers, nhom: viewGroups, nguoidung: viewUsers, gopy: viewFeedback })[route()](m);
   }
@@ -226,30 +229,40 @@
     if (S.group) list = list.filter(i => i.nhom === S.group);
     return list;
   }
+  const MOBILE = '(max-width:899px),(orientation:landscape) and (max-height:520px)';
+  const isMobile = () => matchMedia(MOBILE).matches;
   function viewItems(m) {
-    const d = S.data, list = filteredItems(), shown = list.slice(0, S.limit);
-    const gname = g => (d.groups.find(x => x.maNhom === g) || {}).ten || g;
+    const d = S.data;
     const act = `${canEdit() ? `<button class="btn pri" id="addItem">${ic('plus')}<span>Thêm hàng</span></button>` : ''}<button class="btn" id="xls">${ic('dl')}<span>Xuất Excel</span></button>`;
-    m.innerHTML = header('Danh mục hàng', act, true) + kpis() +
-      `<div class="chips" role="group" aria-label="Lọc">${[['', 'Tất cả'], ...d.groups.map(g => [g.maNhom, g.ten])].map(([k, t]) => `<button class="chip" data-g="${esc(k)}" aria-pressed="${S.group === k}">${esc(t)}</button>`).join('')}
-        <button class="chip" id="stopT" aria-pressed="${S.showStopped}">Gồm hàng ngừng KD</button>${canEdit() ? `<button class="chip mobile-add" id="addItemM">${ic('plus')} Thêm hàng</button>` : ''}</div>
-      <div class="layout"><div class="card"><div class="tbl">
-        ${list.length ? `<table class="big"><thead><tr><th>Mã hàng</th><th>Tên hàng · quy cách</th><th>Nhóm</th><th>ĐVT</th><th class="n">Giá bán</th><th class="n">BH</th></tr></thead><tbody>
-          ${shown.map(i => `<tr data-ma="${esc(i.maHang)}" aria-selected="${S.sel === i.maHang}" tabindex="0"><td class="mono">${esc(i.maHang)}</td><td>${esc(i.ten)}${i.trangThai === 'NGUNG' ? ' <span class="tag stop">Ngừng KD</span>' : ''}<br><small>${esc(i.quyCach)}</small></td><td>${i.nhom ? `<span class="tag">${esc(gname(i.nhom))}</span>` : ''}</td><td>${esc(i.dvt)}</td><td class="n">${money(giaBan(i))}</td><td class="n">${i.thangBH !== '' ? i.thangBH + ' th' : '—'}</td></tr>`).join('')}
-        </tbody></table>
-        <div class="list mobile-only">${shown.map(i => `<div class="it" data-ma="${esc(i.maHang)}" role="button" tabindex="0"><div><div class="mono">${esc(i.maHang)}</div>${esc(i.ten)}${i.trangThai === 'NGUNG' ? ' <span class="tag stop">Ngừng KD</span>' : ''}<br><small class="mut">${esc(i.quyCach)}</small></div><div style="text-align:right;white-space:nowrap"><b>${money(giaBan(i))}</b><br><small class="mut">${esc(i.dvt)}</small></div></div>`).join('')}</div>
-        ${list.length > shown.length ? `<button class="btn more" id="more">Xem thêm (${(list.length - shown.length).toLocaleString('vi-VN')} mã)</button>` : ''}`
-        : `<div class="empty">${d.items.length ? 'Không có mã nào khớp — thử bỏ dấu hoặc ít từ hơn.' : 'Chưa có mặt hàng nào.' + (canEdit() ? ' Bấm <b>Thêm hàng</b> để bắt đầu.' : '')}</div>`}
-      </div></div><section class="card det ${S.sel ? '' : 'closed'}" id="det" aria-label="Chi tiết">${detail()}</section></div>`;
-    const qs = $$('#qm,#qd');
-    qs.forEach(q => q.oninput = () => { S.q = q.value; S.limit = 150; const pos = q.selectionStart, id = q.id; viewItems(m); const nq = $('#' + id); nq.focus(); nq.setSelectionRange(pos, pos); });
-    $$('.chip[data-g]').forEach(b => b.onclick = () => { S.group = b.dataset.g; viewItems(m); });
-    $('#stopT').onclick = () => { S.showStopped = !S.showStopped; viewItems(m); };
-    $$('[data-ma]').forEach(r => { r.onclick = () => select(r.dataset.ma); r.onkeydown = e => { if (e.key === 'Enter') select(r.dataset.ma); }; });
-    const more = $('#more'); if (more) more.onclick = () => { S.limit += 300; viewItems(m); };
+    m.innerHTML = header('Danh mục hàng', act, true, canEdit() ? 'addItemM' : '') + kpis() +
+      `<div class="chips" role="group" aria-label="Lọc">${[['', 'Tất cả'], ...d.groups.map(g => [g.maNhom, g.ten])].map(([k, t]) => `<button class="chip" type="button" data-g="${esc(k)}" aria-pressed="${S.group === k}">${esc(t)}</button>`).join('')}
+        <button class="chip" type="button" id="stopT" aria-pressed="${S.showStopped}">Gồm hàng ngừng KD</button></div>
+      <div class="layout"><div class="card"><div class="tbl" id="results"></div></div><section class="card det ${S.sel ? '' : 'closed'}" id="det" aria-label="Chi tiết">${detail()}</section></div>`;
+    // Ô tìm KHÔNG bị dựng lại khi gõ (giữ bộ gõ Telex/VNI); chỉ vẽ lại vùng kết quả, trễ 150 ms
+    let timer = null, composing = false;
+    $$('#qm,#qd').forEach(q => {
+      q.addEventListener('compositionstart', () => composing = true);
+      q.addEventListener('compositionend', () => { composing = false; q.dispatchEvent(new Event('input')); });
+      q.oninput = () => { if (composing) return; S.q = q.value; $$('#qm,#qd').forEach(o => { if (o !== q) o.value = q.value; }); S.limit = 150; clearTimeout(timer); timer = setTimeout(renderResults, 150); };
+    });
+    $$('.chip[data-g]').forEach(b => b.onclick = () => { S.group = b.dataset.g; $$('.chip[data-g]').forEach(x => x.setAttribute('aria-pressed', x === b)); S.limit = 150; renderResults(); });
+    $('#stopT').onclick = e => { S.showStopped = !S.showStopped; e.currentTarget.setAttribute('aria-pressed', S.showStopped); renderResults(); };
     $$('#addItem,#addItemM').forEach(b => b.onclick = () => itemForm());
     $('#xls').onclick = exportItems;
-    bindDetail();
+    renderResults(); bindDetail();
+  }
+  function renderResults() {
+    const box = $('#results'); if (!box) return;
+    const d = S.data, list = filteredItems(), shown = list.slice(0, S.limit), mob = isMobile();
+    const gname = g => (d.groups.find(x => x.maNhom === g) || {}).ten || g;
+    box.innerHTML = list.length ? (mob
+      ? `<div class="list">${shown.map(i => `<div class="it" data-ma="${esc(i.maHang)}" role="button" tabindex="0" aria-selected="${S.sel === i.maHang}"><div><div class="mono">${esc(i.maHang)}</div>${esc(i.ten)}${i.trangThai === 'NGUNG' ? ' <span class="tag stop">Ngừng KD</span>' : ''}<br><small class="mut">${esc(i.quyCach)}</small></div><div style="text-align:right;white-space:nowrap"><b>${money(giaBan(i))}</b><br><small class="mut">${esc(i.dvt)}</small></div></div>`).join('')}</div>`
+      : `<table><thead><tr><th>Mã hàng</th><th>Tên hàng · quy cách</th><th>Nhóm</th><th>ĐVT</th><th class="n">Giá bán</th><th class="n">BH</th></tr></thead><tbody>
+          ${shown.map(i => `<tr data-ma="${esc(i.maHang)}" role="button" aria-selected="${S.sel === i.maHang}" tabindex="0"><td class="mono">${esc(i.maHang)}</td><td>${esc(i.ten)}${i.trangThai === 'NGUNG' ? ' <span class="tag stop">Ngừng KD</span>' : ''}<br><small>${esc(i.quyCach)}</small></td><td>${i.nhom ? `<span class="tag">${esc(gname(i.nhom))}</span>` : ''}</td><td>${esc(i.dvt)}</td><td class="n">${money(giaBan(i))}</td><td class="n">${i.thangBH !== '' ? i.thangBH + ' th' : '—'}</td></tr>`).join('')}</tbody></table>`)
+      + (list.length > shown.length ? `<button class="btn more" type="button" id="more">Xem thêm (${(list.length - shown.length).toLocaleString('vi-VN')} mã)</button>` : '')
+      : `<div class="empty">${d.items.length ? 'Không có mã nào khớp — thử bỏ dấu hoặc ít từ hơn.' : 'Chưa có mặt hàng nào.' + (canEdit() ? ' Bấm <b>Thêm hàng</b> để bắt đầu.' : '')}</div>`;
+    $$('[data-ma]', box).forEach(r => r.onclick = () => select(r.dataset.ma));
+    const more = $('#more'); if (more) more.onclick = () => { S.limit += 500; renderResults(); };
   }
   function select(ma) {
     S.sel = ma; const det = $('#det'); det.innerHTML = detail(); det.classList.remove('closed'); bindDetail();
@@ -288,8 +301,7 @@
   }
   function viewSuppliers(m) {
     const d = S.data;
-    m.innerHTML = header('Giá & nhà cung cấp', canEdit() ? `<button class="btn pri" id="addSup">${ic('plus')}<span>Thêm NCC</span></button>` : '') +
-      `${canEdit() ? `<div class="chips"><button class="chip mobile-add" id="addSupM">${ic('plus')} Thêm nhà cung cấp</button></div>` : ''}
+    m.innerHTML = header('Giá & nhà cung cấp', canEdit() ? `<button class="btn pri" id="addSup">${ic('plus')}<span>Thêm NCC</span></button>` : '', false, canEdit() ? 'addSupM' : '') + `
       <p class="mut" style="margin-top:0">Giá bán và giá nhập theo từng mặt hàng: mở mặt hàng ở <a href="#/hang">Danh mục hàng</a> → <b>Thêm giá</b>.${isQT() ? '' : ' Giá nhập chỉ Quản trị xem được.'}</p>
       <div class="card list">${d.suppliers.length ? d.suppliers.map(s => `<div class="it" data-ncc="${esc(s.maNCC)}" role="button" tabindex="0"><div><div class="mono">${esc(s.maNCC)}</div><b>${esc(s.ten)}</b><br><small class="mut">${esc([s.mst && 'MST ' + s.mst, s.dienThoai, s.email].filter(Boolean).join(' · '))}</small></div>${s.trangThai === 'NGUNG' ? '<span class="tag stop">Ngừng</span>' : ''}</div>`).join('') : '<div class="empty">Chưa có nhà cung cấp.</div>'}</div>`;
     $$('#addSup,#addSupM').forEach(b => b.onclick = () => supplierForm());
@@ -297,16 +309,15 @@
   }
   function viewGroups(m) {
     const d = S.data, cnt = g => d.items.filter(i => i.nhom === g).length;
-    m.innerHTML = header('Nhóm hàng', canEdit() ? `<button class="btn pri" id="addG">${ic('plus')}<span>Thêm nhóm</span></button>` : '') +
-      `${canEdit() ? `<div class="chips"><button class="chip mobile-add" id="addGM">${ic('plus')} Thêm nhóm</button></div>` : ''}
+    m.innerHTML = header('Nhóm hàng', canEdit() ? `<button class="btn pri" id="addG">${ic('plus')}<span>Thêm nhóm</span></button>` : '', false, canEdit() ? 'addGM' : '') + `
       <div class="card list">${d.groups.length ? d.groups.map(g => `<div class="it" data-g="${esc(g.maNhom)}" role="button" tabindex="0"><div><div class="mono">${esc(g.maNhom)}</div><b>${esc(g.ten)}</b>${g.cha ? `<br><small class="mut">thuộc ${esc(g.cha)}</small>` : ''}</div><span class="tag">${cnt(g.maNhom)} mã</span></div>`).join('') : '<div class="empty">Chưa có nhóm. Ví dụ: ĐÈN LED, TỦ ĐIỆN, TRỤ, CÁP, IOT, PHỤ KIỆN.</div>'}</div>`;
     $$('#addG,#addGM').forEach(b => b.onclick = () => groupForm());
     $$('[data-g]').forEach(r => r.onclick = () => canEdit() && groupForm(d.groups.find(g => g.maNhom === r.dataset.g)));
   }
   function viewUsers(m) {
     const d = S.data;
-    m.innerHTML = header('Người dùng', `<button class="btn pri" id="addU">${ic('plus')}<span>Thêm người dùng</span></button>`) +
-      `<div class="chips"><button class="chip mobile-add" id="addUM">${ic('plus')} Thêm người dùng</button></div>
+    m.innerHTML = header('Người dùng', `<button class="btn pri" id="addU">${ic('plus')}<span>Thêm người dùng</span></button>`, false, 'addUM') +
+      `
       <p class="mut" style="margin-top:0">Người dùng đăng nhập bằng Gmail. <b>Xem</b>: chỉ xem; <b>Nhập liệu</b>: thêm/sửa hàng, NCC, nhập giá (không xem lại giá nhập); <b>Quản trị</b>: toàn quyền, xem giá vốn.</p>
       <div class="card list">${d.users.map(u => `<div class="it" data-u="${esc(u.email)}" role="button" tabindex="0"><div><b>${esc(u.hoTen || u.email)}</b><br><small class="mut">${esc(u.email)}</small></div><div style="text-align:right"><span class="tag">${ROLE[u.vaiTro] || esc(u.vaiTro)}</span>${u.trangThai === 'KHOA' ? '<br><span class="tag stop">Đã khoá</span>' : ''}</div></div>`).join('')}</div>`;
     $$('#addU,#addUM').forEach(b => b.onclick = () => userForm());
@@ -314,8 +325,8 @@
   }
   function viewFeedback(m) {
     const d = S.data, mine = !isQT();
-    m.innerHTML = header('Góp ý & đánh giá', `<button class="btn pri" id="addF">${ic('chat')}<span>Gửi góp ý</span></button>`) +
-      `<div class="chips"><button class="chip mobile-add" id="addFM">${ic('chat')} Gửi góp ý / báo lỗi</button></div>
+    m.innerHTML = header('Góp ý & đánh giá', `<button class="btn pri" id="addF">${ic('chat')}<span>Gửi góp ý</span></button>`, false, 'addFM') +
+      `
       <p class="mut" style="margin-top:0">${mine ? 'Các góp ý anh/chị đã gửi.' : 'Tất cả góp ý của người dùng — bấm để cập nhật trạng thái.'}</p>
       <div class="card list">${d.feedback.length ? d.feedback.slice().reverse().map(f => `<div class="it" data-f="${esc(f.id)}" role="button" tabindex="0"><div><b>${f.sao ? '★'.repeat(f.sao) : ''} ${esc(FBTYPE[f.loai] || f.loai)}</b><br>${esc(f.noiDung || '')}<br><small class="mut">${esc(String(f.thoiGian).slice(0, 16).replace('T', ' '))}${mine ? '' : ' · ' + esc(f.email)}${f.note ? ' · Ghi chú: ' + esc(f.note) : ''}</small></div><span class="tag">${FBST[f.trangThai] || esc(f.trangThai)}</span></div>`).join('') : '<div class="empty">Chưa có góp ý.</div>'}</div>`;
     $$('#addF,#addFM').forEach(b => b.onclick = () => feedbackForm());
@@ -325,17 +336,21 @@
   // ---------------- hộp thoại & biểu mẫu ----------------
   function dialog(title, body, onSubmit, after, submitText = 'Lưu') {
     const d = $('#dlg');
-    d.innerHTML = `<form method="dialog" novalidate><header><h2>${title}</h2><button class="btn ghost iconbtn" value="cancel" aria-label="Đóng" formnovalidate>${ic('x')}</button></header><div class="body">${body}</div>${onSubmit ? `<footer><button class="btn" value="cancel" formnovalidate>Huỷ</button><button class="btn pri" id="dlgOk" value="ok">${submitText}</button></footer>` : ''}</form>`;
+    const back = document.activeElement;
+    d.innerHTML = `<form method="dialog" novalidate><header><h2>${title}</h2><button class="btn ghost iconbtn" type="button" data-x aria-label="Đóng">${ic('x')}</button></header><div class="body">${body}<div class="dlgmsg" id="dlgMsg" role="alert"></div></div>${onSubmit ? `<footer><button class="btn" type="button" data-x>Huỷ</button><button class="btn pri" id="dlgOk" type="submit">${submitText}</button></footer>` : ''}</form>`;
     const f = $('form', d);
-    if (onSubmit) f.onsubmit = async e => {
-      if (e.submitter && e.submitter.value === 'cancel') return;
-      e.preventDefault(); const ok = $('#dlgOk'); ok.classList.add('busy'); ok.disabled = true;
+    $$('[data-x]', d).forEach(b => b.onclick = () => d.close());
+    d.onclose = () => { if (back && back.isConnected && back.focus) back.focus(); };
+    f.onsubmit = async e => {
+      e.preventDefault(); if (!onSubmit) return d.close();
+      const ok = $('#dlgOk'); if (ok.disabled) return; ok.classList.add('busy'); ok.disabled = true; $('#dlgMsg', d).textContent = '';
       try { const done = await onSubmit(Object.fromEntries(new FormData(f)), d); if (done) d.close(); } finally { ok.classList.remove('busy'); ok.disabled = false; }
     };
     d.onclick = e => { if (e.target === d) d.close(); };
     if (after) after(d);
     d.showModal();
     const first = $('.body input:not([type=hidden]):not([readonly]),.body select,.body textarea', d); if (first && matchMedia('(pointer:fine)').matches) first.focus();
+    $$('.body .in', d).forEach(i => { const e = $('#e_' + i.name, d); if (e) i.setAttribute('aria-describedby', e.id); });
     return d;
   }
   const fld = (name, label, val = '', o = {}) => `<label class="f" for="f_${name}">${label}${o.req ? ' *' : ''}</label>${o.type === 'textarea' ? `<textarea class="in" id="f_${name}" name="${name}" ${o.ro ? 'readonly' : ''}>${esc(val)}</textarea>` : o.opts ? `<select class="in" id="f_${name}" name="${name}">${o.opts.map(([k, t]) => `<option value="${esc(k)}" ${String(k) === String(val) ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>` : `<input class="in" id="f_${name}" name="${name}" value="${esc(val)}" ${o.type ? `type="${o.type}"` : ''} ${o.ro ? 'readonly' : ''} ${o.im ? `inputmode="${o.im}"` : ''} autocomplete="off">`}<div class="err" id="e_${name}"></div>`;
@@ -344,12 +359,13 @@
     let first = null;
     Object.entries(errs || {}).forEach(([k, v]) => { const e = $('#e_' + k, d), i = $('#f_' + k, d); if (e) e.textContent = v; if (i) { i.setAttribute('aria-invalid', 'true'); first = first || i; } });
     if (first) first.focus();
-    if (errs && errs._) toast(errs._);
+    if (errs && errs._) dlgMsg(d, errs._);
   }
+  function dlgMsg(d, m) { const x = $('#dlgMsg', d); if (x) x.textContent = m; else toast(m); }
   async function submit(d, action, body, okMsg) {
-    if (S.offline) { toast('Đang ngoại tuyến — chưa lưu được'); return false; }
+    if (S.offline) { dlgMsg(d, 'Đang ngoại tuyến — chưa lưu được. Dữ liệu trong ô vẫn giữ nguyên.'); return false; }
     const r = await write(action, body);
-    if (!r.ok) { if (r.fields && !Array.isArray(r.fields)) showErrors(d, r.fields); toast('Chưa lưu: ' + (r.error || r.code)); return false; }
+    if (!r.ok) { if (r.fields && !Array.isArray(r.fields)) showErrors(d, r.fields); dlgMsg(d, 'Chưa lưu: ' + (r.error || r.code) + (r.code === 'NETWORK' ? ' — kiểm tra mạng rồi bấm Lưu lại' : '')); return false; }
     toast(okMsg); await sync(); return true;
   }
   function itemForm(it) {
@@ -419,7 +435,7 @@
         const r = QValidate.feedback(fb); if (!r.ok) { showErrors(d, r.errors); return false; }
         if (S.offline) { queueFeedback(r.value); toast('Đã lưu góp ý trên máy, sẽ gửi khi có mạng'); return true; }
         const res = await write('feedback.add', { feedback: r.value });
-        if (!res.ok) { if (['NETWORK', 'NOT_JSON', 'INTERNAL', 'LOCK_TIMEOUT'].includes(res.code)) { queueFeedback(r.value); toast('Đã lưu góp ý trên máy, sẽ gửi khi có mạng'); return true; } toast('Chưa gửi: ' + (res.error || res.code)); return false; }
+        if (!res.ok) { if (['NETWORK', 'NOT_JSON', 'INTERNAL', 'LOCK_TIMEOUT'].includes(res.code)) { queueFeedback(r.value); toast('Đã lưu góp ý trên máy, sẽ gửi khi có mạng'); return true; } dlgMsg(d, 'Chưa gửi: ' + (res.error || res.code)); return false; }
         LS.set('qlhh-rated', true); toast('Cảm ơn anh/chị! Góp ý đã gửi.'); sync(); return true;
       }, d => $$('.stars button', d).forEach(b => b.onclick = () => { sao = +b.dataset.s; $$('.stars button', d).forEach(x => x.setAttribute('aria-pressed', +x.dataset.s <= sao)); $('#slbl', d).textContent = STARS[sao]; }), 'Gửi');
   }
@@ -468,7 +484,7 @@
   }
   function toggleTheme() {
     const cur = document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-    const nx = cur === 'dark' ? 'light' : 'dark'; document.documentElement.dataset.theme = nx; LS.set('qlhh-theme', nx);
+    const nx = cur === 'dark' ? 'light' : 'dark'; document.documentElement.dataset.theme = nx; LS.set('qlhh-theme', nx); applyCo();
   }
   let deferredInstall = null;
   window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferredInstall = e; installBtn(); });
@@ -480,15 +496,21 @@
     b.classList.remove('hide');
     b.onclick = async () => { if (deferredInstall) { deferredInstall.prompt(); deferredInstall = null; b.classList.add('hide'); } else dialog('Cài QLHH lên iPhone', '<ol><li>Mở trang này bằng <b>Safari</b>.</li><li>Bấm nút <b>Chia sẻ</b> (ô vuông có mũi tên).</li><li>Chọn <b>Thêm vào MH chính</b> → <b>Thêm</b>.</li></ol>'); };
   }
+  document.addEventListener('keydown', e => {
+    const t = e.target;
+    if ((e.key === 'Enter' || e.key === ' ') && t.getAttribute && t.getAttribute('role') === 'button' && !/^(BUTTON|A|INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) { e.preventDefault(); t.click(); return; }
+    if (e.key === 'Escape' && S.sel && !$('#dlg').open) { history.state && history.state.det ? history.back() : closeDetail(); return; }
+  });
   document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { const q = $('#qd') || $('#qm'); if (q) { e.preventDefault(); q.focus(); q.select(); } } });
   window.addEventListener('hashchange', () => { if (S.user) { S.sel = null; renderView(); } });
   window.addEventListener('online', () => { if (S.user) sync(); });
+  matchMedia(MOBILE).addEventListener('change', () => { if (S.user && S.data && route() === 'hang') renderResults(); });
   document.addEventListener('visibilitychange', () => { if (!document.hidden && S.user && S.data) sync(); });
 
   // ---------------- khởi động ----------------
   async function restore() {
     applyCo();
-    let saved = null; try { saved = JSON.parse(SS.get('qlhh-s:' + S.co.id) || 'null'); } catch (e) {}
+    const saved = await IDB.get('sess:' + S.co.id);
     if (saved && saved.session) { S.session = saved.session; S.user = saved.user; S.data = null; S.version = 0; await boot(); }
     else { S.session = null; S.user = null; renderLogin(); }
   }

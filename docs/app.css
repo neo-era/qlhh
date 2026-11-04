@@ -118,6 +118,8 @@ dialog header{display:flex;align-items:center;gap:8px;padding:14px 16px;border-b
 dialog header h2{font-size:17px;margin:0;flex:1}
 dialog .body{padding:4px 16px 16px;overflow:auto}
 dialog footer{display:flex;gap:8px;justify-content:flex-end;padding:12px 16px calc(12px + env(safe-area-inset-bottom));border-top:1px solid var(--line)}
+.dlgmsg{color:var(--bad);font-weight:600;margin-top:12px;min-height:0}
+.dlgmsg:empty{display:none}
 .stars{display:flex;gap:6px;margin-top:6px}
 .stars button{min-width:52px;min-height:52px;border-radius:var(--r);border:1px solid var(--line);background:var(--panel2);font-size:22px;cursor:pointer}
 .stars button[aria-pressed=true]{background:var(--acc-soft);border-color:var(--acc)}
@@ -149,10 +151,13 @@ dialog footer{display:flex;gap:8px;justify-content:flex-end;padding:12px 16px ca
   .det.closed{display:none}
   #toasts{bottom:calc(var(--nav-h) + 12px + env(safe-area-inset-bottom))}
   .grid2{grid-template-columns:1fr}
+  .chip,.btn,.in,select.in{min-height:48px} .iconbtn{min-width:48px}
+  .list .it[aria-selected=true]{background:var(--acc-soft);box-shadow:inset 3px 0 var(--acc)}
 }
-@media (min-width:900px) and (min-height:521px){.list.mobile-only{display:none}.det .back{display:none}.mobile-add{display:none}}
+@media (min-width:900px) and (min-height:521px){.det .back{display:none}.mtop .iconbtn.pri{display:none}}
 @media (orientation:landscape) and (max-height:520px){
-  .list.mobile-only{display:grid;grid-template-columns:1fr 1fr}
+  #results .list{display:grid;grid-template-columns:1fr 1fr}
+  .msearch{min-height:48px;margin-bottom:8px} .msearch input{min-height:46px} .chips{margin-bottom:8px} .mtop{padding-top:max(6px,env(safe-area-inset-top));padding-bottom:4px}
   .list .it{border-right:1px solid var(--line)}
 }
 @media print{aside.side,.bnav,.mtop,.top .btn,.chips{display:none}}
