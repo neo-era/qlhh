@@ -12,7 +12,7 @@ function setup() {
     var d = QSchema.SHEETS[n], s = ss.getSheetByName(n) || ss.insertSheet(n);
     if (s.getLastRow() === 0) s.appendRow(d.cols);
     s.setFrozenRows(1);
-    (d.text || []).forEach(function (c) { var L = String.fromCharCode(65 + d.cols.indexOf(c)); s.getRange(L + ':' + L).setNumberFormat('@'); });   // cả cột dạng văn bản
+    d.cols.forEach(function (c, i) { if ((d.num || []).indexOf(c) < 0) { var L = String.fromCharCode(65 + i); s.getRange(L + ':' + L).setNumberFormat('@'); } });   // mọi cột chữ dạng văn bản: không tự đổi kiểu, không chạy công thức
   });
   var nd = ss.getSheetByName('NguoiDung');
   var has = nd.getDataRange().getValues().some(function (r) { return String(r[0]).trim().toLowerCase() === me; });
@@ -126,16 +126,21 @@ function findUser(email, fresh) {
 // ======================= ĐỌC =======================
 var TABLES = { items: 'HangHoa', groups: 'NhomHang', suppliers: 'NhaCungCap', prices: 'BangGia', users: 'NguoiDung', feedback: 'GopY', logs: 'NhatKy' };
 function readTable(n) { return QSchema.toObjects(n, sheet(n).getDataRange().getValues()); }
+function readTail(n, k) {
+  var s = sheet(n), last = s.getLastRow(), cols = QSchema.SHEETS[n].cols;
+  if (last < 2) return { rows: [], warnings: [] };
+  var from = Math.max(2, last - k + 1);
+  return QSchema.toObjects(n, [cols].concat(s.getRange(from, 1, last - from + 1, cols.length).getValues()));
+}
 function syncPull(u, req) {
   var ver = Number(props().getProperty('dataVersion') || 1);   // đọc version TRƯỚC dữ liệu
   if (req.since && Number(req.since) === ver) return { unchanged: true, version: ver };
   var raw = {}, warnings = [];
   Object.keys(TABLES).forEach(function (k) {
     if (k === 'logs' && u.vaiTro !== 'QUAN_TRI') { raw[k] = []; return; }
-    var t = readTable(TABLES[k]); raw[k] = t.rows; warnings = warnings.concat(t.warnings);
+    var t = k === 'logs' ? readTail('NhatKy', 300) : readTable(TABLES[k]); raw[k] = t.rows; warnings = warnings.concat(t.warnings);
   });
-  raw.logs = raw.logs.slice(-300);
-  return { version: ver, data: QPerm.filterForRole(u.vaiTro, u.email, raw), warnings: u.vaiTro === 'QUAN_TRI' ? warnings : [], today: today() };
+  return { version: ver, data: QPerm.filterForRole(u.vaiTro, u.email, raw), warnings: u.vaiTro === 'QUAN_TRI' ? warnings : [], today: today(), me: { email: u.email, vaiTro: u.vaiTro, hoTen: u.hoTen } };
 }
 function schemaErrors(force) {
   var c = CacheService.getScriptCache();
@@ -159,11 +164,11 @@ function write(u, req, fn) {
     var rq = sheet('Request'), logs = [];
     var store = {
       get: function (id) { return findRequest(rq, id); },
-      set: function (id, v) { rq.appendRow([String(id), String(v.email), nowIso(), JSON.stringify(v.data)]); }
+      set: function (id, v) { rq.appendRow(QSchema.toRow('Request', { requestId: String(id), email: String(v.email), thoiGian: nowIso(), ketQua: JSON.stringify(v.data) })); }
     };
     var res = QIdem.once(store, u.email, req.requestId, function () {
       var d = fn(u, req, logs);
-      logs.forEach(function (l) { sheet('NhatKy').appendRow([nowIso(), u.email, l.action, l.doiTuong, String(l.id), l.truoc ? JSON.stringify(l.truoc) : '', l.sau ? JSON.stringify(l.sau) : '', String(req.requestId)]); });
+      logs.forEach(function (l) { sheet('NhatKy').appendRow(QSchema.toRow('NhatKy', { thoiGian: nowIso(), email: u.email, action: l.action, doiTuong: l.doiTuong, id: String(l.id), truoc: l.truoc ? JSON.stringify(l.truoc) : '', sau: l.sau ? JSON.stringify(l.sau) : '', requestId: String(req.requestId) })); });
       bumpVersion();
       return d;
     });
@@ -177,7 +182,7 @@ function write(u, req, fn) {
 }
 function findRequest(rq, id) {
   if (rq.getLastRow() < 2) return null;
-  var cell = rq.getRange(2, 1, rq.getLastRow() - 1, 1).createTextFinder(String(id)).matchEntireCell(true).findNext();
+  var cell = rq.getRange(2, 1, rq.getLastRow() - 1, 1).createTextFinder(String(id)).matchEntireCell(true).matchCase(true).findNext();
   if (!cell) return null;
   var r = rq.getRange(cell.getRow(), 1, 1, 4).getValues()[0], data;
   try { data = JSON.parse(r[3]); } catch (e) { data = { loi: 'ketQua hỏng' }; }
@@ -188,8 +193,8 @@ function nextId(key) { var p = props(), v = Number(p.getProperty('seq:' + key) |
 
 /** Tìm 1 dòng theo khoá (cột đầu) bằng TextFinder. Trả {row, obj} hoặc null. */
 function findByKey(n, key) {
-  var s = sheet(n); if (s.getLastRow() < 2) return null;
-  var cell = s.getRange(2, 1, s.getLastRow() - 1, 1).createTextFinder(String(key)).matchEntireCell(true).findNext();
+  var s = sheet(n); if (s.getLastRow() < 2 || key === '' || key === null || key === undefined) return null;
+  var cell = s.getRange(2, 1, s.getLastRow() - 1, 1).createTextFinder(String(key)).matchEntireCell(true).matchCase(true).findNext();
   if (!cell) return null;
   var cols = QSchema.SHEETS[n].cols, v = s.getRange(cell.getRow(), 1, 1, cols.length).getValues()[0];
   var o = QSchema.toObjects(n, [cols, v]).rows[0] || {};
@@ -214,11 +219,11 @@ function itemUpsert(u, req, logs) {
   if (cur) v.giaBan = cur.giaBan;              // giá vốn do hệ thống tính, không nhận từ client
   if (cur && cur.trangThai) v.trangThai = cur.trangThai;   // đổi trạng thái qua item.stop
   v.capNhat = nowIso();
-  putRow('HangHoa', v, cur && cur._row);
-  if (!cur && v.giaBan !== '' && v.giaBan > 0) {   // giá bán ban đầu → ghi luôn vào lịch sử giá
+  if (!cur && v.giaBan !== '' && v.giaBan > 0) {   // giá bán ban đầu → ghi vào lịch sử giá TRƯỚC dòng hàng
     var g = { id: 'G' + ('000000' + nextId('BangGia')).slice(-6), maHang: v.maHang, loai: 'BAN', maNCC: '', gia: v.giaBan, tuNgay: today(), ghiChu: 'Giá ban đầu', nguoiTao: u.email, thoiGian: nowIso() };
     putRow('BangGia', g);
   }
+  putRow('HangHoa', v, cur && cur._row);
   logs.push({ action: 'item.upsert', doiTuong: 'HangHoa', id: v.maHang, truoc: cur ? strip(cur) : null, sau: v });
   return { maHang: v.maHang };
 }
@@ -233,6 +238,10 @@ function itemStop(u, req, logs) {
 function groupUpsert(u, req, logs) {
   var v = need(QValidate.group(req.group));
   if (v.cha && !findByKey('NhomHang', v.cha)) throw fail('VALIDATION', 'Nhóm cha ' + v.cha + ' chưa có', { cha: 'Chọn nhóm có sẵn' });
+  if (v.cha) {   // chặn vòng lặp cha–con (A thuộc B, B thuộc A)
+    var all = {}; readTable('NhomHang').rows.forEach(function (r) { all[r.maNhom] = r.cha; });
+    for (var x = v.cha, n = 0; x && n < 50; x = all[x], n++) if (x === v.maNhom) throw fail('VALIDATION', 'Nhóm cha tạo vòng lặp', { cha: 'Không chọn nhóm con làm nhóm cha' });
+  }
   var cur = findByKey('NhomHang', v.maNhom);
   putRow('NhomHang', v, cur && cur._row);
   logs.push({ action: 'group.upsert', doiTuong: 'NhomHang', id: v.maNhom, truoc: cur ? strip(cur) : null, sau: v });
@@ -284,7 +293,8 @@ function feedbackAdd(u, req, logs) {
   return { id: v.id };
 }
 function feedbackUpdate(u, req, logs) {
-  var cur = findByKey('GopY', String(req.id || ''));
+  if (!req.id) throw fail('VALIDATION', 'Thiếu mã góp ý');
+  var cur = findByKey('GopY', String(req.id));
   if (!cur) throw fail('NOT_FOUND', 'Không có góp ý ' + req.id);
   var st = ['MOI', 'DANG_XU_LY', 'DA_XU_LY', 'BO_QUA'];
   if (st.indexOf(req.trangThai) < 0) throw fail('VALIDATION', 'Trạng thái không hợp lệ');

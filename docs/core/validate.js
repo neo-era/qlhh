@@ -22,6 +22,7 @@ var QValidate=(function(){
     v.tonToiThieu=numOpt(x.tonToiThieu,e,'tonToiThieu','Tồn tối thiểu ≥ 0');
     v.giaBan=intOpt(x.giaBan,e,'giaBan',0,undefined,'Giá bán là số nguyên VND ≥ 0');
     v.anhUrl=s(x.anhUrl).slice(0,500);v.taiLieuUrl=s(x.taiLieuUrl).slice(0,500);
+    ['anhUrl','taiLieuUrl'].forEach(function(k){if(v[k]&&!/^https?:\/\/[^\s"'<>]+$/i.test(v[k]))e[k]='Link phải bắt đầu bằng http:// hoặc https://';});
     v.trangThai=x.trangThai==='NGUNG'?'NGUNG':'KD';
     return done(v,e);
   }

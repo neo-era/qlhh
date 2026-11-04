@@ -42,6 +42,8 @@
   const cacheKey = () => `data:${S.co.id}:${S.user && S.user.email}`;
   const isQT = () => S.user && S.user.vaiTro === 'QUAN_TRI';
   const canEdit = () => S.user && (S.user.vaiTro === 'NHAP_LIEU' || S.user.vaiTro === 'QUAN_TRI');
+  const giaBan = i => { const e = S.data && QPrice.effective(S.data.prices, i.maHang, 'BAN', S.today); return e ? e.gia : i.giaBan; };   // giá áp dụng HÔM NAY (giá hẹn ngày tự có hiệu lực)
+  const safeUrl = u => /^https?:\/\/[^\s"'<>]+$/i.test(String(u || '')) ? u : '';
 
   // ---------------- giao tiếp máy chủ ----------------
   const rid = () => 'r' + Date.now().toString(36) + Array.from(crypto.getRandomValues(new Uint8Array(8)), b => b.toString(16).padStart(2, '0')).join('');
@@ -72,7 +74,7 @@
     writeChain = p.catch(() => {});
     return p;
   }
-  function expire() { SS.del('qlhh-s:' + S.co.id); S.session = null; toast('Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại'); renderLogin(); }
+  function expire(msg) { if (S.user) IDB.del(cacheKey()); SS.del('qlhh-s:' + S.co.id); S.session = null; S.user = null; S.data = null; S.version = 0; toast(msg || 'Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại'); renderLogin(); }
 
   // ---------------- đăng nhập ----------------
   async function startLogin() {
@@ -117,10 +119,16 @@
     const r = await call('sync.pull', { since: S.data ? S.version : 0 }, 3);
     if (!r.ok) {
       if (S.offline) { renderView(); toast(S.data ? 'Đang ngoại tuyến — xem dữ liệu lưu gần nhất' : 'Không kết nối được máy chủ'); }
+      else if (r.code === 'FORBIDDEN') expire('Tài khoản đã bị khoá hoặc chưa được cấp quyền — đã xoá dữ liệu trên máy');
       else if (r.code !== 'AUTH_INVALID' && r.code !== 'AUTH_EXPIRED') toast('Lỗi tải dữ liệu: ' + (r.error || r.code));
       return;
     }
     if (r.data.today) S.today = r.data.today;
+    if (r.data.me && S.user && r.data.me.vaiTro !== S.user.vaiTro) {   // QT vừa đổi vai trò của mình
+      if (r.data.me.vaiTro !== 'QUAN_TRI') await IDB.del(cacheKey());
+      S.user = { ...S.user, ...r.data.me }; SS.set('qlhh-s:' + S.co.id, JSON.stringify({ session: S.session, user: S.user })); S.data = null; S.version = 0;
+      toast('Vai trò của anh/chị đã đổi thành ' + (ROLE[S.user.vaiTro] || S.user.vaiTro)); renderShell(); return sync();
+    }
     if (!r.data.unchanged) {
       S.data = r.data.data; S.version = r.data.version; reindex();
       IDB.set(cacheKey(), { data: S.data, version: S.version, at: Date.now() });
@@ -227,9 +235,9 @@
         <button class="chip" id="stopT" aria-pressed="${S.showStopped}">Gồm hàng ngừng KD</button>${canEdit() ? `<button class="chip mobile-add" id="addItemM">${ic('plus')} Thêm hàng</button>` : ''}</div>
       <div class="layout"><div class="card"><div class="tbl">
         ${list.length ? `<table class="big"><thead><tr><th>Mã hàng</th><th>Tên hàng · quy cách</th><th>Nhóm</th><th>ĐVT</th><th class="n">Giá bán</th><th class="n">BH</th></tr></thead><tbody>
-          ${shown.map(i => `<tr data-ma="${esc(i.maHang)}" aria-selected="${S.sel === i.maHang}" tabindex="0"><td class="mono">${esc(i.maHang)}</td><td>${esc(i.ten)}${i.trangThai === 'NGUNG' ? ' <span class="tag stop">Ngừng KD</span>' : ''}<br><small>${esc(i.quyCach)}</small></td><td>${i.nhom ? `<span class="tag">${esc(gname(i.nhom))}</span>` : ''}</td><td>${esc(i.dvt)}</td><td class="n">${money(i.giaBan)}</td><td class="n">${i.thangBH !== '' ? i.thangBH + ' th' : '—'}</td></tr>`).join('')}
+          ${shown.map(i => `<tr data-ma="${esc(i.maHang)}" aria-selected="${S.sel === i.maHang}" tabindex="0"><td class="mono">${esc(i.maHang)}</td><td>${esc(i.ten)}${i.trangThai === 'NGUNG' ? ' <span class="tag stop">Ngừng KD</span>' : ''}<br><small>${esc(i.quyCach)}</small></td><td>${i.nhom ? `<span class="tag">${esc(gname(i.nhom))}</span>` : ''}</td><td>${esc(i.dvt)}</td><td class="n">${money(giaBan(i))}</td><td class="n">${i.thangBH !== '' ? i.thangBH + ' th' : '—'}</td></tr>`).join('')}
         </tbody></table>
-        <div class="list mobile-only">${shown.map(i => `<div class="it" data-ma="${esc(i.maHang)}" role="button" tabindex="0"><div><div class="mono">${esc(i.maHang)}</div>${esc(i.ten)}${i.trangThai === 'NGUNG' ? ' <span class="tag stop">Ngừng KD</span>' : ''}<br><small class="mut">${esc(i.quyCach)}</small></div><div style="text-align:right;white-space:nowrap"><b>${money(i.giaBan)}</b><br><small class="mut">${esc(i.dvt)}</small></div></div>`).join('')}</div>
+        <div class="list mobile-only">${shown.map(i => `<div class="it" data-ma="${esc(i.maHang)}" role="button" tabindex="0"><div><div class="mono">${esc(i.maHang)}</div>${esc(i.ten)}${i.trangThai === 'NGUNG' ? ' <span class="tag stop">Ngừng KD</span>' : ''}<br><small class="mut">${esc(i.quyCach)}</small></div><div style="text-align:right;white-space:nowrap"><b>${money(giaBan(i))}</b><br><small class="mut">${esc(i.dvt)}</small></div></div>`).join('')}</div>
         ${list.length > shown.length ? `<button class="btn more" id="more">Xem thêm (${(list.length - shown.length).toLocaleString('vi-VN')} mã)</button>` : ''}`
         : `<div class="empty">${d.items.length ? 'Không có mã nào khớp — thử bỏ dấu hoặc ít từ hơn.' : 'Chưa có mặt hàng nào.' + (canEdit() ? ' Bấm <b>Thêm hàng</b> để bắt đầu.' : '')}</div>`}
       </div></div><section class="card det ${S.sel ? '' : 'closed'}" id="det" aria-label="Chi tiết">${detail()}</section></div>`;
@@ -261,8 +269,8 @@
       <dl class="dl"><dt>Nhóm</dt><dd>${esc(g ? g.ten : i.nhom || '—')}</dd><dt>Quy cách</dt><dd>${esc(i.quyCach || '—')}</dd><dt>ĐVT</dt><dd>${esc(i.dvt)}</dd>
         <dt>Hãng / xuất xứ</dt><dd>${esc([i.hang, i.xuatXu].filter(Boolean).join(' · ') || '—')}</dd><dt>Bảo hành</dt><dd>${i.thangBH !== '' ? i.thangBH + ' tháng' : '—'}</dd>
         <dt>Quản lý serial</dt><dd>${i.quanLySerial === true || i.quanLySerial === 'true' ? 'Có' : 'Không'}</dd><dt>Tồn tối thiểu</dt><dd>${i.tonToiThieu !== '' ? i.tonToiThieu + ' ' + esc(i.dvt) : '—'}</dd>
-        <dt>Giá bán hiện hành</dt><dd><b>${money(i.giaBan)}</b></dd>${isQT() ? `<dt>Giá vốn</dt><dd>${money(i.giaVon)}</dd>` : ''}
-        ${i.taiLieuUrl ? `<dt>Tài liệu</dt><dd><a href="${esc(i.taiLieuUrl)}" target="_blank" rel="noopener">Mở tài liệu</a></dd>` : ''}</dl>
+        <dt>Giá bán hiện hành</dt><dd><b>${money(giaBan(i))}</b></dd>${isQT() ? `<dt>Giá vốn</dt><dd>${money(i.giaVon)}</dd>` : ''}
+        ${safeUrl(i.taiLieuUrl) ? `<dt>Tài liệu</dt><dd><a href="${esc(safeUrl(i.taiLieuUrl))}" target="_blank" rel="noopener noreferrer">Mở tài liệu</a></dd>` : ''}</dl>
       ${canEdit() && !S.offline ? `<div class="acts"><button class="btn" id="edItem">Sửa</button><button class="btn" id="addPrice">${ic('plus')} Thêm giá</button><button class="btn ${i.trangThai === 'NGUNG' ? '' : 'danger'}" id="stopItem">${i.trangThai === 'NGUNG' ? 'Kinh doanh lại' : 'Ngừng KD'}</button></div>` : ''}
       <div class="hist"><h3>Lịch sử giá bán</h3>${ban.length ? `<ul>${ban.slice(0, 12).map(p => `<li><span>Từ ${esc(p.tuNgay)}</span><b>${money(p.gia)}</b></li>`).join('')}</ul>` : '<p class="mut">Chưa có giá bán.</p>'}</div>
       ${isQT() ? `<div class="hist"><h3>Giá nhập theo NCC</h3>${nhap.length ? `<ul>${nhap.slice(0, 12).map(p => `<li><span>${esc(sup(p.maNCC))} · ${esc(p.tuNgay)}</span><b>${money(p.gia)}</b></li>`).join('')}</ul>` : '<p class="mut">Chưa có giá nhập.</p>'}</div>` : ''}`;
@@ -420,7 +428,7 @@
       ${fld('trangThai', 'Trạng thái', f.trangThai, { opts: Object.entries(FBST) })}${fld('note', 'Ghi chú xử lý', f.note, { type: 'textarea' })}`,
       async (v, d) => submit(d, 'feedback.update', { id: f.id, trangThai: v.trangThai, note: v.note }, 'Đã cập nhật'));
   }
-  const QK = () => 'qlhh-fbq:' + (S.co && S.co.id);
+  const QK = () => 'qlhh-fbq:' + (S.co && S.co.id) + ':' + (S.user && S.user.email);
   function queueFeedback(fb) { const q = LS.get(QK(), []); q.push({ fb, requestId: rid() }); LS.set(QK(), q.slice(-20)); }
   async function flushFeedbackQueue() {
     const q = LS.get(QK(), []); if (!q.length || !S.session) return;
@@ -437,14 +445,14 @@
   function loadScript(src) { return new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = rej; document.head.appendChild(s); }); }
   async function exportItems() {
     const list = filteredItems(), gname = g => (S.data.groups.find(x => x.maNhom === g) || {}).ten || g;
-    const rows = list.map(i => ({ 'Mã hàng': i.maHang, 'Tên hàng': i.ten, 'Nhóm': gname(i.nhom), 'Quy cách': i.quyCach, 'ĐVT': i.dvt, 'Hãng': i.hang, 'Xuất xứ': i.xuatXu, 'Bảo hành (tháng)': i.thangBH, 'Tồn tối thiểu': i.tonToiThieu, 'Giá bán (₫)': i.giaBan, ...(isQT() ? { 'Giá vốn (₫)': i.giaVon } : {}), 'Quản lý serial': i.quanLySerial === true || i.quanLySerial === 'true' ? 'Có' : '', 'Trạng thái': i.trangThai === 'NGUNG' ? 'Ngừng KD' : 'Đang KD' }));
+    const rows = list.map(i => ({ 'Mã hàng': i.maHang, 'Tên hàng': i.ten, 'Nhóm': gname(i.nhom), 'Quy cách': i.quyCach, 'ĐVT': i.dvt, 'Hãng': i.hang, 'Xuất xứ': i.xuatXu, 'Bảo hành (tháng)': i.thangBH, 'Tồn tối thiểu': i.tonToiThieu, 'Giá bán (₫)': giaBan(i), ...(isQT() ? { 'Giá vốn (₫)': i.giaVon } : {}), 'Quản lý serial': i.quanLySerial === true || i.quanLySerial === 'true' ? 'Có' : '', 'Trạng thái': i.trangThai === 'NGUNG' ? 'Ngừng KD' : 'Đang KD' }));
     const name = `QLHH_${S.co.id}_DanhMucHang_${S.today}`;
     try {
-      if (!window.XLSX) await loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
+      if (!window.XLSX) await loadScript('vendor/xlsx.full.min.js');   // SheetJS 0.18.5 đặt sẵn trong app (không phụ thuộc CDN)
       const ws = XLSX.utils.json_to_sheet(rows); ws['!cols'] = Object.keys(rows[0] || { a: 1 }).map(k => ({ wch: Math.max(10, k.length + 2) }));
       const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'DanhMucHang'); XLSX.writeFile(wb, name + '.xlsx');
     } catch (e) {
-      const head = Object.keys(rows[0] || {}), csv = '﻿' + [head, ...rows.map(r => head.map(h => r[h]))].map(r => r.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\r\n');
+      const head = Object.keys(rows[0] || {}), csv = '﻿' + [head, ...rows.map(r => head.map(h => r[h]))].map(r => r.map(v => { let x = String(v ?? ''); if (/^[=+\-@\t\r]/.test(x)) x = "'" + x; return `"${x.replace(/"/g, '""')}"`; }).join(',')).join('\r\n');
       const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = name + '.csv'; a.click();
       toast('Đã xuất CSV (mở được bằng Excel)');
     }

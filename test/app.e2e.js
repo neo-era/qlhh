@@ -15,7 +15,6 @@ async function page(b, vp, email = 'maivulam2020@gmail.com', scheme = 'light') {
   const p = await ctx.newPage();
   p.on('pageerror', e => { console.log('JS lỗi: ' + e.message); fails.push('JS lỗi: ' + e.message); });
   await p.route('https://script.google.com/**', async rt => { if (offline) return rt.abort(); await rt.fulfill({ contentType: 'application/json', body: api.doPost({ postData: { contents: rt.request().postData() } }).t }); });
-  await p.route('https://cdnjs.cloudflare.com/**', rt => rt.abort());   // thử nhánh CSV dự phòng
   await p.route('https://accounts.google.com/**', async rt => {
     const u = new URL(rt.request().url()); api.st.email = email; api.st.nonce = u.searchParams.get('nonce');
     if (u.searchParams.get('redirect_uri') !== BASE || u.searchParams.get('response_type') !== 'id_token' || u.searchParams.get('state') !== 'LAVIPCO') fails.push('tham số Google sai');
@@ -26,7 +25,7 @@ async function page(b, vp, email = 'maivulam2020@gmail.com', scheme = 'light') {
 }
 const login = async p => { await p.click('#loginBtn'); await p.waitForFunction(() => window.QLHH_DEBUG && window.QLHH_DEBUG.data, null, { timeout: 10000 }); };
 const fill = async (p, o) => { for (const [k, v] of Object.entries(o)) { const s = '#f_' + k; const tag = await p.$eval(s, e => e.tagName); if (tag === 'SELECT') await p.selectOption(s, v); else await p.fill(s, String(v)); } };
-const save = async p => { await p.click('#dlgOk'); await p.waitForFunction(() => !document.querySelector('#dlg').open, null, { timeout: 8000 }).catch(() => fails.push('hộp thoại không đóng sau khi lưu')); await p.waitForTimeout(100); };
+const save = async p => { await p.click('#dlgOk'); await p.waitForFunction(() => !document.querySelector('#dlg').open, null, { timeout: 8000 }).catch(async () => { const t = await toasts(p), e = await p.$$eval('.err', x => x.map(y => y.textContent).filter(Boolean).join('; ')); console.log('✗ hộp thoại không đóng: ' + t + ' | ' + e); fails.push('hộp thoại không đóng sau khi lưu: ' + t + ' | ' + e); await p.keyboard.press('Escape'); }); await p.waitForTimeout(100); };
 const toasts = p => p.$$eval('.toast', ts => ts.map(t => t.textContent).join(' | '));
 const rows = p => p.$$('tbody tr');
 
@@ -56,7 +55,7 @@ const rows = p => p.$$('tbody tr');
   ok((await p.textContent('#e_mst')) !== '', 'MST sai báo lỗi'); await fill(p, { mst: '0312345678' }); await save(p);
   await p.goto(BASE + '#/hang'); await p.click('tbody tr[data-ma="DL-STR-100"]'); await p.click('#addPrice');
   await fill(p, { loai: 'NHAP', maNCC: 'NCC01', gia: '2.900.000', tuNgay: '2026-01-02' }); await save(p);
-  await p.click('tbody tr[data-ma="DL-STR-100"]'); await p.click('#addPrice'); await fill(p, { loai: 'BAN', gia: '3990000', tuNgay: '2026-01-02' }); await save(p);
+  await p.click('tbody tr[data-ma="DL-STR-100"]'); await p.click('#addPrice'); await fill(p, { loai: 'BAN', gia: '3990000' }); await save(p);   // ngày mặc định = hôm nay → thay giá ban đầu
   await p.click('tbody tr[data-ma="DL-STR-100"]');
   const det = await p.textContent('#det');
   ok(det.includes('3.990.000') && det.includes('2.900.000') && det.includes('Cty Đèn Sáng'), 'QT thấy giá bán mới + giá nhập theo NCC');
@@ -64,7 +63,8 @@ const rows = p => p.$$('tbody tr');
   ok((await rows(p)).length === 1, 'ngừng KD → ẩn khỏi danh sách mặc định');
   await p.click('#stopT'); ok((await rows(p)).length === 2, 'bật "Gồm hàng ngừng KD" → hiện lại');
   const [dl] = await Promise.all([p.waitForEvent('download'), p.click('#xls')]);
-  const csv = fs.readFileSync(await dl.path(), 'utf8'); ok(dl.suggestedFilename().endsWith('.csv') && csv.includes('DL-STR-100') && csv.includes('Giá vốn'), 'xuất Excel (CSV dự phòng khi không tải được thư viện)');
+  const XLSX = require('/tmp/xl/package'); const wb = XLSX.readFile(await dl.path()); const rowsX = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+  ok(dl.suggestedFilename().endsWith('.xlsx') && rowsX.some(r => r['Mã hàng'] === 'DL-STR-100' && r['Giá bán (₫)'] === 3990000) && 'Giá vốn (₫)' in rowsX[0], 'xuất Excel .xlsx (giá bán theo ngày hôm nay, QT có cột giá vốn)');
   await p.goto(BASE + '#/nguoidung'); await p.click('#addU'); await fill(p, { email: 'Moi@Gmail.com', hoTen: 'Nhân viên mới', vaiTro: 'NHAP_LIEU' }); await save(p);
   ok((await p.textContent('#main')).includes('moi@gmail.com'), 'QT thêm người dùng (email chuẩn hoá)');
   await p.click('#fbBtn'); await p.click('#dlgOk'); ok(/sao hoặc nhập nội dung/.test(await toasts(p)), 'góp ý rỗng bị chặn');

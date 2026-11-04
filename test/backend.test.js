@@ -156,3 +156,36 @@ test('giá bán ban đầu khi tạo hàng → có trong lịch sử giá; sửa
   a.post({ action: 'item.upsert', session: s, requestId: rid(), isNew: false, item: item({ giaBan: 1 }) });
   d = a.post({ action: 'sync.pull', session: s }).data.data; assert.equal(d.items[0].giaBan, 3850000);
 });
+
+// ---------- các lỗi chuyên gia bảo mật phát hiện (phải luôn đạt) ----------
+test('BẢO MẬT: chèn công thức (=, +, -, @) vào ô chữ → lưu nguyên văn, KHÔNG chạy công thức', () => {
+  const a = ready({ [XEM]: 'XEM' }); const qt = a.login(); const x = a.login(XEM);
+  const evil = '=TEXTJOIN(",",TRUE,BangGia!E2:E5000,HangHoa!L2:L5000)';
+  assert.equal(a.post({ action: 'feedback.add', session: x, requestId: rid(), feedback: { sao: 1, loai: 'KHAC', noiDung: evil } }).ok, true);
+  a.post({ action: 'item.upsert', session: qt, requestId: rid(), isNew: true, item: item({ ten: '+IMPORTXML("http://x")', quyCach: '-5', hang: '@SUM(1)' }) });
+  assert.equal(JSON.stringify(a.sheets).includes('CONG_THUC_DA_CHAY'), false, 'không ô nào chạy công thức');
+  assert.equal(a.post({ action: 'sync.pull', session: x }).data.data.feedback[0].noiDung, evil);
+  const it = a.post({ action: 'sync.pull', session: qt }).data.data.items[0];
+  assert.deepEqual([it.ten, it.quyCach, it.hang], ['+IMPORTXML("http://x")', '-5', '@SUM(1)']);
+});
+test('BẢO MẬT: link tài liệu javascript:/data: bị từ chối, chỉ nhận http(s)', () => {
+  const a = ready(); const s = a.login();
+  for (const u of ['javascript:alert(1)', 'JaVaScRiPt:fetch(1)', 'data:text/html,x', 'http://a b']) assert.equal(a.post({ action: 'item.upsert', session: s, requestId: rid(), isNew: true, item: item({ maHang: 'X' + Math.random().toString(36).slice(2, 6).toUpperCase(), taiLieuUrl: u }) }).code, 'VALIDATION', u);
+  assert.equal(a.post({ action: 'item.upsert', session: s, requestId: rid(), isNew: true, item: item({ taiLieuUrl: 'https://drive.google.com/file/d/abc' }) }).ok, true);
+});
+test('nhóm cha không được tạo vòng lặp', () => {
+  const a = ready(); const s = a.login();
+  a.post({ action: 'group.upsert', session: s, requestId: rid(), group: { maNhom: 'A', ten: 'A' } });
+  a.post({ action: 'group.upsert', session: s, requestId: rid(), group: { maNhom: 'B', ten: 'B', cha: 'A' } });
+  assert.equal(a.post({ action: 'group.upsert', session: s, requestId: rid(), group: { maNhom: 'A', ten: 'A', cha: 'B' } }).code, 'VALIDATION');
+});
+test('feedback.update thiếu id → VALIDATION (không lỗi máy chủ); sync trả vai trò hiện tại', () => {
+  const a = ready(); const s = a.login();
+  assert.equal(a.post({ action: 'feedback.update', session: s, requestId: rid(), id: '', trangThai: 'DA_XU_LY' }).code, 'VALIDATION');
+  assert.equal(a.post({ action: 'sync.pull', session: s }).data.me.vaiTro, 'QUAN_TRI');
+});
+test('ngày lưu dạng Date trong Sheet được đọc đúng ngày theo giờ Việt Nam', () => {
+  const SC = require('../core/schema.js'); const cols = SC.SHEETS.BangGia.cols;
+  const row = cols.map(c => ({ id: 'G1', maHang: 'A', loai: 'BAN', gia: 5, tuNgay: new Date('2026-11-04T17:00:00Z') })[c] ?? '');   // 00:00 ngày 05/11 giờ VN
+  assert.equal(SC.toObjects('BangGia', [cols, row]).rows[0].tuNgay, '2026-11-05');
+});

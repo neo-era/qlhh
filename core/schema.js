@@ -31,7 +31,7 @@ var QSchema=(function(){
       var o={_row:i+1};
       for(var j=0;j<cols.length;j++){
         var c=cols[j],v=r[j]===undefined?'':r[j];
-        if(v instanceof Date)v=v.toISOString().slice(0,10);
+        if(v instanceof Date)v=new Date(v.getTime()+7*3600e3).toISOString().slice(0,10);   // ngày theo giờ VN
         if(num.indexOf(c)>=0&&v!==''){var n=Number(v);if(!isFinite(n)){warnings.push(name+'!'+(i+1)+': '+c+' không phải số ("'+v+'")');v='';}else v=n;}
         else if(num.indexOf(c)<0)v=typeof v==='string'?v:String(v);
         o[c]=v;
@@ -40,7 +40,9 @@ var QSchema=(function(){
     }
     return {rows:rows,warnings:warnings};
   }
-  function toRow(name,o){return SHEETS[name].cols.map(function(c){var v=o[c];return v===undefined||v===null?'':v;});}
-  return {SHEETS:SHEETS,check:check,toObjects:toObjects,toRow:toRow};
+  /* Chuỗi bắt đầu = + - @ được thêm ' để Sheets lưu là VĂN BẢN, không chạy công thức (chống chèn công thức lấy giá vốn). */
+  function safe(v){return typeof v==='string'&&/^[=+\-@\t\r]/.test(v)?"'"+v:v;}
+  function toRow(name,o){return SHEETS[name].cols.map(function(c){var v=o[c];return v===undefined||v===null?'':safe(v);});}
+  return {SHEETS:SHEETS,check:check,toObjects:toObjects,toRow:toRow,safe:safe};
 })();
 if(typeof module!=='undefined')module.exports=QSchema;

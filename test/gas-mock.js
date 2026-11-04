@@ -6,7 +6,8 @@ const BACKEND_FILES = ['core/auth.js', 'core/idem.js', 'core/schema.js', 'core/v
 
 function env(tokeninfo, ownerEmail = 'MaiVuLam2020@gmail.com') {
   const sheets = {}, props = {}, cache = {};
-  const conv = (v, txt) => { if (txt || typeof v !== 'string') return v; if (/^\d+$/.test(v)) return Number(v); if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return new Date(v + 'T00:00:00Z'); return v; };
+  // Mô phỏng Sheets: "'abc" → lưu 'abc' dạng văn bản; "=..." ở ô thường → CHẠY công thức (ở đây trả 'CONG_THUC_DA_CHAY' để test bắt rò rỉ)
+  const conv = (v, txt) => { if (typeof v !== 'string') return v; if (v[0] === "'") return v.slice(1); if (txt) return v; if (/^=/.test(v)) return 'CONG_THUC_DA_CHAY'; if (/^-?\d+(\.\d+)?$/.test(v)) return Number(v); if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return new Date(v + 'T00:00:00Z'); return v; };
   const colIdx = a => a.charCodeAt(0) - 65;
   const mk = n => {
     const s = {
@@ -24,7 +25,7 @@ function env(tokeninfo, ownerEmail = 'MaiVuLam2020@gmail.com') {
           getValues: () => Array.from({ length: nr }, (_, i) => Array.from({ length: nc }, (_, j) => { const row = me.d[r - 1 + i] || []; const v = row[c - 1 + j]; return v === undefined ? '' : v; })),
           setValues: v => v.forEach((row, i) => { const t = me.d[r - 1 + i] || (me.d[r - 1 + i] = []); row.forEach((x, j) => t[c - 1 + j] = conv(x, me.txt[c - 1 + j])); }),
           setNumberFormat: f => { for (let j = 0; j < nc; j++) me.txt[c - 1 + j] = f === '@'; },
-          createTextFinder: t => ({ matchEntireCell: () => ({ findNext: () => { for (let i = r - 1; i < r - 1 + nr; i++) for (let j = c - 1; j < c - 1 + nc; j++) if (me.d[i] && String(me.d[i][j]) === t) return { getRow: () => i + 1 }; return null; } }) })
+          createTextFinder: t => ({ matchEntireCell: () => ({ matchCase: function () { return this; }, findNext: () => { for (let i = r - 1; i < r - 1 + nr; i++) for (let j = c - 1; j < c - 1 + nc; j++) if (me.d[i] && String(me.d[i][j]) === t) return { getRow: () => i + 1 }; return null; } }) })
         };
       }
     };
