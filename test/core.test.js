@@ -136,3 +136,10 @@ test('schema: đọc dòng → object, dòng trống bị bỏ, sai kiểu báo 
   assert.equal(r.rows.length, 1); assert.equal(r.rows[0].maHang, 'A1');
   assert.ok(r.warnings.some(w => /HangHoa!2/.test(w) && /giaBan/.test(w)));
 });
+
+test('đọc ô: bỏ dấu \' thừa trước = + - @; ô có/không đọc đúng dù Sheet trả true/"TRUE"/"false"', () => {
+  const cols = SC.SHEETS.HangHoa.cols, mk = o => cols.map(c => o[c] ?? '');
+  const r = SC.toObjects('HangHoa', [cols, mk({ maHang: 'A', ten: "'=1+1", quyCach: "'-40°C", hang: "'Nhà A", quanLySerial: 'TRUE' }), mk({ maHang: 'B', ten: 'x', quanLySerial: true }), mk({ maHang: 'C', ten: 'y', quanLySerial: 'false' })]).rows;
+  assert.deepEqual([r[0].ten, r[0].quyCach, r[0].hang], ['=1+1', '-40°C', "'Nhà A"]);
+  assert.deepEqual(r.map(x => x.quanLySerial), [true, true, false]);
+});

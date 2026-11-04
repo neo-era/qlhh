@@ -2,7 +2,7 @@
 var QSchema=(function(){
   var SHEETS={
     HangHoa:{key:'maHang',cols:['maHang','ten','nhom','quyCach','dvt','hang','xuatXu','quanLySerial','thangBH','tonToiThieu','giaBan','giaVon','anhUrl','taiLieuUrl','trangThai','capNhat'],
-      num:['thangBH','tonToiThieu','giaBan','giaVon'],text:['maHang','nhom']},
+      num:['thangBH','tonToiThieu','giaBan','giaVon'],bool:['quanLySerial'],text:['maHang','nhom']},
     NhomHang:{key:'maNhom',cols:['maNhom','ten','cha'],text:['maNhom','cha']},
     NhaCungCap:{key:'maNCC',cols:['maNCC','ten','mst','diaChi','lienHe','dienThoai','email','ghiChu','trangThai'],text:['maNCC','mst','dienThoai']},
     BangGia:{key:'id',cols:['id','maHang','loai','maNCC','gia','tuNgay','ghiChu','nguoiTao','thoiGian'],num:['gia'],text:['id','maHang','maNCC','tuNgay']},
@@ -25,7 +25,7 @@ var QSchema=(function(){
   }
   function blank(r){for(var i=0;i<r.length;i++)if(r[i]!==''&&r[i]!==null&&r[i]!==undefined)return false;return true;}
   function toObjects(name,values){
-    var d=SHEETS[name],cols=d.cols,num=d.num||[],rows=[],warnings=[];
+    var d=SHEETS[name],cols=d.cols,num=d.num||[],bool=d.bool||[],rows=[],warnings=[];
     for(var i=1;i<values.length;i++){
       var r=values[i];if(!r||blank(r))continue;
       var o={_row:i+1};
@@ -33,7 +33,8 @@ var QSchema=(function(){
         var c=cols[j],v=r[j]===undefined?'':r[j];
         if(v instanceof Date)v=new Date(v.getTime()+7*3600e3).toISOString().slice(0,10);   // ngày theo giờ VN
         if(num.indexOf(c)>=0&&v!==''){var n=Number(v);if(!isFinite(n)){warnings.push(name+'!'+(i+1)+': '+c+' không phải số ("'+v+'")');v='';}else v=n;}
-        else if(num.indexOf(c)<0)v=typeof v==='string'?v:String(v);
+        else if(bool.indexOf(c)>=0)v=v===true||String(v).trim().toLowerCase()==='true';
+        else if(num.indexOf(c)<0){v=typeof v==='string'?v:String(v);if(/^'[=+\-@\t\r]/.test(v))v=v.slice(1);}   // ô văn bản có thể giữ dấu ' đã thêm khi ghi
         o[c]=v;
       }
       rows.push(o);
