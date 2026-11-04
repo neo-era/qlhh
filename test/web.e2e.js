@@ -5,7 +5,7 @@ const envSrc=src.slice(src.indexOf('function env'),src.indexOf('const post='));c
 process.chdir(path.join(__dirname,'..'));
 let nonce='';const api=env(()=>({getResponseCode:()=>200,getContentText:()=>JSON.stringify({aud:'CID',iss:'accounts.google.com',exp:String(Math.floor(Date.now()/1000)+600),email:'maivulam2020@gmail.com',email_verified:'true',nonce})}));
 api.setup();api.raw.CLIENT_ID='CID';
-const srv=http.createServer((q,r)=>{let f=path.join('web',decodeURIComponent(q.url.split('?')[0].split('#')[0]));if(f.endsWith('/'))f+='index.html';
+const srv=http.createServer((q,r)=>{let f=path.join('docs',decodeURIComponent(q.url.split('?')[0].split('#')[0]));if(f.endsWith('/'))f+='index.html';
  fs.readFile(f,(e,b)=>{if(e){r.writeHead(404);return r.end()}r.writeHead(200,{'content-type':f.endsWith('.html')?'text/html; charset=utf-8':f.endsWith('.js')?'text/javascript':f.endsWith('.png')?'image/png':'application/json'});r.end(b)})}).listen(8765);
 (async()=>{const b=await chromium.launch();const fails=[];const ok=(c,m)=>{console.log((c?'✓ ':'✗ ')+m);if(!c)fails.push(m)};
  for(const [name,vp] of [['doc',{width:390,height:844}],['ngang',{width:844,height:390}],['desktop',{width:1280,height:800}]]){
@@ -14,8 +14,8 @@ const srv=http.createServer((q,r)=>{let f=path.join('web',decodeURIComponent(q.u
   await p.goto('http://localhost:8765/');
   await p.fill('#cid','CID');await p.fill('#url','https://script.google.com/macros/s/X/exec');await p.click('#save');
   await p.click('#ping');await p.waitForTimeout(150);
-  nonce='nonce-'+name;await p.evaluate(n=>sessionStorage.setItem('qlhh-nonce',n),nonce);
-  await p.goto('about:blank');await p.goto('http://localhost:8765/#id_token=fake&token_type=Bearer');await p.waitForSelector('text=ĐĂNG NHẬP THÀNH CÔNG');
+  nonce=JSON.parse(api.doPost({postData:{contents:'{"action":"auth.nonce"}'}}).t).data.nonce;
+  await p.goto('about:blank');await p.goto('http://localhost:8765/#id_token=fake-'+name+'&token_type=Bearer');await p.waitForSelector('text=ĐĂNG NHẬP THÀNH CÔNG');
   ok(!(await p.evaluate(()=>location.hash)),name+': xoá token khỏi thanh địa chỉ');
   await p.click('#me');await p.click('#fake');await p.click('#w20');await p.waitForSelector('text=Ghi 20 lệnh');await p.click('#rep');await p.waitForSelector('text=Gửi lặp 3 lần');
   const t=await p.innerText('#log');

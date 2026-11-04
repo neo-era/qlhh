@@ -10,19 +10,17 @@ Tài khoản dùng cho mọi bước: **maivulam2020@gmail.com** (bật xác min
 
 ---
 
-## Bước 1 — Tạo kho GitHub cho trang web
-1. Vào github.com/new (đăng nhập `neo-era`) → Repository name: **`qlhh`** → chọn **Public** (GitHub Pages miễn phí cần Public; trong mã không có bí mật nào) → **Create repository**.
-2. Nhắn em "đã tạo repo qlhh" → em đẩy code lên.
-3. Sau khi em đẩy: repo → **Settings → Pages** → Source: *Deploy from a branch* → Branch **main**, thư mục **/web** (nếu không có lựa chọn /web thì chọn **/(root)**, em sẽ chuyển file ra gốc) → Save.
-4. Địa chỉ trang sẽ là: `https://neo-era.github.io/qlhh/`
+## Bước 1 — Bật trang web (GitHub Pages)
+1. Repo `neo-era/qlhh` (em đã đẩy code) → **Settings → Pages** → Source: **Deploy from a branch** → Branch **main**, thư mục **/docs** → **Save**.
+2. Chờ 1–2 phút, địa chỉ trang: `https://neo-era.github.io/qlhh/`
 
 ## Bước 2 — Tạo Google Sheet + máy chủ Apps Script
 1. Vào sheets.new → đặt tên **`QLHH-LAVIPCO-THUNGHIEM`**.
 2. Menu **Tiện ích mở rộng → Apps Script**.
-3. Xoá nội dung `Mã.gs`, dán toàn bộ `backend/Code.gs`.
-4. Bấm **＋ → Tập lệnh**, tạo `auth` và dán `backend/auth.gs`; tạo `idem` và dán `backend/idem.gs`.
+3. Xoá nội dung `Mã.gs`, dán toàn bộ `Code.gs` (trong gói `QLHH-spike-backend`).
+4. Bấm **＋ → Tập lệnh**, tạo `auth` và dán `auth.gs`; tạo `idem` và dán `idem.gs`.
 5. Bánh răng **Cài đặt dự án** → tích *Hiển thị tệp kê khai "appsscript.json"* → mở `appsscript.json`, dán nội dung file cùng tên.
-6. Chọn hàm **`setup`** → **Chạy** → cấp quyền (chọn tài khoản → Nâng cao → Đi tới… → Cho phép).
+6. Chọn hàm **`setup`** (ở `Code.gs`) → **Chạy** → cấp quyền (chọn tài khoản → Nâng cao → Đi tới… → Cho phép).
    Sheet sẽ có các trang NguoiDung (đã có anh là QUAN_TRI), Request, SpikeGhi, CauHinh.
 7. **Triển khai → Tùy chọn triển khai mới** → loại **Ứng dụng web** → Thực thi với tư cách: **Tôi** → Người có quyền truy cập: **Bất kỳ ai** → Triển khai → **sao chép URL kết thúc bằng `/exec`**.
 8. **Không chia sẻ** Google Sheet này cho ai.

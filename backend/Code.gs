@@ -8,10 +8,13 @@ function setup() {
   function sheet(n, head){ var s = ss.getSheetByName(n) || ss.insertSheet(n); if (s.getLastRow()===0) s.appendRow(head); s.setFrozenRows(1); return s; }
   var nd = sheet(SH.ND, ['email','hoTen','vaiTro','trangThai','ngayTao']);
   var has = nd.getDataRange().getValues().some(function(r){ return String(r[0]).toLowerCase()===me; });
+  nd.getRange('A:A').setNumberFormat('@');
+  if (!me) throw new Error('Không đọc được email chủ — kiểm tra scope userinfo.email trong appsscript.json');
   if (!has) nd.appendRow([me,'Chủ hệ thống','QUAN_TRI','HOAT_DONG',new Date().toISOString()]);
-  sheet(SH.REQ, ['requestId','email','thoiGian','ketQua']);
-  sheet(SH.GHI, ['so','email','thoiGian','requestId']);
-  sheet(SH.CH, ['key','value']);
+  // Cột khoá để dạng VĂN BẢN để Sheets không tự đổi '00000001' → 1, '2026-11-04' → Date
+  sheet(SH.REQ, ['requestId','email','thoiGian','ketQua']).getRange('A:B').setNumberFormat('@');
+  sheet(SH.GHI, ['so','email','thoiGian','requestId']).getRange('D:D').setNumberFormat('@');
+  var ch = sheet(SH.CH, ['key','value']); ch.getRange('A:A').setNumberFormat('@');
   var p = PropertiesService.getScriptProperties();
   if (!p.getProperty('SESSION_KEY')) p.setProperty('SESSION_KEY', Utilities.getUuid()+Utilities.getUuid());
   if (!p.getProperty('CLIENT_ID')) p.setProperty('CLIENT_ID', 'DIEN_CLIENT_ID_VAO_DAY');
@@ -28,7 +31,8 @@ function doPost(e) {
     res.ms = Date.now() - t0;
     return out(res);
   } catch (err) {
-    return out({ok:false, code:'INTERNAL', error:String(err && err.message || err), ms: Date.now()-t0});
+    console.error(err && err.stack || err);          // chi tiết chỉ ghi log máy chủ
+    return out({ok:false, code:'INTERNAL', error:'Lỗi máy chủ, thử lại', ms: Date.now()-t0});
   }
 }
 function out(o){ return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
@@ -39,6 +43,7 @@ function props(){ return PropertiesService.getScriptProperties(); }
 function route(req) {
   switch (req.action) {
     case 'ping': return {ok:true, code:'OK', data:{t:new Date().toISOString()}};
+    case 'auth.nonce': return issueNonce();
     case 'auth.login': return login(req);
   }
   var s = QAuth.verifySession(req.session, now(), props().getProperty('SESSION_KEY'), hmac);
@@ -54,6 +59,14 @@ function route(req) {
   return {ok:false, code:'VALIDATION', error:'action không hợp lệ'};
 }
 
+/** Nonce do MÁY CHỦ cấp, dùng 1 lần, hạn 10 phút (chống dùng lại id_token bị lộ). */
+function issueNonce() {
+  var n = Utilities.getUuid().replace(/-/g,'') + Utilities.getUuid().replace(/-/g,'');
+  CacheService.getScriptCache().put('n:' + n, '1', 600);
+  return {ok:true, code:'OK', data:{nonce:n}};
+}
+function sha(s){ return Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, s)); }
+
 function login(req) {
   var p = props(), cid = p.getProperty('CLIENT_ID');
   if (typeof req.idToken !== 'string' || req.idToken.length > 4096) return {ok:false, code:'VALIDATION', error:'Thiếu idToken'};
@@ -66,8 +79,14 @@ function login(req) {
     else { Utilities.sleep(wait); wait *= 2; }
   }
   if (!claims) return {ok:false, code:'INTERNAL', error:'Không xác minh được với Google, thử lại'};
-  var chk = QAuth.checkClaims(claims, {clientId:cid, nonce:req.nonce, now:now()});
+  var cache = CacheService.getScriptCache(), n = String(claims.nonce || '');
+  if (!n || cache.get('n:' + n) !== '1') return {ok:false, code:'AUTH_INVALID', error:'Nonce không hợp lệ hoặc đã dùng'};
+  cache.remove('n:' + n);                                   // dùng 1 lần
+  var th = 't:' + sha(req.idToken);
+  if (cache.get(th)) return {ok:false, code:'AUTH_INVALID', error:'Token đã được dùng'};
+  var chk = QAuth.checkClaims(claims, {clientId:cid, nonce:n, now:now()});
   if (!chk.ok) return chk;
+  cache.put(th, '1', Math.max(1, Math.min(21600, Number(claims.exp) - now())));
   var user = findUser(chk.email);
   if (!user) return {ok:false, code:'FORBIDDEN', error:'Email ' + chk.email + ' chưa có trong danh sách người dùng'};
   return {ok:true, code:'OK', data:{session:QAuth.issueSession(chk.email, now(), SESSION_TTL, p.getProperty('SESSION_KEY'), hmac), email:chk.email, vaiTro:user.vaiTro}};
@@ -75,32 +94,44 @@ function login(req) {
 
 function findUser(email) {
   var c = CacheService.getScriptCache(), k = 'u:' + email, v = c.get(k);
-  if (v) return v === '-' ? null : JSON.parse(v);
+  if (v) return JSON.parse(v);
   var rows = SpreadsheetApp.getActive().getSheetByName(SH.ND).getDataRange().getValues(), u = null;
-  for (var i = 1; i < rows.length; i++) if (String(rows[i][0]).trim().toLowerCase() === email && rows[i][3] === 'HOAT_DONG') { u = {vaiTro:rows[i][2]}; break; }
-  c.put(k, u ? JSON.stringify(u) : '-', 60);   // cache vai trò ≤ 60 giây
+  for (var i = 1; i < rows.length; i++) if (String(rows[i][0]).trim().toLowerCase() === email && String(rows[i][3]).trim() === 'HOAT_DONG') { u = {vaiTro:rows[i][2]}; break; }
+  if (u) c.put(k, JSON.stringify(u), 60);   // cache vai trò ≤ 60 giây; KHÔNG cache "không có quyền" 
   return u;
 }
 
 /** Ghi thử: khoá + idempotent (email+requestId) + số tự tăng không trùng. */
 function spikeWrite(email, rid) {
+  if (!QIdem.validId(rid)) return {ok:false, code:'VALIDATION', error:'requestId không hợp lệ'};   // kiểm trước khi lấy khoá
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(30000)) return {ok:false, code:'LOCK_TIMEOUT', error:'Máy chủ bận, thử lại'};
   var held0 = Date.now();
   try {
-    var ss = SpreadsheetApp.getActive(), rq = ss.getSheetByName(SH.REQ);
-    var rows = rq.getLastRow() > 1 ? rq.getRange(2,1,rq.getLastRow()-1,4).getValues() : [];
-    var store = { map:{}, get:function(id){ return this.map[id]; }, set:function(id,v){ this.map[id]=v; rq.appendRow([id, v.email, new Date().toISOString(), JSON.stringify(v.data)]); } };
-    rows.forEach(function(r){ store.map[r[0]] = {email:r[1], data:JSON.parse(r[3])}; });
-    var res = QIdem.once(store, email, rid, function(){
-      var g = ss.getSheetByName(SH.GHI), so = g.getLastRow();   // dòng tiêu đề = 1 → số kế tiếp = lastRow
-      g.appendRow([so, email, new Date().toISOString(), rid]);
-      return {so:so};
-    });
+    var ss = SpreadsheetApp.getActive(), rq = ss.getSheetByName(SH.REQ), g = ss.getSheetByName(SH.GHI);
+    var store = { get:function(id){ return findReq(rq, id); },
+                  set:function(id, v){ rq.appendRow([String(id), String(v.email), new Date().toISOString(), JSON.stringify(v.data)]); } };
+    var res = QIdem.once(store, email, rid, function(){ return {so: nextCounter(ss, 'soSpike')}; });
+    if (res.ok && !res.replay) g.appendRow([res.data.so, email, new Date().toISOString(), String(rid)]);   // ghi SAU dòng Request
     SpreadsheetApp.flush();
     res.code = res.ok ? 'OK' : res.code; res.lockMs = Date.now() - held0;
     return res;
   } finally { lock.releaseLock(); }
+}
+/** Tìm requestId bằng TextFinder (không đọc cả sheet); dòng JSON hỏng không làm sập. */
+function findReq(rq, id) {
+  if (rq.getLastRow() < 2) return null;
+  var cell = rq.getRange(2, 1, rq.getLastRow()-1, 1).createTextFinder(String(id)).matchEntireCell(true).findNext();
+  if (!cell) return null;
+  var r = rq.getRange(cell.getRow(), 1, 1, 4).getValues()[0], data = null;
+  try { data = JSON.parse(r[3]); } catch (e) { data = {loi:'ketQua hỏng'}; }
+  return {email:String(r[1]), data:data};
+}
+/** Bộ đếm trong CauHinh — chỉ gọi khi đang giữ khoá. Không phụ thuộc số dòng (xoá dòng không gây trùng). */
+function nextCounter(ss, key) {
+  var ch = ss.getSheetByName(SH.CH), rows = ch.getDataRange().getValues();
+  for (var i = 1; i < rows.length; i++) if (String(rows[i][0]) === key) { var v = Number(rows[i][1]) + 1; ch.getRange(i+1, 2, 1, 1).setValues([[v]]); return v; }
+  ch.appendRow([key, 1]); return 1;
 }
 
 /** Đo tốc độ: tạo 5.000 mã + 50.000 dòng chi tiết giả (chạy 1 lần). */

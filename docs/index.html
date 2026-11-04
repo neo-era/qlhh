@@ -55,20 +55,22 @@ async function call(action,body={},tries=1){
 function show(){ $('who').textContent=session?'Đã có phiên đăng nhập':'Chưa đăng nhập'; }
 $('save').onclick=()=>{cfg={cid:$('cid').value.trim(),url:$('url').value.trim()};try{localStorage.setItem(K,JSON.stringify(cfg))}catch(e){}log('Đã lưu cấu hình','ok')};
 $('ping').onclick=async()=>{const j=await call('ping');j&&log('ping → '+(j.ok?'OK':j.code)+' · '+j.clientMs+' ms (máy chủ '+j.ms+' ms)',j.ok?'ok':'bad')};
-$('login').onclick=()=>{
+const REDIRECT=new URL('./',location.href).href;   // chuẩn hoá: /qlhh/ và /qlhh/index.html cùng 1 URI
+$('login').onclick=async()=>{
   if(!cfg.cid){log('Chưa có Client ID','bad');return}
-  const nonce=crypto.getRandomValues(new Uint32Array(4)).join('-');try{sessionStorage.setItem('qlhh-nonce',nonce);localStorage.setItem('qlhh-nonce',nonce)}catch(e){}
+  const n=await call('auth.nonce',{},3);           // nonce do MÁY CHỦ cấp, dùng 1 lần
+  if(!n||!n.ok){log('Không lấy được nonce: '+(n&&n.code),'bad');return}
   const u=new URL('https://accounts.google.com/o/oauth2/v2/auth');
-  u.search=new URLSearchParams({client_id:cfg.cid,redirect_uri:location.origin+location.pathname,response_type:'id_token',scope:'openid email profile',nonce,prompt:'select_account'});
+  u.search=new URLSearchParams({client_id:cfg.cid,redirect_uri:REDIRECT,response_type:'id_token',scope:'openid email profile',nonce:n.data.nonce,prompt:'select_account'});
   location.assign(u.toString());
 };
 (async()=>{ // quay về từ Google: id_token nằm trong #fragment
-  if(!location.hash.includes('id_token='))return show();
-  const p=new URLSearchParams(location.hash.slice(1));history.replaceState(null,'',location.pathname);
-  let nonce=null;try{nonce=sessionStorage.getItem('qlhh-nonce')||localStorage.getItem('qlhh-nonce')}catch(e){}
+  const p=new URLSearchParams(location.hash.slice(1));
+  if(p.has('error')){history.replaceState(null,'',location.pathname);log('Google báo lỗi: '+p.get('error')+(p.get('error_description')?' – '+p.get('error_description'):''),'bad');return show();}
+  if(!p.has('id_token'))return show();
+  history.replaceState(null,'',location.pathname);
   log('Đã nhận token từ Google, đang xác minh với máy chủ…');
-  const j=await call('auth.login',{idToken:p.get('id_token'),nonce},3);
-  try{localStorage.removeItem('qlhh-nonce')}catch(e){}
+  const j=await call('auth.login',{idToken:p.get('id_token')},3);
   if(j&&j.ok){session=j.data.session;try{sessionStorage.setItem('qlhh-s',session)}catch(e){}log('ĐĂNG NHẬP THÀNH CÔNG: '+j.data.email+' ('+j.data.vaiTro+') · '+j.clientMs+' ms','ok')}
   else log('Đăng nhập thất bại: '+(j&&(j.code+' – '+j.error)),'bad');
   show();

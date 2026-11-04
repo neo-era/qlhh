@@ -4,9 +4,10 @@ var QIdem=(function(){
   function once(store,email,rid,run){
     if(typeof rid!=='string'||!RE.test(rid))return {ok:false,code:'VALIDATION',error:'requestId không hợp lệ'};
     var prev=store.get(rid);
-    if(prev){if(prev.email!==email)return {ok:false,code:'FORBIDDEN',error:'requestId thuộc người khác'};return {ok:true,data:prev.data,replay:true};}
+    if(prev){if(String(prev.email)!==String(email))return {ok:false,code:'FORBIDDEN',error:'requestId thuộc người khác'};return {ok:true,data:prev.data,replay:true};}
     var data=run();store.set(rid,{email:email,data:data});return {ok:true,data:data,replay:false};
   }
-  return {once:once};
+  function validId(rid){return typeof rid==='string'&&RE.test(rid);}
+  return {once:once,validId:validId};
 })();
 if(typeof module!=='undefined')module.exports=QIdem;
