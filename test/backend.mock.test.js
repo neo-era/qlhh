@@ -26,7 +26,7 @@ function env(tokeninfo){
   const src=['core/auth.js','core/idem.js','backend/Code.gs'].map(f=>fs.readFileSync(f,'utf8')).join('\n')+'\nreturn {setup,doPost,props:PropertiesService};';
   const f=new Function(...Object.keys(G).filter(k=>k!=='sheets'),'module','Buffer',src);
   const api=f(...Object.keys(G).filter(k=>k!=='sheets').map(k=>G[k]),undefined,undefined);
-  api.sheets=sheets;api.raw=props;return api;
+  api.sheets=sheets;api.raw=props;api.cache=cache;return api;
 }
 const post=(api,o)=>JSON.parse(api.doPost({postData:{contents:JSON.stringify(o)}}).t);
 let NONCE='';const nonce=a=>NONCE=post(a,{action:'auth.nonce'}).data.nonce;
@@ -38,9 +38,11 @@ test('đăng nhập (nonce máy chủ) → phiên → auth.me',()=>{const a=read
   const m=post(a,{action:'auth.me',session:l.data.session});assert.equal(m.data.email,'maivulam2020@gmail.com');assert.equal(m.data.vaiTro,'QUAN_TRI');});
 test('nonce do client tự bịa / nonce dùng lại / token dùng lại → từ chối',()=>{
   const a=env(()=>claims('tu-bia'));a.setup();a.raw.CLIENT_ID='CID';assert.equal(post(a,{action:'auth.login',idToken:'x'}).code,'AUTH_INVALID');
-  const b=ready();assert.equal(login(b,'tok-1').ok,true);
+  const b=ready();const s1=login(b,'tok-1');assert.equal(s1.ok,true);
   assert.equal(post(b,{action:'auth.login',idToken:'tok-2'}).code,'AUTH_INVALID','nonce cũ đã dùng');
-  nonce(b);assert.equal(post(b,{action:'auth.login',idToken:'tok-1'}).code,'AUTH_INVALID','token đã dùng');});
+  nonce(b);assert.equal(post(b,{action:'auth.login',idToken:'tok-1'}).data.session,s1.data.session,'trong 2 phút: trả lại đúng phiên cũ, không cấp mới');
+  for(const k of Object.keys(b.cache))if(k.startsWith('r:'))delete b.cache[k];   // hết cửa sổ 2 phút
+  nonce(b);assert.equal(post(b,{action:'auth.login',idToken:'tok-1'}).code,'AUTH_INVALID','quá 2 phút: token đã dùng');});
 test('token Google 400 / phiên giả bị từ chối',()=>{const b=env(()=>({getResponseCode:()=>400,getContentText:()=>'{}'}));b.setup();assert.equal(login(b).code,'AUTH_INVALID');
   const a=ready();assert.equal(post(a,{action:'auth.me',session:'abc.def'}).code,'AUTH_INVALID');assert.equal(post(a,{action:'auth.me'}).code,'AUTH_INVALID');});
 test('email không có quyền → FORBIDDEN; thêm vào NguoiDung là dùng được ngay (không cache từ chối)',()=>{let em='la@gmail.com';
@@ -64,3 +66,9 @@ test('bench: seed + read',()=>{const a=ready();const s=login(a).data.session;
   assert.equal(post(a,{action:'bench.read',session:s}).code,'VALIDATION');assert.equal(post(a,{action:'bench.seed',session:s}).data.chiTiet,50000);
   const r=post(a,{action:'bench.read',session:s});assert.equal(r.data.dongHH,5000);assert.equal(r.data.dongCT,50000);});
 test('JSON rác → INTERNAL, không lộ chi tiết lỗi',()=>{const a=env();const o=JSON.parse(a.doPost({postData:{contents:'{rác'}}).t);assert.equal(o.code,'INTERNAL');assert.equal(o.error,'Lỗi máy chủ, thử lại');});
+test('mạng chập chờn: gửi lại CÙNG token → cùng phiên; token khác dùng nonce cũ → từ chối; token sai không đốt nonce',()=>{const a=ready();nonce(a);
+  const r1=post(a,{action:'auth.login',idToken:'tok-A'}),r2=post(a,{action:'auth.login',idToken:'tok-A'});
+  assert.equal(r1.ok,true);assert.equal(r2.data.session,r1.data.session);
+  assert.equal(post(a,{action:'auth.login',idToken:'tok-B'}).code,'AUTH_INVALID');
+  const b=env(()=>({getResponseCode:()=>200,getContentText:()=>JSON.stringify({...JSON.parse(claims().getContentText()),aud:'SAI'})}));b.setup();b.raw.CLIENT_ID='CID';nonce(b);
+  assert.equal(post(b,{action:'auth.login',idToken:'x'}).code,'AUTH_INVALID');b.raw.CLIENT_ID='SAI';assert.equal(post(b,{action:'auth.login',idToken:'y'}).ok,true,'nonce vẫn còn sau token sai');});

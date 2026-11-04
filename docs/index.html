@@ -48,7 +48,8 @@ async function call(action,body={},tries=1){
       const txt=await r.text();let j;try{j=JSON.parse(txt)}catch(e){j={ok:false,code:'NOT_JSON',error:'Máy chủ trả về trang lỗi (không phải JSON)'}}
       j.clientMs=Math.round(performance.now()-t0);
       if(j.ok||!['LOCK_TIMEOUT','INTERNAL','NOT_JSON'].includes(j.code)||i===tries-1)return j;
-    }catch(e){if(i===tries-1)return {ok:false,code:'NETWORK',error:String(e),clientMs:Math.round(performance.now()-t0)}}
+      log(`  ${action} lần ${i+1} lỗi ${j.code} (${j.clientMs} ms) – thử lại`,'bad');
+    }catch(e){const ms=Math.round(performance.now()-t0);if(i===tries-1)return {ok:false,code:'NETWORK',error:String(e),clientMs:ms};log(`  ${action} lần ${i+1} lỗi mạng: ${e} (${ms} ms) – thử lại`,'bad')}
     await new Promise(r=>setTimeout(r,wait));wait*=2;
   }
 }

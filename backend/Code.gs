@@ -80,16 +80,21 @@ function login(req) {
   }
   if (!claims) return {ok:false, code:'INTERNAL', error:'Không xác minh được với Google, thử lại'};
   var cache = CacheService.getScriptCache(), n = String(claims.nonce || '');
-  if (!n || cache.get('n:' + n) !== '1') return {ok:false, code:'AUTH_INVALID', error:'Nonce không hợp lệ hoặc đã dùng'};
-  cache.remove('n:' + n);                                   // dùng 1 lần
   var th = 't:' + sha(req.idToken);
+  // Gửi lại CÙNG token trong 2 phút (mạng chập chờn trên điện thoại) → trả lại đúng phiên đã cấp, không cấp phiên mới
+  var prev = cache.get('r:' + th);
+  if (prev) return JSON.parse(prev);
+  if (!n || cache.get('n:' + n) !== '1') return {ok:false, code:'AUTH_INVALID', error:'Nonce không hợp lệ hoặc đã dùng'};
   if (cache.get(th)) return {ok:false, code:'AUTH_INVALID', error:'Token đã được dùng'};
   var chk = QAuth.checkClaims(claims, {clientId:cid, nonce:n, now:now()});
   if (!chk.ok) return chk;
-  cache.put(th, '1', Math.max(1, Math.min(21600, Number(claims.exp) - now())));
+  cache.remove('n:' + n);                                   // nonce chỉ bị huỷ khi token hợp lệ
   var user = findUser(chk.email);
   if (!user) return {ok:false, code:'FORBIDDEN', error:'Email ' + chk.email + ' chưa có trong danh sách người dùng'};
-  return {ok:true, code:'OK', data:{session:QAuth.issueSession(chk.email, now(), SESSION_TTL, p.getProperty('SESSION_KEY'), hmac), email:chk.email, vaiTro:user.vaiTro}};
+  var res = {ok:true, code:'OK', data:{session:QAuth.issueSession(chk.email, now(), SESSION_TTL, p.getProperty('SESSION_KEY'), hmac), email:chk.email, vaiTro:user.vaiTro}};
+  cache.put('r:' + th, JSON.stringify(res), 120);           // cửa sổ gửi lại 2 phút
+  cache.put(th, '1', Math.max(1, Math.min(21600, Number(claims.exp) - now())));
+  return res;
 }
 
 function findUser(email) {
