@@ -203,7 +203,7 @@
     });
   }
   function header(title, actions = '', search = false, addId = '') {
-    return `<div class="mtop">${title === 'Danh mục hàng' ? '' : `<a class="btn ghost iconbtn" href="#/hang" aria-label="Quay lại">${ic('back')}</a>`}<h1>${title}</h1><span class="cobadge">${esc(S.co.ten)}</span>${addId ? `<button class="btn pri iconbtn" type="button" id="${addId}" aria-label="Thêm">${ic('plus')}</button>` : ''}</div>
+    return `<div class="mtop">${title === 'Danh mục hàng' ? '' : `<a class="btn ghost iconbtn" href="#/hang" aria-label="Quay lại">${ic('back')}</a>`}<h1>${title}</h1><span class="cobadge">${esc(S.co.ten)}</span>${addId ? `<button class="btn pri iconbtn" type="button" id="${addId}" aria-label="${{ addItemM: 'Thêm hàng', addSupM: 'Thêm nhà cung cấp', addGM: 'Thêm nhóm', addUM: 'Thêm người dùng', addFM: 'Gửi góp ý' }[addId] || 'Thêm'}">${ic('plus')}</button>` : ''}</div>
       ${search ? `<label class="msearch">${ic('search')}<span class="sr">Tìm hàng</span><input id="qm" type="search" inputmode="search" placeholder="Tìm mã, tên, quy cách…" value="${esc(S.q)}" autocomplete="off"></label>` : ''}
       <div class="top"><h1>${title}</h1><span class="cobadge">${esc(S.co.ten)}</span>${search ? `<label class="search">${ic('search')}<span class="sr">Tìm hàng</span><input id="qd" type="search" placeholder="Tìm mã, tên, quy cách… (Ctrl K)" value="${esc(S.q)}" autocomplete="off"></label>` : ''}${actions}</div>
       ${S.offline ? `<div class="banner" role="status">${ic('warn')} Đang ngoại tuyến — chỉ xem dữ liệu đã lưu, chưa ghi được.</div>` : ''}`;
@@ -366,7 +366,7 @@
     if (S.offline) { dlgMsg(d, 'Đang ngoại tuyến — chưa lưu được. Dữ liệu trong ô vẫn giữ nguyên.'); return false; }
     const r = await write(action, body);
     if (!r.ok) { if (r.fields && !Array.isArray(r.fields)) showErrors(d, r.fields); dlgMsg(d, 'Chưa lưu: ' + (r.error || r.code) + (r.code === 'NETWORK' ? ' — kiểm tra mạng rồi bấm Lưu lại' : '')); return false; }
-    toast(okMsg); await sync(); return true;
+    toast(okMsg); await sync(); setTimeout(() => { const h = $('#main .top h1') || $('#main .mtop h1'); if (h && document.activeElement === document.body) { h.tabIndex = -1; h.focus(); } }, 0); return true;
   }
   function itemForm(it) {
     const isNew = !it; it = it || { quanLySerial: false };

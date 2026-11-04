@@ -41,7 +41,7 @@ textarea.in{min-height:96px;resize:vertical}
 .in[aria-invalid=true]{border-color:var(--bad)}
 .err{color:var(--bad);font-size:12.5px;margin-top:4px;min-height:0}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
-.chk{display:flex;align-items:center;gap:10px;min-height:44px;margin-top:12px}
+.chk{display:flex;align-items:center;gap:10px;min-height:48px;margin-top:12px}
 .chk input{width:20px;height:20px}
 
 /* ---------- đăng nhập ---------- */
