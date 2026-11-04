@@ -36,10 +36,14 @@ $('cid').value=cfg.cid||'';$('url').value=cfg.url||'';
 let session=null;try{session=sessionStorage.getItem('qlhh-s')}catch(e){}
 const standalone=matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
 $('env').textContent=(standalone?'Đang chạy dạng APP đã cài':'Đang chạy trong trình duyệt')+' · '+navigator.userAgent.replace(/^Mozilla\/5.0 /,'').slice(0,90);
-function log(m,cls){const t=new Date().toLocaleTimeString('vi-VN');const l=document.createElement('div');if(cls)l.className=cls;l.textContent=t+'  '+m;$('log').prepend(l);}
+const LK='qlhh-spike-log';
+function log(m,cls){const t=new Date().toLocaleTimeString('vi-VN');const l=document.createElement('div');if(cls)l.className=cls;l.textContent=t+'  '+m;$('log').prepend(l);
+  try{const a=JSON.parse(sessionStorage.getItem(LK)||'[]');a.unshift([t+'  '+m,cls||'']);sessionStorage.setItem(LK,JSON.stringify(a.slice(0,200)))}catch(e){}}
+try{JSON.parse(sessionStorage.getItem(LK)||'[]').reverse().forEach(([m,c])=>{const l=document.createElement('div');if(c)l.className=c;l.textContent=m;$('log').prepend(l)})}catch(e){}
 const rid=()=>'r'+Date.now().toString(36)+Math.random().toString(36).slice(2,10);
 async function call(action,body={},tries=1){
   if(!cfg.url){log('Chưa có địa chỉ Web App','bad');return null}
+  if(!session&&!['ping','auth.nonce','auth.login'].includes(action)){log('Chưa đăng nhập — bấm "Đăng nhập bằng Google" trước ('+action+')','bad');return null}
   let wait=1000;
   for(let i=0;i<tries;i++){
     const t0=performance.now();
@@ -59,14 +63,17 @@ $('ping').onclick=async()=>{const j=await call('ping');j&&log('ping → '+(j.ok?
 const REDIRECT=new URL('./',location.href).href;   // chuẩn hoá: /qlhh/ và /qlhh/index.html cùng 1 URI
 $('login').onclick=async()=>{
   if(!cfg.cid){log('Chưa có Client ID','bad');return}
+  log('Đăng nhập: đang lấy mã nonce từ máy chủ…');
   const n=await call('auth.nonce',{},3);           // nonce do MÁY CHỦ cấp, dùng 1 lần
-  if(!n||!n.ok){log('Không lấy được nonce: '+(n&&n.code),'bad');return}
+  if(!n||!n.ok){log('Không lấy được nonce: '+(n&&(n.code+' – '+n.error)),'bad');return}
+  log('Đã có nonce ('+n.clientMs+' ms) → chuyển sang trang Google…');
   const u=new URL('https://accounts.google.com/o/oauth2/v2/auth');
   u.search=new URLSearchParams({client_id:cfg.cid,redirect_uri:REDIRECT,response_type:'id_token',scope:'openid email profile',nonce:n.data.nonce,prompt:'select_account'});
   location.assign(u.toString());
 };
 (async()=>{ // quay về từ Google: id_token nằm trong #fragment
   const p=new URLSearchParams(location.hash.slice(1));
+  log('Tải trang: '+(location.hash?('có #'+[...p.keys()].join(',')):'không có #')+' · phiên đã lưu: '+(session?'có':'không')+' · sessionStorage '+(()=>{try{sessionStorage.setItem('t','1');return 'OK'}catch(e){return 'BỊ CHẶN'}})());
   if(p.has('error')){history.replaceState(null,'',location.pathname);log('Google báo lỗi: '+p.get('error')+(p.get('error_description')?' – '+p.get('error_description'):''),'bad');return show();}
   if(!p.has('id_token'))return show();
   history.replaceState(null,'',location.pathname);
@@ -79,7 +86,7 @@ $('login').onclick=async()=>{
 $('me').onclick=async()=>{const j=await call('auth.me');j&&log('phiên → '+(j.ok?j.data.email+' · '+j.data.vaiTro:j.code+' – '+j.error)+' · '+j.clientMs+' ms',j.ok?'ok':'bad')};
 $('fake').onclick=async()=>{const s=session;session='eyJlIjoiaGFja2VyQGdtYWlsLmNvbSIsIngiOjk5OTk5OTk5OTl9.gia';const j=await call('auth.me');session=s;j&&log('phiên giả → '+(j.ok?'LỖI: được chấp nhận!':'bị từ chối ('+j.code+') ✓'),j.ok?'bad':'ok')};
 $('out').onclick=()=>{session=null;try{sessionStorage.clear()}catch(e){}show();log('Đã đăng xuất')};
-$('w20').onclick=async()=>{
+$('w20').onclick=async()=>{if(!session){log('Chưa đăng nhập — bấm "Đăng nhập bằng Google" trước','bad');return}
   log('Bắt đầu ghi đồng thời 20 lệnh (thử lại ≤ 5 lần, giữ requestId)…');const t0=performance.now();
   const rs=await Promise.all([...Array(20)].map(()=>call('spike.write',{requestId:rid()},6)));
   const ok=rs.filter(r=>r&&r.ok),so=ok.map(r=>r.data.so),uniq=new Set(so).size,ms=ok.map(r=>r.clientMs).sort((a,b)=>a-b);
@@ -87,10 +94,10 @@ $('w20').onclick=async()=>{
   log(`Ghi 20 lệnh: thành công ${ok.length}/20 · số không trùng ${uniq}/${ok.length} · p95 ${p95} ms · tổng ${Math.round(performance.now()-t0)} ms · giữ khoá TB ${ok.length?Math.round(ok.reduce((a,r)=>a+r.lockMs,0)/ok.length):0} ms`,ok.length===20&&uniq===20?'ok':'bad');
   rs.filter(r=>!r||!r.ok).forEach(r=>log('  lỗi: '+(r&&(r.code+' – '+r.error)),'bad'));
 };
-$('rep').onclick=async()=>{const id=rid(),rs=[];for(let i=0;i<3;i++)rs.push(await call('spike.write',{requestId:id},3));const so=new Set(rs.filter(r=>r&&r.ok).map(r=>r.data.so));log('Gửi lặp 3 lần cùng requestId → '+so.size+' phiếu '+(so.size===1?'✓':'✗')+' (replay: '+rs.map(r=>r&&r.replay).join(',')+')',so.size===1?'ok':'bad')};
+$('rep').onclick=async()=>{if(!session){log('Chưa đăng nhập — bấm "Đăng nhập bằng Google" trước','bad');return}const id=rid(),rs=[];for(let i=0;i<3;i++)rs.push(await call('spike.write',{requestId:id},3));const so=new Set(rs.filter(r=>r&&r.ok).map(r=>r.data.so));log('Gửi lặp 3 lần cùng requestId → '+so.size+' phiếu '+(so.size===1?'✓':'✗')+' (replay: '+rs.map(r=>r&&r.replay).join(',')+')',so.size===1?'ok':'bad')};
 $('seed').onclick=async()=>{log('Đang tạo 5.000 mã + 50.000 dòng (có thể mất 10–40 giây)…');const j=await call('bench.seed');j&&log('Tạo dữ liệu đo → '+(j.ok?'xong trong '+j.data.taoMs+' ms':j.code+' – '+j.error),j.ok?'ok':'bad')};
 $('read').onclick=async()=>{const j=await call('bench.read');j&&log(j.ok?`Đọc: hàng hoá ${j.data.dongHH} dòng ${j.data.docHangHoaMs} ms · chi tiết ${j.data.dongCT} dòng ${j.data.docChiTietMs} ms · tạo chỉ mục ${j.data.taoMapMs} ms · cả vòng ${j.clientMs} ms`:j.code+' – '+j.error,j.ok&&j.data.docHangHoaMs+j.data.docChiTietMs<=3000?'ok':'bad')};
 $('copy').onclick=async()=>{try{await navigator.clipboard.writeText($('env').textContent+'\n'+$('log').innerText);log('Đã sao chép — dán gửi Claude','ok')}catch(e){log('Không sao chép được: '+e,'bad')}};
-$('clr').onclick=()=>$('log').textContent='';
+$('clr').onclick=()=>{$('log').textContent='';try{sessionStorage.removeItem(LK)}catch(e){}};
 if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(e=>log('SW lỗi: '+e,'bad'));
 </script></body></html>

@@ -1,6 +1,6 @@
 // App shell: network-first cho trang (luôn lấy bản mới khi có mạng), cache-first cho icon/manifest.
 // KHÔNG cache API (script.google.com). Tăng C mỗi lần phát hành.
-const C='qlhh-spike-v3',SHELL=['./','manifest.webmanifest','icons/192.png','icons/512.png','icons/180.png'];
+const C='qlhh-spike-v4',SHELL=['./','manifest.webmanifest','icons/192.png','icons/512.png','icons/180.png'];
 self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>Promise.allSettled(SHELL.map(u=>c.add(u)))));self.skipWaiting()});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k)))));self.clients.claim()});
 self.addEventListener('fetch',e=>{const r=e.request,u=new URL(r.url);if(r.method!=='GET'||u.origin!==location.origin)return;
