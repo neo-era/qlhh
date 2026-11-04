@@ -1,0 +1,21 @@
+// Test trước (TDD) cho lõi xác thực — chạy: node --test test/
+const test=require('node:test'),assert=require('node:assert');const crypto=require('crypto');
+const A=require('../core/auth.js');
+const hmac=(key,msg)=>crypto.createHmac('sha256',key).update(msg).digest('base64url');
+const CID='123.apps.googleusercontent.com',NOW=1_800_000_000;
+const good={aud:CID,iss:'https://accounts.google.com',exp:String(NOW+600),email:'a@gmail.com',email_verified:'true',nonce:'n1'};
+test('claims hợp lệ',()=>assert.deepEqual(A.checkClaims(good,{clientId:CID,nonce:'n1',now:NOW}),{ok:true,email:'a@gmail.com'}));
+test('sai aud → từ chối',()=>assert.equal(A.checkClaims({...good,aud:'x'},{clientId:CID,nonce:'n1',now:NOW}).code,'AUTH_INVALID'));
+test('sai iss → từ chối',()=>assert.equal(A.checkClaims({...good,iss:'evil'},{clientId:CID,nonce:'n1',now:NOW}).code,'AUTH_INVALID'));
+test('iss không có https vẫn hợp lệ',()=>assert.ok(A.checkClaims({...good,iss:'accounts.google.com'},{clientId:CID,nonce:'n1',now:NOW}).ok));
+test('hết hạn → AUTH_EXPIRED',()=>assert.equal(A.checkClaims({...good,exp:String(NOW-1)},{clientId:CID,nonce:'n1',now:NOW}).code,'AUTH_EXPIRED'));
+test('email chưa xác minh → từ chối',()=>assert.equal(A.checkClaims({...good,email_verified:'false'},{clientId:CID,nonce:'n1',now:NOW}).code,'AUTH_INVALID'));
+test('sai nonce → từ chối',()=>assert.equal(A.checkClaims({...good,nonce:'n2'},{clientId:CID,nonce:'n1',now:NOW}).code,'AUTH_INVALID'));
+test('email chữ hoa → chuẩn hoá thường',()=>assert.equal(A.checkClaims({...good,email:'A@Gmail.com'},{clientId:CID,nonce:'n1',now:NOW}).email,'a@gmail.com'));
+const K='secret-key';
+test('phiên HMAC: cấp rồi kiểm đúng',()=>{const t=A.issueSession('a@gmail.com',NOW,36000,K,hmac);assert.deepEqual(A.verifySession(t,NOW+10,K,hmac),{ok:true,email:'a@gmail.com',exp:NOW+36000});});
+test('phiên bị sửa email → từ chối',()=>{const t=A.issueSession('a@gmail.com',NOW,36000,K,hmac);const [p,s]=t.split('.');const p2=Buffer.from(JSON.stringify({e:'b@gmail.com',x:NOW+36000})).toString('base64url');assert.equal(A.verifySession(p2+'.'+s,NOW,K,hmac).code,'AUTH_INVALID');});
+test('phiên hết hạn',()=>{const t=A.issueSession('a@gmail.com',NOW,100,K,hmac);assert.equal(A.verifySession(t,NOW+101,K,hmac).code,'AUTH_EXPIRED');});
+test('phiên ký bằng khoá khác',()=>{const t=A.issueSession('a@gmail.com',NOW,100,'k2',hmac);assert.equal(A.verifySession(t,NOW,K,hmac).code,'AUTH_INVALID');});
+test('phiên rác/rỗng không sập',()=>{for(const t of ['', 'abc', 'a.b.c', null, undefined, '.'])assert.equal(A.verifySession(t,NOW,K,hmac).code,'AUTH_INVALID');});
+test('so sánh chữ ký thời gian hằng',()=>{assert.equal(A.safeEq('abc','abc'),true);assert.equal(A.safeEq('abc','abd'),false);assert.equal(A.safeEq('ab','abc'),false);});
