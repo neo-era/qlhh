@@ -1,103 +1,28 @@
-<!doctype html><html lang="vi"><head><meta charset="utf-8">
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#0b3b6f"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="QLHH"><link rel="manifest" href="manifest.webmanifest"><link rel="apple-touch-icon" href="icons/180.png">
-<title>QLHH – Thử nghiệm đợt 1</title>
-<style>
-:root{--bg:#f3f6fa;--panel:#fff;--ink:#0f1e33;--mut:#4f5f76;--line:#e2e8f0;--pri:#0b3b6f;--acc:#0e7490;--ok:#15803d;--bad:#b91c1c}
-@media (prefers-color-scheme:dark){:root{--bg:#0b1220;--panel:#111a2b;--ink:#e6edf7;--mut:#a3b2c8;--line:#22314a;--pri:#4f9be8;--acc:#22d3ee;--ok:#4ade80;--bad:#f87171}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 Inter,system-ui,-apple-system,"Segoe UI",sans-serif;padding:max(16px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left))}
-main{max-width:720px;margin:0 auto}h1{font-size:20px;margin:4px 0 2px}.sub{color:var(--mut);margin:0 0 16px}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px}
-.card h2{font-size:14px;margin:0 0 10px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut)}
-label{display:block;font-size:13px;color:var(--mut);margin:8px 0 4px}input{width:100%;min-height:48px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font:inherit}
-.row{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
-button{min-height:48px;padding:0 16px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--ink);font:inherit;font-weight:600;cursor:pointer}
-button.pri{background:var(--pri);border-color:var(--pri);color:#fff}@media (prefers-color-scheme:dark){button.pri{color:#06121f}}
-button:disabled{opacity:.5}button:focus-visible,input:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
-.who{font-weight:600}.ok{color:var(--ok)}.bad{color:var(--bad)}
-#log{font:12.5px/1.55 ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-word;max-height:50dvh;overflow:auto;background:var(--bg);border-radius:8px;padding:10px;margin:0}
-.env{font-size:13px;color:var(--mut)}
-</style></head><body><main>
-<h1>QLHH · Thử nghiệm đợt 1</h1><p class="sub">Kiểm đăng nhập Google (kể cả iPhone), gọi máy chủ, ghi đồng thời, đo tốc độ.</p>
-<div class="card"><h2>Cấu hình</h2>
-<label for="cid">Google OAuth Client ID</label><input id="cid" autocomplete="off" placeholder="…apps.googleusercontent.com">
-<label for="url">Địa chỉ Web App (Apps Script /exec)</label><input id="url" autocomplete="off" placeholder="https://script.google.com/macros/s/…/exec">
-<div class="row"><button id="save">Lưu cấu hình</button><button id="ping">Kiểm tra máy chủ</button></div></div>
-<div class="card"><h2>Đăng nhập</h2><div id="who" class="who">Chưa đăng nhập</div><div class="env" id="env"></div>
-<div class="row"><button class="pri" id="login">Đăng nhập bằng Google</button><button id="me">Kiểm tra phiên</button><button id="fake">Thử phiên giả (phải bị từ chối)</button><button id="out">Đăng xuất</button></div></div>
-<div class="card"><h2>Ghi & tốc độ</h2>
-<div class="row"><button id="w20">Ghi đồng thời 20 lệnh</button><button id="rep">Gửi lặp 1 lệnh × 3</button><button id="seed">Tạo dữ liệu đo (1 lần)</button><button id="read">Đo tốc độ đọc</button></div></div>
-<div class="card"><h2>Kết quả</h2><div class="row" style="margin:0 0 8px"><button id="copy">Sao chép kết quả</button><button id="clr">Xoá</button></div><pre id="log" aria-live="polite"></pre></div>
-</main>
-<script>
-const $=id=>document.getElementById(id),K='qlhh-spike-cfg';let cfg={};try{cfg=JSON.parse(localStorage.getItem(K)||'{}')}catch(e){}
-$('cid').value=cfg.cid||'';$('url').value=cfg.url||'';
-let session=null;try{session=sessionStorage.getItem('qlhh-s')}catch(e){}
-const standalone=matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
-$('env').textContent=(standalone?'Đang chạy dạng APP đã cài':'Đang chạy trong trình duyệt')+' · '+navigator.userAgent.replace(/^Mozilla\/5.0 /,'').slice(0,90);
-const LK='qlhh-spike-log';
-function log(m,cls){const t=new Date().toLocaleTimeString('vi-VN');const l=document.createElement('div');if(cls)l.className=cls;l.textContent=t+'  '+m;$('log').prepend(l);
-  try{const a=JSON.parse(sessionStorage.getItem(LK)||'[]');a.unshift([t+'  '+m,cls||'']);sessionStorage.setItem(LK,JSON.stringify(a.slice(0,200)))}catch(e){}}
-try{JSON.parse(sessionStorage.getItem(LK)||'[]').reverse().forEach(([m,c])=>{const l=document.createElement('div');if(c)l.className=c;l.textContent=m;$('log').prepend(l)})}catch(e){}
-const rid=()=>'r'+Date.now().toString(36)+Math.random().toString(36).slice(2,10);
-async function call(action,body={},tries=1){
-  if(!cfg.url){log('Chưa có địa chỉ Web App','bad');return null}
-  if(!session&&!['ping','auth.nonce','auth.login'].includes(action)){log('Chưa đăng nhập — bấm "Đăng nhập bằng Google" trước ('+action+')','bad');return null}
-  let wait=1000;
-  for(let i=0;i<tries;i++){
-    const t0=performance.now();
-    try{
-      const r=await fetch(cfg.url,{method:'POST',redirect:'follow',credentials:'omit',body:JSON.stringify({action,session,...body})});
-      const txt=await r.text();let j;try{j=JSON.parse(txt)}catch(e){j={ok:false,code:'NOT_JSON',error:'Máy chủ trả về trang lỗi (không phải JSON)'}}
-      j.clientMs=Math.round(performance.now()-t0);
-      if(j.ok||!['LOCK_TIMEOUT','INTERNAL','NOT_JSON'].includes(j.code)||i===tries-1)return j;
-      log(`  ${action} lần ${i+1} lỗi ${j.code} (${j.clientMs} ms) – thử lại`,'bad');
-    }catch(e){const ms=Math.round(performance.now()-t0);if(i===tries-1)return {ok:false,code:'NETWORK',error:String(e),clientMs:ms};log(`  ${action} lần ${i+1} lỗi mạng: ${e} (${ms} ms) – thử lại`,'bad')}
-    await new Promise(r=>setTimeout(r,wait));wait*=2;
-  }
-}
-function show(){ $('who').textContent=session?'Đã có phiên đăng nhập':'Chưa đăng nhập'; }
-$('save').onclick=()=>{cfg={cid:$('cid').value.trim(),url:$('url').value.trim()};try{localStorage.setItem(K,JSON.stringify(cfg))}catch(e){}log('Đã lưu cấu hình','ok')};
-$('ping').onclick=async()=>{const j=await call('ping');j&&log('ping → '+(j.ok?'OK':j.code)+' · '+j.clientMs+' ms (máy chủ '+j.ms+' ms)',j.ok?'ok':'bad')};
-const REDIRECT=new URL('./',location.href).href;   // chuẩn hoá: /qlhh/ và /qlhh/index.html cùng 1 URI
-$('login').onclick=async()=>{
-  if(!cfg.cid){log('Chưa có Client ID','bad');return}
-  log('Đăng nhập: đang lấy mã nonce từ máy chủ…');
-  const n=await call('auth.nonce',{},3);           // nonce do MÁY CHỦ cấp, dùng 1 lần
-  if(!n||!n.ok){log('Không lấy được nonce: '+(n&&(n.code+' – '+n.error)),'bad');return}
-  log('Đã có nonce ('+n.clientMs+' ms) → chuyển sang trang Google…');
-  const u=new URL('https://accounts.google.com/o/oauth2/v2/auth');
-  u.search=new URLSearchParams({client_id:cfg.cid,redirect_uri:REDIRECT,response_type:'id_token',scope:'openid email profile',nonce:n.data.nonce,prompt:'select_account'});
-  location.assign(u.toString());
-};
-(async()=>{ // quay về từ Google: id_token nằm trong #fragment
-  const p=new URLSearchParams(location.hash.slice(1));
-  log('Tải trang: '+(location.hash?('có #'+[...p.keys()].join(',')):'không có #')+' · phiên đã lưu: '+(session?'có':'không')+' · sessionStorage '+(()=>{try{sessionStorage.setItem('t','1');return 'OK'}catch(e){return 'BỊ CHẶN'}})());
-  if(p.has('error')){history.replaceState(null,'',location.pathname);log('Google báo lỗi: '+p.get('error')+(p.get('error_description')?' – '+p.get('error_description'):''),'bad');return show();}
-  if(!p.has('id_token'))return show();
-  history.replaceState(null,'',location.pathname);
-  log('Đã nhận token từ Google, đang xác minh với máy chủ…');
-  const j=await call('auth.login',{idToken:p.get('id_token')},3);
-  if(j&&j.ok){session=j.data.session;try{sessionStorage.setItem('qlhh-s',session)}catch(e){}log('ĐĂNG NHẬP THÀNH CÔNG: '+j.data.email+' ('+j.data.vaiTro+') · '+j.clientMs+' ms','ok')}
-  else log('Đăng nhập thất bại: '+(j&&(j.code+' – '+j.error)),'bad');
-  show();
-})();
-$('me').onclick=async()=>{const j=await call('auth.me');j&&log('phiên → '+(j.ok?j.data.email+' · '+j.data.vaiTro:j.code+' – '+j.error)+' · '+j.clientMs+' ms',j.ok?'ok':'bad')};
-$('fake').onclick=async()=>{const s=session;session='eyJlIjoiaGFja2VyQGdtYWlsLmNvbSIsIngiOjk5OTk5OTk5OTl9.gia';const j=await call('auth.me');session=s;j&&log('phiên giả → '+(j.ok?'LỖI: được chấp nhận!':'bị từ chối ('+j.code+') ✓'),j.ok?'bad':'ok')};
-$('out').onclick=()=>{session=null;try{sessionStorage.clear()}catch(e){}show();log('Đã đăng xuất')};
-$('w20').onclick=async()=>{if(!session){log('Chưa đăng nhập — bấm "Đăng nhập bằng Google" trước','bad');return}
-  log('Bắt đầu ghi đồng thời 20 lệnh (thử lại ≤ 5 lần, giữ requestId)…');const t0=performance.now();
-  const rs=await Promise.all([...Array(20)].map(()=>call('spike.write',{requestId:rid()},6)));
-  const ok=rs.filter(r=>r&&r.ok),so=ok.map(r=>r.data.so),uniq=new Set(so).size,ms=ok.map(r=>r.clientMs).sort((a,b)=>a-b);
-  const p95=ms.length?ms[Math.min(ms.length-1,Math.ceil(ms.length*.95)-1)]:0;
-  log(`Ghi 20 lệnh: thành công ${ok.length}/20 · số không trùng ${uniq}/${ok.length} · p95 ${p95} ms · tổng ${Math.round(performance.now()-t0)} ms · giữ khoá TB ${ok.length?Math.round(ok.reduce((a,r)=>a+r.lockMs,0)/ok.length):0} ms`,ok.length===20&&uniq===20?'ok':'bad');
-  rs.filter(r=>!r||!r.ok).forEach(r=>log('  lỗi: '+(r&&(r.code+' – '+r.error)),'bad'));
-};
-$('rep').onclick=async()=>{if(!session){log('Chưa đăng nhập — bấm "Đăng nhập bằng Google" trước','bad');return}const id=rid(),rs=[];for(let i=0;i<3;i++)rs.push(await call('spike.write',{requestId:id},3));const so=new Set(rs.filter(r=>r&&r.ok).map(r=>r.data.so));log('Gửi lặp 3 lần cùng requestId → '+so.size+' phiếu '+(so.size===1?'✓':'✗')+' (replay: '+rs.map(r=>r&&r.replay).join(',')+')',so.size===1?'ok':'bad')};
-$('seed').onclick=async()=>{log('Đang tạo 5.000 mã + 50.000 dòng (có thể mất 10–40 giây)…');const j=await call('bench.seed');j&&log('Tạo dữ liệu đo → '+(j.ok?'xong trong '+j.data.taoMs+' ms':j.code+' – '+j.error),j.ok?'ok':'bad')};
-$('read').onclick=async()=>{const j=await call('bench.read');j&&log(j.ok?`Đọc: hàng hoá ${j.data.dongHH} dòng ${j.data.docHangHoaMs} ms · chi tiết ${j.data.dongCT} dòng ${j.data.docChiTietMs} ms · tạo chỉ mục ${j.data.taoMapMs} ms · cả vòng ${j.clientMs} ms`:j.code+' – '+j.error,j.ok&&j.data.docHangHoaMs+j.data.docChiTietMs<=3000?'ok':'bad')};
-$('copy').onclick=async()=>{try{await navigator.clipboard.writeText($('env').textContent+'\n'+$('log').innerText);log('Đã sao chép — dán gửi Claude','ok')}catch(e){log('Không sao chép được: '+e,'bad')}};
-$('clr').onclick=()=>{$('log').textContent='';try{sessionStorage.removeItem(LK)}catch(e){}};
-if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(e=>log('SW lỗi: '+e,'bad'));
-</script></body></html>
+<meta name="theme-color" content="#0b3b6f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="QLHH">
+<meta name="description" content="Quản lý hàng hóa LAVIPCO / Đại Châu">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/180.png">
+<link rel="icon" href="icons/192.png">
+<title>QLHH – Quản lý hàng hóa</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div id="root"><div class="login"><div class="box"><div class="skel"></div><div class="skel"></div></div></div></div>
+<div id="toasts" aria-live="polite"></div>
+<dialog id="dlg"></dialog>
+<script src="config.js"></script>
+<script src="core/validate.js"></script>
+<script src="core/perm.js"></script>
+<script src="core/price.js"></script>
+<script src="core/search.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

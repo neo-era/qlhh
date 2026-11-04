@@ -1,0 +1,114 @@
+// E2E giao diện QLHH (Playwright) + máy chủ giả lập (Code.gs thật). Chạy: node test/app.e2e.js
+const { chromium } = require('playwright'), http = require('http'), fs = require('fs'), path = require('path');
+const { ready } = require('./gas-mock.js');
+const DOCS = path.join(__dirname, '..', 'docs'), SHOTS = process.env.SHOTS || '/tmp/qlhh-shots'; fs.mkdirSync(SHOTS, { recursive: true });
+const api = ready({ 'nv@gmail.com': 'NHAP_LIEU', 'xem@gmail.com': 'XEM' });
+const srv = http.createServer((q, r) => {
+  let f = path.join(DOCS, decodeURIComponent(q.url.split('?')[0])); if (f.endsWith('/')) f += 'index.html';
+  fs.readFile(f, (e, b) => { if (e) { r.writeHead(404); return r.end(); } const ext = path.extname(f); r.writeHead(200, { 'content-type': { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css', '.png': 'image/png' }[ext] || 'application/json' }); r.end(b); });
+}).listen(8766);
+const BASE = 'http://localhost:8766/';
+const fails = []; const ok = (c, m) => { console.log((c ? '✓ ' : '✗ ') + m); if (!c) fails.push(m); };
+let offline = false;
+async function page(b, vp, email = 'maivulam2020@gmail.com', scheme = 'light') {
+  const ctx = await b.newContext({ viewport: vp, colorScheme: scheme, acceptDownloads: true, serviceWorkers: 'block' });
+  const p = await ctx.newPage();
+  p.on('pageerror', e => { console.log('JS lỗi: ' + e.message); fails.push('JS lỗi: ' + e.message); });
+  await p.route('https://script.google.com/**', async rt => { if (offline) return rt.abort(); await rt.fulfill({ contentType: 'application/json', body: api.doPost({ postData: { contents: rt.request().postData() } }).t }); });
+  await p.route('https://cdnjs.cloudflare.com/**', rt => rt.abort());   // thử nhánh CSV dự phòng
+  await p.route('https://accounts.google.com/**', async rt => {
+    const u = new URL(rt.request().url()); api.st.email = email; api.st.nonce = u.searchParams.get('nonce');
+    if (u.searchParams.get('redirect_uri') !== BASE || u.searchParams.get('response_type') !== 'id_token' || u.searchParams.get('state') !== 'LAVIPCO') fails.push('tham số Google sai');
+    await rt.fulfill({ status: 302, headers: { location: BASE + '#id_token=tok-' + Math.random() + '&state=LAVIPCO' } });
+  });
+  await p.goto(BASE); await p.waitForSelector('#loginBtn');
+  return p;
+}
+const login = async p => { await p.click('#loginBtn'); await p.waitForFunction(() => window.QLHH_DEBUG && window.QLHH_DEBUG.data, null, { timeout: 10000 }); };
+const fill = async (p, o) => { for (const [k, v] of Object.entries(o)) { const s = '#f_' + k; const tag = await p.$eval(s, e => e.tagName); if (tag === 'SELECT') await p.selectOption(s, v); else await p.fill(s, String(v)); } };
+const save = async p => { await p.click('#dlgOk'); await p.waitForFunction(() => !document.querySelector('#dlg').open, null, { timeout: 8000 }).catch(() => fails.push('hộp thoại không đóng sau khi lưu')); await p.waitForTimeout(100); };
+const toasts = p => p.$$eval('.toast', ts => ts.map(t => t.textContent).join(' | '));
+const rows = p => p.$$('tbody tr');
+
+(async () => {
+  const b = await chromium.launch();
+  // ===== QUẢN TRỊ — desktop =====
+  let p = await page(b, { width: 1366, height: 820 });
+  ok((await p.textContent('.cos')).includes('chưa cấu hình'), 'Đại Châu chưa cấu hình hiển thị rõ');
+  await p.screenshot({ path: SHOTS + '/login.png' });
+  await login(p);
+  ok(await p.isVisible('text=Chưa có mặt hàng nào'), 'trạng thái rỗng có hướng dẫn');
+  await p.goto(BASE + '#/nhom'); await p.click('#addG'); await fill(p, { maNhom: 'den', ten: 'Đèn LED' }); await save(p);
+  await p.click('#addG'); await fill(p, { maNhom: 'TU', ten: 'Tủ điện' }); await save(p);
+  ok((await p.textContent('#main')).includes('Tủ điện'), 'thêm 2 nhóm');
+  await p.goto(BASE + '#/hang'); await p.click('#addItem');
+  await p.click('#dlgOk'); ok((await p.textContent('#e_maHang')) !== '', 'bỏ trống → báo lỗi tại ô');
+  await fill(p, { maHang: 'dl-str-100', nhom: 'DEN', ten: 'Đèn LED đường phố 100W', quyCach: '100W · 4000K · IP66', dvt: 'bộ', thangBH: 24, giaBan: '3850000', tonToiThieu: 10 });
+  await p.check('input[name=quanLySerial]'); await save(p);
+  await p.click('#addItem'); await fill(p, { maHang: 'TU-DK-3P', nhom: 'TU', ten: 'Tủ điều khiển chiếu sáng 3 pha', dvt: 'tủ', giaBan: '28500000' }); await save(p);
+  await p.click('#addItem'); await fill(p, { maHang: 'DL-STR-100', ten: 'x', dvt: 'bộ' }); await p.click('#dlgOk');
+  ok((await p.textContent('#e_maHang')).includes('đã tồn tại'), 'mã trùng bị chặn ngay trên máy'); await p.keyboard.press('Escape');
+  ok((await rows(p)).length === 2, 'bảng có 2 mã');
+  await p.fill('#qd', 'den 100w'); ok((await rows(p)).length === 1, 'tìm không dấu nhiều từ');
+  await p.fill('#qd', ''); await p.click('tbody tr[data-ma="DL-STR-100"]');
+  ok((await p.textContent('#det')).includes('3.850.000'), 'chi tiết hiển thị giá bán');
+  await p.goto(BASE + '#/ncc'); await p.click('#addSup'); await fill(p, { maNCC: 'ncc01', ten: 'Cty Đèn Sáng', mst: '123' }); await p.click('#dlgOk');
+  ok((await p.textContent('#e_mst')) !== '', 'MST sai báo lỗi'); await fill(p, { mst: '0312345678' }); await save(p);
+  await p.goto(BASE + '#/hang'); await p.click('tbody tr[data-ma="DL-STR-100"]'); await p.click('#addPrice');
+  await fill(p, { loai: 'NHAP', maNCC: 'NCC01', gia: '2.900.000', tuNgay: '2026-01-02' }); await save(p);
+  await p.click('tbody tr[data-ma="DL-STR-100"]'); await p.click('#addPrice'); await fill(p, { loai: 'BAN', gia: '3990000', tuNgay: '2026-01-02' }); await save(p);
+  await p.click('tbody tr[data-ma="DL-STR-100"]');
+  const det = await p.textContent('#det');
+  ok(det.includes('3.990.000') && det.includes('2.900.000') && det.includes('Cty Đèn Sáng'), 'QT thấy giá bán mới + giá nhập theo NCC');
+  await p.click('#stopItem'); await p.waitForTimeout(300);
+  ok((await rows(p)).length === 1, 'ngừng KD → ẩn khỏi danh sách mặc định');
+  await p.click('#stopT'); ok((await rows(p)).length === 2, 'bật "Gồm hàng ngừng KD" → hiện lại');
+  const [dl] = await Promise.all([p.waitForEvent('download'), p.click('#xls')]);
+  const csv = fs.readFileSync(await dl.path(), 'utf8'); ok(dl.suggestedFilename().endsWith('.csv') && csv.includes('DL-STR-100') && csv.includes('Giá vốn'), 'xuất Excel (CSV dự phòng khi không tải được thư viện)');
+  await p.goto(BASE + '#/nguoidung'); await p.click('#addU'); await fill(p, { email: 'Moi@Gmail.com', hoTen: 'Nhân viên mới', vaiTro: 'NHAP_LIEU' }); await save(p);
+  ok((await p.textContent('#main')).includes('moi@gmail.com'), 'QT thêm người dùng (email chuẩn hoá)');
+  await p.click('#fbBtn'); await p.click('#dlgOk'); ok(/sao hoặc nhập nội dung/.test(await toasts(p)), 'góp ý rỗng bị chặn');
+  await p.click('.stars button[data-s="4"]'); await fill(p, { noiDung: 'Thêm lọc theo hãng' }); await save(p);
+  await p.goto(BASE + '#/gopy'); await p.waitForTimeout(200); ok((await p.textContent('#main')).includes('Thêm lọc theo hãng'), 'góp ý đã gửi và hiện trong danh sách');
+  await p.goto(BASE + '#/hang'); await p.click('tbody tr[data-ma="TU-DK-3P"]'); await p.screenshot({ path: SHOTS + '/desktop-light.png' });
+  // mất mạng: dữ liệu đã lưu vẫn xem được
+  offline = true; await p.reload(); await p.waitForSelector('tbody tr', { timeout: 10000 }).catch(() => {});
+  await p.waitForSelector('text=Đang ngoại tuyến', { timeout: 2500 }).catch(() => {});
+  ok((await rows(p)).length >= 1 && await p.isVisible('text=Đang ngoại tuyến'), 'mất mạng: vẫn xem dữ liệu đã lưu + báo ngoại tuyến');
+  offline = false;
+  await p.click('#outBtn'); await p.waitForSelector('#loginBtn');
+  ok(await p.evaluate(() => new Promise(r => { const q = indexedDB.open('qlhh'); q.onsuccess = () => { const t = q.result.transaction('kv').objectStore('kv').getAllKeys(); t.onsuccess = () => r(t.result.length === 0); }; })), 'đăng xuất xoá dữ liệu lưu trên máy');
+  await p.context().close();
+
+  // ===== NHẬP LIỆU — điện thoại dọc =====
+  p = await page(b, { width: 390, height: 844 }, 'nv@gmail.com');
+  await login(p); await p.waitForSelector('.list .it');
+  ok(!(await p.$('a[href="#/nguoidung"]')), 'Nhập liệu không thấy menu Người dùng');
+  const raw = JSON.stringify(await p.evaluate(() => window.QLHH_DEBUG.data));
+  ok(!raw.includes('2900000'), 'BẢO MẬT: dữ liệu trên máy Nhập liệu không chứa giá nhập/giá vốn');
+  await p.screenshot({ path: SHOTS + '/mobile-portrait-light.png' });
+  const m = await p.evaluate(() => {
+    const over = document.documentElement.scrollWidth > innerWidth;
+    const small = [...document.querySelectorAll('.bnav a,.bnav button,.chip,.msearch,.list .it,#main .btn')].filter(e => { const r = e.getBoundingClientRect(); return r.width && r.height < 40; }).map(e => e.textContent.trim().slice(0, 20));
+    const nav = document.querySelector('.bnav').getBoundingClientRect();
+    return { over, small, navBottom: Math.round(nav.bottom), h: innerHeight };
+  });
+  ok(!m.over, 'dọc: không tràn ngang'); ok(m.small.length === 0, 'dọc: vùng chạm ≥ 40px ' + m.small.join(',')); ok(m.navBottom === m.h, 'thanh điều hướng dưới bám đáy');
+  await p.click('.list .it'); await p.waitForTimeout(250);
+  ok(await p.isVisible('#detBack'), 'mở chi tiết có nút Quay lại'); await p.screenshot({ path: SHOTS + '/mobile-detail.png' });
+  ok(!(await p.textContent('#det')).includes('Giá nhập'), 'Nhập liệu không thấy mục giá nhập');
+  await p.click('#detBack'); await p.waitForTimeout(250); ok(await p.isHidden('#det'), 'Quay lại đóng chi tiết');
+  await p.click('#moreBtn'); ok(await p.isVisible('text=Đổi công ty'), 'menu Thêm có đổi công ty/đăng xuất'); await p.keyboard.press('Escape');
+  await p.context().close();
+  // ===== XEM — dọc tối; ngang; desktop tối =====
+  p = await page(b, { width: 390, height: 844 }, 'xem@gmail.com', 'dark'); await login(p);
+  ok(!(await p.$('#addItemM')) && !(await p.$('#addItem')), 'vai trò Xem không có nút Thêm hàng');
+  await p.screenshot({ path: SHOTS + '/mobile-portrait-dark.png' }); await p.context().close();
+  p = await page(b, { width: 844, height: 390 }); await login(p); await p.waitForSelector('.list .it');
+  const l = await p.evaluate(() => ({ over: document.documentElement.scrollWidth > innerWidth, side: getComputedStyle(document.querySelector('aside.side')).display }));
+  ok(!l.over && l.side === 'none', 'ngang: không tràn, dùng bố cục điện thoại'); await p.screenshot({ path: SHOTS + '/mobile-landscape.png' });
+  await p.context().close();
+  p = await page(b, { width: 1366, height: 820 }, 'maivulam2020@gmail.com', 'dark'); await login(p); await p.click('tbody tr'); await p.screenshot({ path: SHOTS + '/desktop-dark.png' }); await p.context().close();
+  await b.close(); srv.close();
+  console.log(fails.length ? 'THẤT BẠI ' + fails.length + ':\n - ' + fails.join('\n - ') : 'TẤT CẢ ĐẠT'); process.exit(fails.length ? 1 : 0);
+})().catch(e => { console.error(e); process.exit(1); });
