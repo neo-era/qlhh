@@ -248,3 +248,16 @@ test('Y2 qua máy chủ: trả NCC toàn bộ lô giá thấp → lưu chênh l�
   assert.equal(a.post({ action: 'report.nxt', session: s, from: '2026-10-01', to: '2026-10-31' }).data.rows[0].dcV, -500);
   assert.equal('chenhLechGV' in a.post({ action: 'voucher.get', session: a.login(NV), soPhieu: t.data.soPhieu }).data.lines[0], false);
 });
+test('tính lại giá vốn lùi ngày → cập nhật cả tổng tiền đầu phiếu xuất (phát hiện khi chạy trên Google thật)', () => {
+  const { a, s, V } = shop();
+  V(nhap('2026-10-01', [{ maHang: 'CB40', soLuongCT: 100, gia: 100000 }]));
+  const x1 = V({ loai: 'XUAT_CONG_TRINH', ngay: '2026-10-05', kho: 'KHO', maCongTrinh: 'PDG', lines: [{ maHang: 'CB40', soLuongCT: 80 }] }).data.soPhieu;
+  V(nhap('2026-10-10', [{ maHang: 'CB40', soLuongCT: 100, gia: 130000 }]));
+  const x2 = V({ loai: 'XUAT_CONG_TRINH', ngay: '2026-10-15', kho: 'KHO', maCongTrinh: 'PDG', lines: [{ maHang: 'CB40', soLuongCT: 50 }] }).data.soPhieu;
+  V(nhap('2026-10-03', [{ maHang: 'CB40', soLuongCT: 50, gia: 70000 }]));
+  const vs = pull(a, s).data.vouchers, t = so => vs.find(p => p.soPhieu === so).tongTien;
+  assert.deepEqual([t(x1), t(x2)], [7200000, 5676471]);
+  const pr = a.sheets.Phieu.d.findIndex(r => r[0] === x1); a.sheets.Phieu.d[pr][16] = 1;   // sửa tay sai → tính lại tồn sửa về đúng
+  assert.equal(a.post({ action: 'stock.rebuild', session: s, requestId: rid() }).ok, true);
+  assert.equal(pull(a, s).data.vouchers.find(p => p.soPhieu === x1).tongTien, 7200000);
+});

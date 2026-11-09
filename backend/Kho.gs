@@ -79,8 +79,22 @@ function applySerials(changes, so) {
   appendBlock('Serial', add);
 }
 function applyChanges(changes, rowOf, mas) {
-  var s = sheet('ChiTietPhieu'), n = 0, want = mapBy(mas.map(function (m) { return { m: m }; }), 'm');
-  changes.forEach(function (c) { if (!want[c.maHang]) return; var row = rowOf[c.soPhieu + '#' + c.dong]; if (row) { s.getRange(row, CT_COL, 1, 1).setValues([[c.new]]); s.getRange(row, CL_COL, 1, 1).setValues([[c.adj || '']]); n++; } });
+  var s = sheet('ChiTietPhieu'), n = 0, want = mapBy(mas.map(function (m) { return { m: m }; }), 'm'), sos = {};
+  changes.forEach(function (c) { if (!want[c.maHang]) return; var row = rowOf[c.soPhieu + '#' + c.dong]; if (row) { s.getRange(row, CT_COL, 1, 1).setValues([[c.new]]); s.getRange(row, CL_COL, 1, 1).setValues([[c.adj || '']]); n++; sos[c.soPhieu] = 1; } });
+  if (n) refreshTotals(Object.keys(sos));   // tổng tiền đầu phiếu theo giá vốn mới
+  return n;
+}
+/** Tổng tiền đầu phiếu = Σ thành tiền (phiếu có đơn giá) hoặc Σ (giá trị kho + chênh lệch GV) — tính lại sau khi giá vốn dòng đổi. sos=null → mọi phiếu. */
+function refreshTotals(sos) {
+  var want = sos ? mapBy(sos.map(function (x) { return { s: x }; }), 's') : null; if (want && !sos.length) return 0;
+  var sum = {}, ps = sheet('Phieu'), cols = QSchema.SHEETS.Phieu.cols, n = 0;
+  readTable('ChiTietPhieu').rows.forEach(function (l) { if (want && !want[l.soPhieu]) return; (sum[l.soPhieu] = sum[l.soPhieu] || []).push(l); });
+  readTable('Phieu').rows.forEach(function (h) {
+    if (want && !want[h.soPhieu]) return; var L = sum[h.soPhieu]; if (!L) return;
+    var priced = QStock.TYPES[h.loai] && QStock.TYPES[h.loai].cost === 'PRICE';
+    var t = L.reduce(function (a, l) { return a + (priced ? Number(l.thanhTien) || 0 : (Number(l.giaTriKho) || 0) + (Number(l.chenhLechGV) || 0)); }, 0);
+    if (t !== Number(h.tongTien)) { var x = strip(h); x.tongTien = t; ps.getRange(h._row, 1, 1, cols.length).setValues([QSchema.toRow('Phieu', x)]); n++; }
+  });
   return n;
 }
 function updateCost(ton, mas) {
@@ -123,6 +137,7 @@ function rebuildFor(mas) {
   }); });
   var n = applyChanges(changes, all.rowOf, mas);
   writeTon(r.ton, mas); updateCost(r.ton, mas);
+  refreshTotals(all.vouchers.filter(function (p) { return !(o.ngayKhoaSo && p.ngay <= o.ngayKhoaSo); }).map(function (p) { return p.soPhieu; }));   // sửa cả tổng tiền bị sửa tay (trừ kỳ đã khoá)
   return { changes: n, errors: r.errors, lechKyKhoa: locked };
 }
 
