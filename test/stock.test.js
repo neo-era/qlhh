@@ -246,3 +246,65 @@ test('báo cáo N-X-T tháng 10 (KB1 + đảo + chuyển kho): đầu + nhập �
   assert.equal(a.dauV + a.nhapV - a.xuatV, a.cuoiV); assert.equal(a.dauQ + a.nhapQ - a.xuatQ, a.cuoiQ);
   assert.equal(a.cuoiQ, 130);
 });
+
+// ===== ca xấu chuyên gia kế toán tái hiện (duyệt v0.2 vòng 1) =====
+test('X2 khoá sổ SAU khi đảo không được đổi giá vốn kỳ đã khoá: vị trí phiếu đảo cố định lúc lập (hieuLuc)', () => {
+  const n2 = nhap('2026-10-02', 100, 140000);
+  const v = [nhap('2026-10-01', 100, 100000), n2, xuat('2026-10-05', 50)];
+  const c = K.check(v, P('DAO', '2026-10-20', 'K1', [], { phieuGoc: n2.soPhieu }), {});
+  assert.equal(c.hieuLuc, 'GOC');
+  const dao = P('DAO', '2026-10-20', 'K1', [], { phieuGoc: n2.soPhieu, hieuLuc: c.hieuLuc });
+  const r = K.replay([...v, dao], { ngayKhoaSo: '2026-10-31' });
+  assert.equal(val(r, v[2].soPhieu), 5000000, 'khoá sổ sau không làm đổi');
+  assert.equal(K.nxt([...v, dao], '2026-10-01', '2026-10-31', { ngayKhoaSo: '2026-10-31' })[0].cuoiV, 5000000);
+});
+test('X1 đảo phiếu nhập kỳ đã khoá làm giá trị tồn âm → từ chối', () => {
+  const n2 = nhap('2026-09-02', 1, 10000);
+  const v = [nhap('2026-09-01', 10, 100), n2, xuat('2026-10-05', 5)];
+  const c = K.check(v, P('DAO', '2026-10-20', 'K1', [], { phieuGoc: n2.soPhieu }), { ngayKhoaSo: '2026-09-30' });
+  assert.equal(c.ok, false); assert.equal(c.code, 'VALIDATION'); assert.match(c.errors[0].msg, /giá trị tồn/);
+});
+test('X3 đảo phiếu xuất đã có khách trả → chặn (đảo phiếu khách trả trước)', () => {
+  const v = [nhap('2026-10-01', 10, 100), xuat('2026-10-02', 5)];
+  const kt = P('KHACH_TRA', '2026-10-03', 'K1', [{ maHang: 'A', soLuong: 5 }], { phieuGoc: v[1].soPhieu });
+  const c = K.check([...v, kt], P('DAO', '2026-10-04', 'K1', [], { phieuGoc: v[1].soPhieu }), {});
+  assert.equal(c.code, 'VALIDATION'); assert.match(c.errors[0].msg, /khách trả|trả NCC/);
+});
+test('X9 trả NCC từ kho thường: bắt buộc phiếu nhập gốc, tính theo giá gốc, không vượt số đã nhập', () => {
+  const n1 = nhap('2026-10-01', 10, 100), n2 = nhap('2026-10-02', 10, 200);
+  const tn = P('TRA_NCC', '2026-10-03', 'K1', [{ maHang: 'A', soLuong: 10 }], { phieuGoc: n2.soPhieu });
+  const c = K.check([n1, n2], tn, {});
+  assert.equal(c.ok, true, JSON.stringify(c)); assert.equal(val(c.result, tn.soPhieu), 2000);
+  assert.deepEqual([c.result.ton.A.pool.q, c.result.ton.A.pool.v], [10, 1000]);
+  assert.equal(K.check([n1, n2], P('TRA_NCC', '2026-10-03', 'K1', [{ maHang: 'A', soLuong: 1 }]), {}).code, 'VALIDATION', 'thiếu phiếu gốc');
+  assert.equal(K.check([n1, n2], P('TRA_NCC', '2026-10-03', 'K1', [{ maHang: 'A', soLuong: 11 }], { phieuGoc: n2.soPhieu }), {}).code, 'VALIDATION');
+  const c2 = K.check([n1, n2, tn], P('DAO', '2026-10-04', 'K1', [], { phieuGoc: n2.soPhieu }), {});
+  assert.equal(c2.code, 'VALIDATION', 'phiếu nhập đã trả NCC → đảo phiếu trả trước');
+});
+test('X10 phiếu lùi ngày trước phiếu kiểm kê cùng mã × kho → chặn (đảo kiểm kê trước)', () => {
+  const v = [nhap('2026-10-01', 10, 100), P('KIEM_KE', '2026-10-05', 'K1', [{ maHang: 'A', slSoSach: 10, slThucTe: 8 }])];
+  const c = K.check(v, nhap('2026-10-03', 5, 100), {});
+  assert.equal(c.code, 'VALIDATION'); assert.match(c.errors[0].msg, /kiểm kê/);
+  assert.equal(K.check(v, nhap('2026-10-05', 5, 100), {}).ok, true, 'cùng ngày, lập sau kiểm kê → được');
+  assert.equal(K.check(v, nhap('2026-10-03', 5, 100, { lines: undefined }) && P('NHAP_MUA', '2026-10-03', 'K2', [{ maHang: 'A', soLuong: 1, donGia: 1 }]), {}).ok, true, 'kho khác → được');
+  assert.equal(K.check(v, P('DAO', '2026-10-06', 'K1', [], { phieuGoc: v[1].soPhieu }), {}).ok, true, 'đảo chính phiếu kiểm kê → được');
+});
+test('X11 kiểm kê thừa khi tồn 0 → lấy giá BQ gần nhất (không ghi giá trị 0)', () => {
+  const v = [nhap('2026-10-01', 2, 500), xuat('2026-10-02', 2)];
+  const kk = P('KIEM_KE', '2026-10-03', 'K1', [{ maHang: 'A', slSoSach: 0, slThucTe: 1 }]);
+  const c = K.check(v, kk, {});
+  assert.equal(val(c.result, kk.soPhieu), 500);
+});
+test('X4b khách trả theo dòng gốc khi phiếu gốc có 2 dòng cùng mã (4 + 6)', () => {
+  const v = [nhap('2026-10-01', 10, 100), P('XUAT_BAN', '2026-10-02', 'K1', [{ maHang: 'A', soLuong: 4 }, { maHang: 'A', soLuong: 6 }])];
+  assert.equal(K.check(v, P('KHACH_TRA', '2026-10-03', 'K1', [{ maHang: 'A', soLuong: 5, dongGoc: 2 }], { phieuGoc: v[1].soPhieu }), {}).ok, true);
+  assert.equal(K.check(v, P('KHACH_TRA', '2026-10-03', 'K1', [{ maHang: 'A', soLuong: 5 }], { phieuGoc: v[1].soPhieu }), {}).code, 'VALIDATION', 'nhiều dòng cùng mã → phải chọn dòng gốc');
+});
+test('B4 đơn giá quá lớn / không an toàn số nguyên → từ chối', () => {
+  assert.equal(K.check([], nhap('2026-10-01', 1, 1e13), {}).code, 'VALIDATION');
+});
+test('kiểm kê phải là phiếu mới nhất của mã tại kho', () => {
+  const v = [nhap('2026-10-01', 10, 100), xuat('2026-10-06', 1)];
+  assert.equal(K.check(v, P('KIEM_KE', '2026-10-05', 'K1', [{ maHang: 'A', slSoSach: 10, slThucTe: 9 }]), {}).code, 'VALIDATION');
+  assert.equal(K.check(v, P('KIEM_KE', '2026-10-06', 'K1', [{ maHang: 'A', slSoSach: 9, slThucTe: 9 }]), {}).ok, true);
+});

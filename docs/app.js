@@ -445,6 +445,7 @@
     const p = r.data.phieu, L = r.data.lines, showMoney = isQT();
     const canRev = isQT() && !S.offline && p.loai !== 'DAO' && !p.daDao;
     const canRet = canEdit() && !S.offline && ['XUAT_BAN', 'XUAT_CONG_TRINH', 'XUAT_BH'].includes(p.loai) && !p.daDao;
+    const canTn = canEdit() && !S.offline && ['NHAP_MUA', 'TON_DAU'].includes(p.loai) && !p.daDao;
     dialog(esc(LOAI[p.loai] || p.loai) + ' ' + esc(p.soPhieu), `
       <dl class="dl"><dt>Ngày</dt><dd>${esc(p.ngay)}</dd><dt>Kho</dt><dd>${esc(khoName(p.kho))}${p.khoDen ? ' → ' + esc(khoName(p.khoDen)) : ''}</dd>
         ${p.maNCC ? `<dt>Nhà cung cấp</dt><dd>${esc(supName(p.maNCC))}</dd>` : ''}${p.maKH ? `<dt>Khách hàng</dt><dd>${esc(custName(p.maKH))}</dd>` : ''}${p.maCongTrinh ? `<dt>Công trình</dt><dd>${esc(projName(p.maCongTrinh))}</dd>` : ''}
@@ -454,27 +455,28 @@
       <div class="tbl" style="max-height:none"><table><thead><tr><th>#</th><th>Hàng</th><th class="n">${p.loai === 'KIEM_KE' ? 'Sổ sách → Thực tế' : 'Số lượng'}</th>${showMoney ? '<th class="n">Giá trị kho</th>' : ''}</tr></thead><tbody>
         ${L.map(l => { const i = itemOf(l.maHang); return `<tr><td>${l.dong}</td><td><span class="mono">${esc(l.maHang)}</span> ${esc(i.ten)}${l.serials && l.serials.length ? `<br><small class="mono">${l.serials.map(esc).join(', ')}</small>` : ''}</td><td class="n">${p.loai === 'KIEM_KE' ? num(l.slSoSach) + ' → ' + num(l.slThucTe) : num(l.soLuongCT) + ' ' + esc(l.dvt)}${l.heSo && l.heSo !== 1 ? `<br><small class="mut">= ${num(l.soLuong)} ${esc(i.dvt)}</small>` : ''}</td>${showMoney ? `<td class="n">${money(l.giaTriKho)}</td>` : ''}</tr>`; }).join('')}</tbody></table></div>
       ${showMoney ? `<p style="text-align:right"><b>Tổng: ${money(p.tongTien)}</b></p>` : '<p class="mut" style="font-size:12.5px">Đơn giá, giá trị chỉ Quản trị xem được.</p>'}
-      <div class="acts" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"><button class="btn" type="button" id="vPrint">In phiếu</button>${canRet ? '<button class="btn" type="button" id="vRet">Khách trả hàng</button>' : ''}${canRev ? '<button class="btn danger" type="button" id="vRev">Đảo phiếu</button>' : ''}</div>`, null, d => {
+      <div class="acts" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"><button class="btn" type="button" id="vPrint">In phiếu</button>${canRet ? '<button class="btn" type="button" id="vRet">Khách trả hàng</button>' : ''}${canTn ? '<button class="btn" type="button" id="vTn">Trả nhà cung cấp</button>' : ''}${canRev ? '<button class="btn danger" type="button" id="vRev">Đảo phiếu</button>' : ''}</div>`, null, d => {
       d.classList.add('wide');
-      $('#vPrint', d).onclick = () => printVoucher(p, L);
-      const rt = $('#vRet', d); if (rt) rt.onclick = () => { d.close(); voucherForm('KHACH_TRA', { phieuGoc: p.soPhieu, kho: p.kho, maKH: p.maKH, maCongTrinh: p.maCongTrinh, lines: L.map(l => ({ maHang: l.maHang, soLuongCT: '', gocSerials: l.serials })) }); };
+      $('#vPrint', d).onclick = () => printVoucher(p, L);   // phiếu đảo: in theo mẫu của phiếu gốc, số âm
+      const rt = $('#vRet', d); if (rt) rt.onclick = () => { d.close(); voucherForm('KHACH_TRA', { phieuGoc: p.soPhieu, kho: p.kho, maKH: p.maKH, maCongTrinh: p.maCongTrinh, lines: L.map(l => ({ maHang: l.maHang, soLuongCT: '', dongGoc: l.dong, gocSerials: l.serials })) }); };
+      const tn = $('#vTn', d); if (tn) tn.onclick = () => { d.close(); voucherForm('TRA_NCC', { phieuGoc: p.soPhieu, kho: p.kho, maNCC: p.maNCC, lines: L.map(l => ({ maHang: l.maHang, soLuongCT: '', dongGoc: l.dong, gocSerials: l.serials })) }); };
       const rv = $('#vRev', d); if (rv) rv.onclick = () => { d.close(); reverseForm(p); };
     });
   }
   function reverseForm(p) {
     dialog('Đảo phiếu ' + esc(p.soPhieu), `<p>Phiếu đảo huỷ tác động của phiếu gốc lên tồn kho và giá vốn. Phiếu gốc vẫn giữ lại, được đánh dấu <b>Đã đảo</b>.</p>
-      ${fld('ngay', 'Ngày phiếu đảo', S.today, { req: 1, type: 'date' })}${fld('lyDo', 'Lý do đảo', '', { req: 1, type: 'textarea' })}`,
+      ${fld('ngay', 'Ngày phiếu đảo', S.today, { req: 1, type: 'date', max: S.today })}${fld('lyDo', 'Lý do đảo', '', { req: 1, type: 'textarea' })}`,
       async (v, d) => { if (!v.lyDo.trim()) { showErrors(d, { lyDo: 'Nhập lý do' }); return false; } return submitV(d, 'voucher.reverse', { phieuGoc: p.soPhieu, ngay: v.ngay, lyDo: v.lyDo }, so => 'Đã lập phiếu đảo ' + so); }, null, 'Đảo phiếu');
   }
   async function submitV(d, action, body, okMsg) {
     if (S.offline) { dlgMsg(d, 'Đang ngoại tuyến — chưa lưu được. Dữ liệu trong phiếu vẫn giữ nguyên.'); return false; }
-    const r = await write(action, body);
+    const r = await write(action, { ...body, requestId: d._rid || (d._rid = rid()) });
     if (!r.ok) {
       if (Array.isArray(r.fields)) { r.fields.forEach(e => { const c = e.dong ? $(`[data-line="${e.dong}"]`, d) : null; if (c) c.classList.add('bad-line'); }); }
       else if (r.fields) showErrors(d, r.fields);
       dlgMsg(d, 'Chưa lưu: ' + (r.error || r.code) + (r.code === 'NETWORK' ? ' — kiểm tra mạng rồi bấm Lưu lại' : '')); return false;
     }
-    toast(okMsg(r.data.soPhieu) + (r.data.tinhLai ? ` · đã tính lại giá vốn ${r.data.tinhLai} dòng phiếu sau` : '')); await sync(); return true;
+    d._guard = null; toast((r.data.lapLai ? 'Phiếu đã lưu từ lần bấm trước: ' + r.data.soPhieu : okMsg(r.data.soPhieu)) + (r.data.tinhLai ? ` · đã tính lại giá vốn ${r.data.tinhLai} dòng phiếu sau` : '')); await sync(); return true;
   }
 
   // ---------- lập phiếu ----------
@@ -485,15 +487,16 @@
     const lines = (pre.lines && pre.lines.length ? pre.lines : [{}]).map(l => ({ ...l }));
     const custProj = loai === 'XUAT_BAN' || loai === 'XUAT_BH' || loai === 'KHACH_TRA';
     const body = `
-      <div class="grid2"><div>${fld('ngay', 'Ngày phiếu', pre.ngay || S.today, { req: 1, type: 'date' })}</div>
+      <div class="grid2"><div>${fld('ngay', 'Ngày phiếu', pre.ngay || S.today, { req: 1, type: 'date', max: S.today })}</div>
         <div>${fld('kho', loai === 'CHUYEN_KHO' ? 'Từ kho' : 'Kho', pre.kho || (khos[0] || {}).maKho || '', { opts: khos.map(w => [w.maKho, w.ten]) })}</div>
         ${loai === 'CHUYEN_KHO' ? `<div>${fld('khoDen', 'Đến kho', '', { opts: [['', '— Chọn kho đến —'], ...activeKho().map(w => [w.maKho, w.ten])] })}</div>` : ''}
         ${loai === 'NHAP_MUA' || loai === 'TRA_NCC' ? `<div>${fld('maNCC', 'Nhà cung cấp', pre.maNCC || '', { opts: opt(d.suppliers, 'maNCC', 'ten', '— Chọn NCC —') })}</div>` : ''}
         ${custProj ? `<div>${fld('maKH', 'Khách hàng', pre.maKH || '', { opts: opt(d.customers || [], 'maKH', 'ten', '— Chọn khách —') })}</div>` : ''}
         ${custProj || loai === 'XUAT_CONG_TRINH' ? `<div>${fld('maCongTrinh', 'Công trình', pre.maCongTrinh || '', { opts: opt(d.projects || [], 'maCongTrinh', 'ten', '— Chọn công trình —') })}</div>` : ''}
         ${loai === 'KHACH_TRA' ? `<div>${fld('phieuGoc', 'Phiếu xuất gốc', pre.phieuGoc || '', { ro: !!pre.phieuGoc })}</div>` : ''}
+        ${loai === 'TRA_NCC' ? `<div>${fld('phieuGoc', 'Phiếu nhập gốc (bắt buộc nếu trả từ kho thường)', pre.phieuGoc || '', { ro: !!pre.phieuGoc, list: 'dlGocN' })}<datalist id="dlGocN">${(d.vouchers || []).filter(x => ['NHAP_MUA', 'TON_DAU'].includes(x.loai) && !x.daDao).slice(-200).reverse().map(x => `<option value="${esc(x.soPhieu)}">${esc(x.ngay)} · ${esc(supName(x.maNCC))}</option>`).join('')}</datalist></div>` : ''}
         <div>${fld('nguoiGiaoNhan', t.dir > 0 ? 'Người giao hàng' : 'Người nhận hàng', '')}</div>
-        <div>${fld('soCTGoc', 'Số chứng từ gốc (HĐ, hợp đồng…)', '')}</div><div>${fld('ngayCTGoc', 'Ngày chứng từ gốc', '', { type: 'date' })}</div></div>
+        <div>${fld('soCTGoc', 'Số chứng từ gốc (HĐ, hợp đồng…)', '')}</div><div>${fld('ngayCTGoc', 'Ngày chứng từ gốc', '', { type: 'date', max: S.today })}</div></div>
       ${fld('lyDo', kk ? 'Ghi chú kiểm kê' : 'Lý do ' + (t.dir > 0 ? 'nhập' : 'xuất'), pre.lyDo || '')}
       <h3 style="font-size:14px;margin:16px 0 6px">Dòng hàng</h3>
       <datalist id="dlItems">${d.items.filter(i => i.trangThai !== 'NGUNG').map(i => `<option value="${esc(i.maHang)}">${esc(i.ten)}</option>`).join('')}</datalist>
@@ -517,7 +520,7 @@
             <div style="align-self:end"><button class="btn ghost iconbtn" type="button" data-del="${i}" aria-label="Xoá dòng ${i + 1}" ${lines.length < 2 ? 'disabled' : ''}>${ic('x')}</button></div>
           </div>
           ${ser ? (pick.length || gocS.length
-            ? `<div class="f" style="margin-top:8px">Chọn serial (${(l.serials || []).length} đã chọn)</div><div class="serpick">${(gocS.length ? gocS : pick.map(x => x.serial)).map(s => `<label class="chk" style="margin:0;min-height:40px"><input type="checkbox" data-i="${i}" data-s="${esc(s)}" ${(l.serials || []).includes(s) ? 'checked' : ''}> <span class="mono">${esc(s)}</span></label>`).join('')}</div>`
+            ? `<div class="f" style="margin-top:8px">Chọn serial (${(l.serials || []).length} đã chọn)</div><div class="serpick">${(gocS.length ? gocS : pick.map(x => x.serial)).map(s => `<label class="chk" style="margin:0;min-height:48px"><input type="checkbox" data-i="${i}" data-s="${esc(s)}" ${(l.serials || []).includes(s) ? 'checked' : ''}> <span class="mono">${esc(s)}</span></label>`).join('')}</div>`
             : out && !kk ? `<div class="err">Không có serial nào của mã này trong kho đã chọn.</div>`
             : `<label class="f" for="l_sr_${i}">Số serial (mỗi dòng 1 số, đủ = số lượng)</label><textarea class="in" id="l_sr_${i}" data-i="${i}" data-f="serials" style="min-height:64px">${esc((l.serials || []).join('\n'))}</textarea>`) : ''}
         </div>`;
@@ -534,13 +537,20 @@
     };
     const sum = dlg => { const s = $('#vSum', dlg); if (!s) return; let tot = 0; lines.forEach(l => { const q = Number(l.soLuongCT), g = Number(l.gia); if (q > 0 && g >= 0) tot += Math.round(q * g); }); s.textContent = money(tot); };
     dialog(LOAI[loai] + ' — phiếu mới', body, async (v, dlg) => {
-      const clean = lines.filter(l => String(l.maHang || '').trim());
+      const clean = lines.filter(l => String(l.maHang || '').trim() && !(l.dongGoc && (l.soLuongCT === '' || l.soLuongCT === undefined) && !(l.serials || []).length));   // dòng lấy từ phiếu gốc mà để trống SL = không trả dòng đó
       if (!clean.length) { dlgMsg(dlg, 'Phiếu chưa có dòng hàng'); return false; }
-      const vh = { ...v, loai, phieuGoc: v.phieuGoc || pre.phieuGoc || '', lines: clean.map(l => ({ maHang: String(l.maHang).trim().toUpperCase(), dvt: l.dvt, soLuongCT: l.soLuongCT === '' ? '' : Number(String(l.soLuongCT).replace(',', '.')), gia: l.gia === undefined ? undefined : Number(l.gia), slThucTe: l.slThucTe === undefined ? undefined : Number(String(l.slThucTe).replace(',', '.')), serials: l.serials || [] })) };
+      const vh = { ...v, loai, phieuGoc: v.phieuGoc || pre.phieuGoc || '', lines: clean.map(l => ({ maHang: String(l.maHang).trim().toUpperCase(), dvt: l.dvt, soLuongCT: l.soLuongCT === '' ? '' : Number(String(l.soLuongCT).replace(',', '.')), gia: l.gia === undefined ? undefined : Number(l.gia), slThucTe: l.slThucTe === undefined ? undefined : Number(String(l.slThucTe).replace(',', '.')), dongGoc: l.dongGoc, serials: l.serials || [] })) };
       const r = QValidate.voucherHead(vh); if (!r.ok) { showErrors(dlg, r.errors); dlgMsg(dlg, Object.values(r.errors)[0]); return false; }
       return submitV(dlg, 'voucher.create', { voucher: vh }, so => 'Đã lưu phiếu ' + so);
     }, dlg => {
       dlg.classList.add('wide');
+      const start = JSON.stringify(lines); dlg._guard = () => JSON.stringify(lines) !== start;
+      dlg.addEventListener('keydown', e => {   // Enter trong dòng hàng: sang ô kế tiếp (không lưu vội); Ctrl+Enter = Lưu phiếu
+        if (e.key !== 'Enter' || e.target.tagName === 'TEXTAREA' || !e.target.closest || !e.target.closest('#vLines')) return;
+        if (e.ctrlKey || e.metaKey) return;
+        e.preventDefault(); const ins = $$('#vLines input:not([type=checkbox]),#vLines select', dlg), i = ins.indexOf(e.target);
+        if (i >= 0 && i < ins.length - 1) ins[i + 1].focus(); else $('#addLine', dlg).click();
+      });
       $('#addLine', dlg).onclick = () => { lines.push({}); draw(dlg); const n = $(`#l_ma_${lines.length - 1}`, dlg); if (n) n.focus(); };
       $('#f_kho', dlg).onchange = () => draw(dlg);
       $('#vLines', dlg).addEventListener('change', e => {   // đổi mã hàng → vẽ lại dòng (ĐVT, serial); hoãn để không đụng sự kiện blur, giữ con trỏ ở ô kế tiếp
@@ -552,28 +562,43 @@
   }
 
   // ---------- in chứng từ (đủ nội dung Điều 16 Luật Kế toán 88/2015) ----------
-  function printVoucher(p, L) {
-    const t = QStock.TYPES[p.loai] || {}, kk = p.loai === 'KIEM_KE', nhapKho = t.dir > 0 || (p.loai === 'DAO' && false);
-    const title = kk ? 'BIÊN BẢN KIỂM KÊ VẬT TƯ, HÀNG HÓA' : p.loai === 'CHUYEN_KHO' ? 'PHIẾU XUẤT KHO KIÊM VẬN CHUYỂN NỘI BỘ' : p.loai === 'DAO' ? 'PHIẾU ĐẢO (ĐIỀU CHỈNH GIẢM CHỨNG TỪ ' + p.phieuGoc + ')' : nhapKho ? 'PHIẾU NHẬP KHO' : 'PHIẾU XUẤT KHO';
+  async function printVoucher(p, L) {
+    let base = p, sign = 1;
+    if (p.loai === 'DAO') {   // phiếu đảo: in theo mẫu của phiếu gốc, số lượng & tiền ghi ÂM (phương pháp ghi số âm)
+      let g = (S.data.vouchers || []).find(x => x.soPhieu === p.phieuGoc);
+      if (!g) { const r = await call('voucher.get', { soPhieu: p.phieuGoc }, 2); g = r.ok ? r.data.phieu : null; }
+      if (!g) return toast('Không đọc được phiếu gốc ' + p.phieuGoc);
+      base = { ...p, loai: g.loai, maNCC: g.maNCC, maKH: g.maKH, maCongTrinh: g.maCongTrinh, khoDen: g.khoDen }; sign = -1;
+    }
+    const t = QStock.TYPES[base.loai] || {}, kk = base.loai === 'KIEM_KE', ck = base.loai === 'CHUYEN_KHO', nhapKho = t.dir > 0, priced = t.cost === 'PRICE';
+    const title = (kk ? 'BIÊN BẢN KIỂM KÊ VẬT TƯ, HÀNG HÓA' : ck ? 'PHIẾU ĐIỀU CHUYỂN KHO (NỘI BỘ)' : nhapKho ? 'PHIẾU NHẬP KHO' : 'PHIẾU XUẤT KHO') + (sign < 0 ? ' (ĐẢO)' : '');
     const mau = kk ? 'Mẫu số 05 - VT' : nhapKho ? 'Mẫu số 01 - VT' : 'Mẫu số 02 - VT';
-    const showMoney = isQT(), tot = L.reduce((a, l) => a + (Number(t.cost === 'PRICE' ? l.thanhTien : l.giaTriKho) || 0), 0);
+    const showMoney = isQT(), sg = n => n === '' || n === undefined || n === null ? '' : sign * Number(n);
+    const amt = l => Number(priced ? l.thanhTien : l.giaTriKho) || 0, tot = sign * L.reduce((a, l) => a + amt(l), 0);
     const d0 = p.ngay.split('-'), ngay = `Ngày ${d0[2]} tháng ${d0[1]} năm ${d0[0]}`;
-    const who = p.maNCC ? supName(p.maNCC) : p.maKH ? custName(p.maKH) : '';
-    const rows = L.map((l, i) => { const it = itemOf(l.maHang), price = t.cost === 'PRICE' ? l.donGia : (Number(l.giaTriKho) && Number(l.soLuong) ? Number(l.giaTriKho) / Number(l.soLuong) : '');
-      return kk ? `<tr><td>${i + 1}</td><td>${esc(it.ten)}</td><td>${esc(l.maHang)}</td><td>${esc(it.dvt)}</td><td class="n">${num(l.slSoSach)}</td><td class="n">${num(l.slThucTe)}</td><td class="n">${num(Number(l.slThucTe) - Number(l.slSoSach))}</td><td class="n">${showMoney ? money(l.giaTriKho) : ''}</td></tr>`
-        : `<tr><td>${i + 1}</td><td>${esc(it.ten)}${l.serials && l.serials.length ? `<br><small>Serial: ${l.serials.map(esc).join(', ')}</small>` : ''}</td><td>${esc(l.maHang)}</td><td>${esc(it.dvt)}</td><td class="n">${num(l.soLuong)}</td><td class="n">${num(l.soLuong)}</td><td class="n">${showMoney && price !== '' ? num(Math.round(price)) : ''}</td><td class="n">${showMoney ? num(t.cost === 'PRICE' ? l.thanhTien : l.giaTriKho) : ''}</td></tr>`; }).join('');
-    const host = document.createElement('div'); host.id = 'printArea';
-    host.innerHTML = `<div class="pv"><div class="pv-h"><div><b>${esc(S.co.tenDay || S.co.ten)}</b><br>Bộ phận: Kho</div><div class="pv-r"><b>${mau}</b></div></div>
+    const partner = base.maNCC ? (d => d && { ten: d.ten, dc: d.diaChi, mst: d.mst })((S.data.suppliers || []).find(x => x.maNCC === base.maNCC))
+      : base.maKH ? (d => d && { ten: d.ten, dc: d.diaChi, mst: d.mst })((S.data.customers || []).find(x => x.maKH === base.maKH)) : null;
+    const price = l => priced ? Number(l.donGia) : (Number(l.giaTriKho) && Number(l.soLuong) ? Number(l.giaTriKho) / Number(l.soLuong) : '');
+    const p2 = n => n === '' ? '' : Number(n).toLocaleString('vi-VN', { maximumFractionDigits: 2 });
+    const rows = L.map((l, i) => { const it = itemOf(l.maHang);
+      if (kk) { const dd = Number(l.slThucTe) - Number(l.slSoSach), u = price(l) || Number(it.giaVon) || '';
+        return `<tr><td>${i + 1}</td><td>${esc(it.ten)}</td><td>${esc(l.maHang)}</td><td>${esc(it.dvt)}</td><td class="n">${showMoney ? p2(u) : ''}</td><td class="n">${num(sg(l.slSoSach))}</td><td class="n">${num(sg(l.slThucTe))}</td><td class="n">${dd > 0 ? num(sg(dd)) : ''}</td><td class="n">${dd < 0 ? num(sg(-dd)) : ''}</td><td class="n">${showMoney ? num(sg(l.giaTriKho)) : ''}</td></tr>`; }
+      const ct = l.dvt && l.dvt !== it.dvt ? `${num(sg(l.soLuongCT))} ${esc(l.dvt)}` : num(sg(l.soLuongCT !== '' && l.soLuongCT !== undefined ? l.soLuongCT : l.soLuong));
+      return `<tr><td>${i + 1}</td><td>${esc(it.ten)}${l.serials && l.serials.length ? `<br><small>Serial: ${l.serials.map(esc).join(', ')}</small>` : ''}</td><td>${esc(l.maHang)}</td><td>${esc(it.dvt)}</td><td class="n">${ct}</td><td class="n">${num(sg(l.soLuong))}</td><td class="n">${showMoney ? p2(price(l)) : ''}</td><td class="n">${showMoney ? num(sg(amt(l))) : ''}</td></tr>`; }).join('');
+    const co = S.co, host = document.createElement('div'); host.id = 'printArea';
+    host.innerHTML = `<div class="pv"><div class="pv-h"><div><b>${esc(co.tenDay || co.ten)}</b><br>${esc(co.diaChi || '')}${co.mst ? '<br>MST: ' + esc(co.mst) : ''}<br>Bộ phận: Kho</div><div class="pv-r"><b>${mau}</b></div></div>
       <h1>${title}</h1><p class="c">${ngay}<br>Số: <b>${esc(p.soPhieu)}</b></p>
-      ${kk ? `<p>Kho kiểm kê: ${esc(khoName(p.kho))}. ${esc(p.lyDo || '')}</p>`
-        : `<p>- Họ và tên người ${nhapKho ? 'giao' : 'nhận'}: ${esc(p.nguoiGiaoNhan || '')} ${who ? '(' + esc(who) + ')' : ''}<br>- ${p.loai === 'DAO' ? 'Lý do đảo' : 'Lý do ' + (nhapKho ? 'nhập' : 'xuất') + ' kho'}: ${esc(p.lyDo || LOAI[p.loai])}${p.maCongTrinh ? ' — công trình ' + esc(projName(p.maCongTrinh)) : ''}<br>
-          - Theo chứng từ số: ${esc(p.soCTGoc || '……')} ngày ${esc(p.ngayCTGoc || '……')}<br>- ${nhapKho ? 'Nhập' : 'Xuất'} tại kho: ${esc(khoName(p.kho))}${p.khoDen ? ' → đến kho: ' + esc(khoName(p.khoDen)) : ''}</p>`}
-      <table class="pv-t"><thead>${kk ? '<tr><th>STT</th><th>Tên vật tư, hàng hóa</th><th>Mã số</th><th>ĐVT</th><th>SL sổ sách</th><th>SL thực tế</th><th>Chênh lệch</th><th>Giá trị chênh lệch</th></tr>'
+      ${sign < 0 ? `<p><b>Đảo chứng từ số ${esc(p.phieuGoc)} ngày ${esc(p.ngayCTGoc || '')}</b> — lý do: ${esc(p.lyDo || '')}</p>` : ''}
+      ${kk ? `<p>- Thời điểm kiểm kê: ${ngay.toLowerCase()} · Kho: ${esc(khoName(base.kho))}<br>- Ban kiểm kê: ……………………………………………………………<br>- ${esc(p.lyDo || 'Đã kiểm kê các mặt hàng dưới đây')}</p>`
+        : `<p>- Họ và tên người ${nhapKho ? 'giao' : 'nhận'}: ${esc(p.nguoiGiaoNhan || '……………………')}${partner ? `<br>- Đơn vị: ${esc(partner.ten)}${partner.mst ? ' · MST ' + esc(partner.mst) : ''}${partner.dc ? '<br>- Địa chỉ: ' + esc(partner.dc) : ''}` : ''}
+          <br>- Lý do ${nhapKho ? 'nhập' : 'xuất'} kho: ${esc(sign < 0 ? LOAI[base.loai] + ' (đảo)' : (p.lyDo || LOAI[base.loai]))}${base.maCongTrinh ? ' — công trình ' + esc(projName(base.maCongTrinh)) : ''}
+          <br>- Theo chứng từ số: ${esc((sign < 0 ? '' : p.soCTGoc) || '……')} ngày ${esc((sign < 0 ? '' : p.ngayCTGoc) || '……')}<br>- ${ck ? 'Từ kho: ' + esc(khoName(base.kho)) + ' → đến kho: ' + esc(khoName(base.khoDen)) : (nhapKho ? 'Nhập' : 'Xuất') + ' tại kho: ' + esc(khoName(base.kho))}</p>`}
+      <table class="pv-t"><thead>${kk ? '<tr><th rowspan="2">STT</th><th rowspan="2">Tên vật tư, hàng hóa</th><th rowspan="2">Mã số</th><th rowspan="2">ĐVT</th><th rowspan="2">Đơn giá</th><th colspan="2">Số lượng</th><th colspan="2">Chênh lệch</th><th rowspan="2">Giá trị chênh lệch</th></tr><tr><th>Theo sổ sách</th><th>Theo kiểm kê</th><th>Thừa</th><th>Thiếu</th></tr>'
         : `<tr><th rowspan="2">STT</th><th rowspan="2">Tên, nhãn hiệu, quy cách vật tư, hàng hóa</th><th rowspan="2">Mã số</th><th rowspan="2">ĐVT</th><th colspan="2">Số lượng</th><th rowspan="2">Đơn giá</th><th rowspan="2">Thành tiền</th></tr><tr><th>Theo chứng từ</th><th>Thực ${nhapKho ? 'nhập' : 'xuất'}</th></tr>`}</thead>
-        <tbody>${rows}<tr><td></td><td><b>Cộng</b></td><td></td><td></td><td></td><td></td><td></td><td class="n"><b>${showMoney ? num(tot) : ''}</b></td></tr></tbody></table>
-      <p>- Tổng số tiền (viết bằng chữ): ${showMoney ? '<i>' + esc(QWords.money(tot)) + '</i>' : '……………………………………………'}<br>- Số chứng từ gốc kèm theo: ${esc(p.soCTGoc || '……')}</p>
+        <tbody>${rows}<tr><td></td><td><b>Cộng</b></td><td></td><td></td><td></td><td></td><td></td>${kk ? '<td></td><td></td>' : ''}<td class="n"><b>${showMoney ? num(tot) : ''}</b></td></tr></tbody></table>
+      ${kk ? '' : `<p>- Tổng số tiền (viết bằng chữ): ${showMoney ? '<i>' + esc(QWords.money(tot)) + '</i>' : '……………………………………………'}<br>- Số chứng từ gốc kèm theo: ${esc((sign < 0 ? p.phieuGoc : p.soCTGoc) || '……')}</p>`}
       <p class="pv-date">${ngay}</p>
-      <div class="pv-sign">${(kk ? ['Người lập', 'Thủ kho', 'Kế toán trưởng', 'Giám đốc'] : ['Người lập phiếu', nhapKho ? 'Người giao hàng' : 'Người nhận hàng', 'Thủ kho', 'Kế toán trưởng', 'Giám đốc']).map(s => `<div><b>${s}</b><br><i>(Ký, họ tên)</i></div>`).join('')}</div>
+      <div class="pv-sign">${(kk ? ['Thủ kho', 'Kế toán trưởng', 'Trưởng ban kiểm kê', 'Giám đốc'] : ['Người lập phiếu', nhapKho ? 'Người giao hàng' : 'Người nhận hàng', 'Thủ kho', 'Kế toán trưởng', 'Giám đốc']).map(x => `<div><b>${x}</b><br><i>(Ký, họ tên)</i></div>`).join('')}</div>
       <p class="pv-foot">In từ QLHH v${VER} · người lập ${esc(p.nguoiTao)}${showMoney ? '' : ' · bản in không gồm đơn giá (vai trò ' + esc(ROLE[S.user.vaiTro]) + ')'}</p></div>`;
     document.body.appendChild(host); document.body.classList.add('printing');
     const done = () => { document.body.classList.remove('printing'); host.remove(); window.removeEventListener('afterprint', done); };
@@ -669,21 +694,24 @@
     const back = document.activeElement;
     d.innerHTML = `<form method="dialog" novalidate><header><h2>${title}</h2><button class="btn ghost iconbtn" type="button" data-x aria-label="Đóng">${ic('x')}</button></header><div class="body">${body}<div class="dlgmsg" id="dlgMsg" role="alert"></div></div>${onSubmit ? `<footer><button class="btn" type="button" data-x>Huỷ</button><button class="btn pri" id="dlgOk" type="submit">${submitText}</button></footer>` : ''}</form>`;
     const f = $('form', d);
-    $$('[data-x]', d).forEach(b => b.onclick = () => d.close());
+    d._rid = null; d._guard = null;   // 1 requestId cho cả vòng đời hộp thoại: bấm Lưu lại sau khi mất phản hồi KHÔNG tạo phiếu thứ 2
+    const tryClose = () => { if (d._guard && d._guard() && !confirm('Bỏ phiếu đang nhập dở?')) return; d.close(); };
+    $$('[data-x]', d).forEach(b => b.onclick = tryClose);
+    d.oncancel = e => { if (d._guard && d._guard()) { e.preventDefault(); tryClose(); } };
     d.onclose = () => { if (back && back.isConnected && back.focus) back.focus(); };
     f.onsubmit = async e => {
       e.preventDefault(); if (!onSubmit) return d.close();
       const ok = $('#dlgOk'); if (ok.disabled) return; ok.classList.add('busy'); ok.disabled = true; $('#dlgMsg', d).textContent = '';
       try { const done = await onSubmit(Object.fromEntries(new FormData(f)), d); if (done) d.close(); } finally { ok.classList.remove('busy'); ok.disabled = false; }
     };
-    d.onclick = e => { if (e.target === d) d.close(); };
+    d.onclick = e => { if (e.target === d) tryClose(); };
     if (after) after(d);
     d.showModal();
     const first = $('.body input:not([type=hidden]):not([readonly]),.body select,.body textarea', d); if (first && matchMedia('(pointer:fine)').matches) first.focus();
     $$('.body .in', d).forEach(i => { const e = $('#e_' + i.name, d); if (e) i.setAttribute('aria-describedby', e.id); });
     return d;
   }
-  const fld = (name, label, val = '', o = {}) => `<label class="f" for="f_${name}">${label}${o.req ? ' *' : ''}</label>${o.type === 'textarea' ? `<textarea class="in" id="f_${name}" name="${name}" ${o.ro ? 'readonly' : ''}>${esc(val)}</textarea>` : o.opts ? `<select class="in" id="f_${name}" name="${name}">${o.opts.map(([k, t]) => `<option value="${esc(k)}" ${String(k) === String(val) ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>` : `<input class="in" id="f_${name}" name="${name}" value="${esc(val)}" ${o.type ? `type="${o.type}"` : ''} ${o.ro ? 'readonly' : ''} ${o.im ? `inputmode="${o.im}"` : ''} autocomplete="off">`}<div class="err" id="e_${name}"></div>`;
+  const fld = (name, label, val = '', o = {}) => `<label class="f" for="f_${name}">${label}${o.req ? ' *' : ''}</label>${o.type === 'textarea' ? `<textarea class="in" id="f_${name}" name="${name}" ${o.ro ? 'readonly' : ''}>${esc(val)}</textarea>` : o.opts ? `<select class="in" id="f_${name}" name="${name}">${o.opts.map(([k, t]) => `<option value="${esc(k)}" ${String(k) === String(val) ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>` : `<input class="in" id="f_${name}" name="${name}" value="${esc(val)}" ${o.type ? `type="${o.type}"` : ''} ${o.max ? `max="${esc(o.max)}"` : ''} ${o.list ? `list="${esc(o.list)}"` : ''} ${o.ro ? 'readonly' : ''} ${o.im ? `inputmode="${o.im}"` : ''} autocomplete="off">`}<div class="err" id="e_${name}"></div>`;
   function showErrors(d, errs) {
     $$('.err', d).forEach(e => e.textContent = ''); $$('.in', d).forEach(i => i.removeAttribute('aria-invalid'));
     let first = null;
@@ -694,7 +722,7 @@
   function dlgMsg(d, m) { const x = $('#dlgMsg', d); if (x) x.textContent = m; else toast(m); }
   async function submit(d, action, body, okMsg) {
     if (S.offline) { dlgMsg(d, 'Đang ngoại tuyến — chưa lưu được. Dữ liệu trong ô vẫn giữ nguyên.'); return false; }
-    const r = await write(action, body);
+    const r = await write(action, { ...body, requestId: d._rid || (d._rid = rid()) });
     if (!r.ok) { if (r.fields && !Array.isArray(r.fields)) showErrors(d, r.fields); dlgMsg(d, 'Chưa lưu: ' + (r.error || r.code) + (r.code === 'NETWORK' ? ' — kiểm tra mạng rồi bấm Lưu lại' : '')); return false; }
     toast(okMsg); await sync(); setTimeout(() => { const h = $('#main .top h1') || $('#main .mtop h1'); if (h && document.activeElement === document.body) { h.tabIndex = -1; h.focus(); } }, 0); return true;
   }

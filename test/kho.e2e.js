@@ -8,7 +8,7 @@ const srv = http.createServer((q, r) => {
   fs.readFile(f, (e, b) => { if (e) { r.writeHead(404); return r.end(); } const ext = path.extname(f); r.writeHead(200, { 'content-type': { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css', '.png': 'image/png' }[ext] || 'application/json' }); r.end(b); });
 }).listen(8767);
 const BASE = 'http://localhost:8767/';
-const fails = []; const ok = (c, m) => { console.log((c ? '✓ ' : '✗ ') + m); if (!c) fails.push(m); };
+let drop = 0; const fails = []; const ok = (c, m) => { console.log((c ? '✓ ' : '✗ ') + m); if (!c) fails.push(m); };
 // dữ liệu sẵn qua API (danh mục đã test ở đợt ①)
 const s0 = api.login(); const W = (action, o) => { const r = api.post({ action, session: s0, requestId: rid(), ...o }); if (!r.ok) throw new Error(action + ' ' + JSON.stringify(r)); };
 W('item.upsert', { isNew: true, item: { maHang: 'LOGO', ten: 'Siemens LOGO! 230RC', dvt: 'bộ', hang: 'Siemens', quanLySerial: true } });
@@ -20,7 +20,11 @@ async function page(b, vp, email = 'maivulam2020@gmail.com', scheme = 'light') {
   const ctx = await b.newContext({ viewport: vp, colorScheme: scheme, acceptDownloads: true, serviceWorkers: 'block' });
   const p = await ctx.newPage();
   p.on('pageerror', e => { console.log('JS lỗi: ' + e.message); fails.push('JS lỗi: ' + e.message); });
-  await p.route('https://script.google.com/**', async rt => rt.fulfill({ contentType: 'application/json', body: api.doPost({ postData: { contents: rt.request().postData() } }).t }));
+  await p.route('https://script.google.com/**', async rt => {
+    const body = api.doPost({ postData: { contents: rt.request().postData() } }).t;   // máy chủ VẪN ghi
+    if (drop > 0 && JSON.parse(rt.request().postData()).action === 'voucher.create') { drop--; return rt.abort(); }   // nhưng phản hồi bị mất
+    await rt.fulfill({ contentType: 'application/json', body });
+  });
   await p.route('https://accounts.google.com/**', async rt => { const u = new URL(rt.request().url()); api.st.email = email; api.st.nonce = u.searchParams.get('nonce'); await rt.fulfill({ status: 302, headers: { location: BASE + '#id_token=tok-' + Math.random() + '&state=LAVIPCO' } }); });
   await p.goto(BASE); await p.waitForSelector('#loginBtn'); await p.click('#loginBtn');
   await p.waitForFunction(() => window.QLHH_DEBUG && window.QLHH_DEBUG.data, null, { timeout: 10000 });
@@ -76,6 +80,30 @@ const toast = p => p.$$eval('.toast', ts => ts.map(t => t.textContent).join(' | 
   await p.evaluate(() => { document.body.classList.remove('printing'); const x = document.querySelector('#printArea'); if (x) x.remove(); });
   await p.click('#vRev'); await fill(p, { lyDo: 'Xuất nhầm công trình' }); await p.click('#dlgOk'); ok(await closed(p), 'QT đảo phiếu xuất');
   await p.waitForTimeout(200); ok((await p.textContent('#main')).includes('Đã đảo') && (await p.textContent('#main')).includes('DA-'), 'phiếu gốc "Đã đảo" + phiếu đảo DA-');
+  await p.click('[data-so^="DA-"]'); await p.waitForSelector('#vPrint');
+  await p.evaluate(() => { window.print = () => { window.__printed = document.querySelector('#printArea').innerText; }; });
+  await p.click('#vPrint'); await p.waitForTimeout(300);
+  const pd = await p.evaluate(() => window.__printed || '');
+  ok(/PHIẾU XUẤT KHO \(ĐẢO\)/.test(pd) && /Mẫu số 02 - VT/.test(pd) && /Đảo chứng từ số PX-/.test(pd) && /-7/.test(pd) && /Âm/.test(pd), 'in phiếu đảo: mẫu phiếu gốc, số âm, ghi rõ chứng từ bị đảo');
+  ok(/Địa chỉ|Số 63\/23A/.test(pd), 'bản in có địa chỉ đơn vị');
+  await p.evaluate(() => { const x = document.querySelector('#printArea'); if (x) x.remove(); document.body.classList.remove('printing'); }); await p.keyboard.press('Escape');
+  // trả NCC từ phiếu nhập gốc
+  await p.click('[data-so^="PN-"]'); await p.waitForSelector('#vTn'); await p.click('#vTn');
+  await line(p, 0, { soLuongCT: 1 }); await p.click('#dlgOk'); const okTn = await closed(p);
+  if (!okTn) { console.log('  msg:', await msg(p)); p.once('dialog', dg => dg.accept()); await p.keyboard.press('Escape'); }
+  ok(okTn, 'trả NCC từ phiếu nhập gốc (tính theo giá gốc)');
+  // mất phản hồi khi lưu → bấm Lưu lại → chỉ 1 phiếu
+  const nPh = api.sheets.Phieu.d.length;
+  await p.click('#newV'); await p.click('[data-t="XUAT_CONG_TRINH"]'); await fill(p, { maCongTrinh: 'PDG' }); await line(p, 0, { maHang: 'CB40', soLuongCT: 1 });
+  drop = 2; await p.click('#dlgOk'); await p.waitForTimeout(2500);
+  ok(await p.evaluate(() => document.querySelector('#dlg').open), 'mất phản hồi → hộp thoại còn mở, báo lỗi');
+  await p.evaluate(() => window.dispatchEvent(new Event('online'))); await p.waitForTimeout(300);
+  await p.click('#dlgOk'); ok(await closed(p), 'bấm Lưu lại khi có mạng');
+  ok(api.sheets.Phieu.d.length === nPh + 1, 'chỉ 1 phiếu được tạo (cùng requestId)');
+  await p.click('#newV'); await p.click('[data-t="XUAT_CONG_TRINH"]'); await line(p, 0, { maHang: 'CB40', soLuongCT: 1 });
+  p.once('dialog', dg => dg.dismiss()); await p.keyboard.press('Escape'); await p.waitForTimeout(200);
+  ok(await p.evaluate(() => document.querySelector('#dlg').open), 'Esc khi phiếu đang nhập dở → hỏi lại, bấm Huỷ thì giữ phiếu');
+  p.once('dialog', dg => dg.accept()); await p.keyboard.press('Escape'); ok(await closed(p), 'đồng ý bỏ → đóng');
   // kiểm kê
   await p.goto(BASE + '#/kho'); await p.click('[data-km="CB40"]'); await p.click('#kKK'); await line(p, 0, { slThucTe: 9 });
   await p.click('#dlgOk'); ok(await closed(p), 'kiểm kê từ chi tiết tồn'); await p.waitForTimeout(200);

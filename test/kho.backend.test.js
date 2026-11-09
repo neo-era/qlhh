@@ -169,3 +169,70 @@ test('kiểm kê: SL sổ sách lấy từ máy chủ; kho hàng lỗi không nh
   assert.equal(V({ loai: 'NHAP_TP', ngay: '2026-10-02', kho: 'KHO', lines: [{ maHang: 'CB40', soLuongCT: 1 }] }).code, 'VALIDATION');
   assert.equal(V({ loai: 'XUAT_BAN', ngay: '2026-10-02', kho: 'KHO', maKH: 'KHONGCO', maCongTrinh: 'PDG', lines: [{ maHang: 'CB40', soLuongCT: 1 }] }).code, 'VALIDATION');
 });
+
+// ===== ca xấu chuyên gia bảo mật/QA + kế toán tái hiện (duyệt v0.2 vòng 1) =====
+test('B2 lỗi sau khi phiếu đã HOAN_TAT (trước khi ghi Request) → gửi lại cùng requestId vẫn chỉ 1 phiếu', () => {
+  const { a, s, V } = shop(); V(nhap('2026-10-01', [{ maHang: 'CB40', soLuongCT: 10, gia: 1000 }]));
+  const nk = a.sheets.NhatKy, orig = nk.getRange; let once = true;
+  nk.getRange = function (...x) { if (once) { once = false; nk.getRange = orig; throw new Error('mất kết nối Sheet'); } return orig.apply(this, x); };
+  const id = rid(), v = { loai: 'XUAT_BAN', ngay: '2026-10-02', kho: 'KHO', maKH: 'TN', maCongTrinh: 'PDG', lines: [{ maHang: 'CB40', soLuongCT: 1 }] };
+  assert.equal(a.post({ action: 'voucher.create', session: s, requestId: id, voucher: v }).code, 'INTERNAL');
+  const r2 = a.post({ action: 'voucher.create', session: s, requestId: id, voucher: v });
+  assert.equal(r2.ok, true, JSON.stringify(r2));
+  assert.equal(a.sheets.Phieu.d.filter(r => String(r[0]).startsWith('PX')).length, 1);
+});
+test('B3 ngày phiếu / ngày chứng từ gốc ở tương lai → từ chối', () => {
+  const { V } = shop();
+  assert.equal(V(nhap('2099-01-01', [{ maHang: 'CB40', soLuongCT: 1, gia: 1 }])).code, 'VALIDATION');
+  assert.equal(V(nhap('2026-10-01', [{ maHang: 'CB40', soLuongCT: 1, gia: 1 }], { ngayCTGoc: '2099-01-01' })).code, 'VALIDATION');
+});
+test('B4 giá 1e20 / tiền vượt số nguyên an toàn → từ chối', () => {
+  const { V } = shop();
+  assert.equal(V(nhap('2026-10-01', [{ maHang: 'CB40', soLuongCT: 1, gia: 1e20 }])).code, 'VALIDATION');
+  assert.equal(V(nhap('2026-10-01', [{ maHang: 'CB40', soLuongCT: 1e9, gia: 1e12 }])).code, 'VALIDATION');
+});
+test('B5 serial: ≤ 60 ký tự, đúng mẫu; hàng không quản lý serial thì bỏ serial; kiểu dữ liệu lạ không gây lỗi máy chủ', () => {
+  const { a, s, V } = shop();
+  assert.equal(V(nhap('2026-10-01', [{ maHang: 'LOGO', soLuongCT: 1, gia: 1, serials: ['X'.repeat(100000)] }])).code, 'VALIDATION');
+  assert.equal(V(nhap('2026-10-01', [{ maHang: 'LOGO', soLuongCT: 1, gia: 1, serials: ['<img src=x>'] }])).code, 'VALIDATION');
+  const r = V(nhap('2026-10-01', [{ maHang: 'CB40', soLuongCT: 2, gia: 1, serials: new Array(1000).fill('A') }]));
+  assert.equal(r.ok, true);
+  assert.equal(a.sheets.ChiTietPhieu.d.slice(1).find(x => x[0] === r.data.soPhieu)[13], '');
+  assert.equal(V(nhap('2026-10-01', [{ maHang: { toString: null }, soLuongCT: 1, gia: 1 }])).code, 'VALIDATION');
+  assert.equal(V(nhap('2026-10-01', [{ maHang: 'CB40', dvt: { a: 1 }, soLuongCT: 1, gia: 1 }])).code, 'VALIDATION');
+  assert.equal(V({ loai: 'NHAP_MUA', ngay: '2026-10-01', kho: 'KHO', maNCC: 'NCC1', lines: [null] }).code, 'VALIDATION');
+});
+test('tồn đầu kỳ chỉ Quản trị; phieuGoc chỉ giữ ở phiếu trả', () => {
+  const { a, s, V } = shop();
+  assert.equal(V({ loai: 'TON_DAU', ngay: '2026-01-01', kho: 'KHO', lines: [{ maHang: 'CB40', soLuongCT: 1, gia: 1 }] }, a.login(NV)).code, 'FORBIDDEN');
+  const r = V(nhap('2026-10-01', [{ maHang: 'CB40', soLuongCT: 1, gia: 1 }], { phieuGoc: 'PX-2026-99999' }));
+  assert.equal(r.ok, true); assert.equal(pull(a, s).data.vouchers[0].phieuGoc, '');
+});
+test('X2 qua máy chủ: phiếu đảo lưu hieuLuc; khoá sổ sau đó + tính lại tồn không đổi giá vốn kỳ đã khoá', () => {
+  const { a, s, V } = shop();
+  V(nhap('2026-10-01', [{ maHang: 'CB40', soLuongCT: 100, gia: 100000 }]));
+  const n2 = V(nhap('2026-10-02', [{ maHang: 'CB40', soLuongCT: 100, gia: 140000 }])).data.soPhieu;
+  const x = V({ loai: 'XUAT_BAN', ngay: '2026-10-05', kho: 'KHO', maKH: 'TN', maCongTrinh: 'PDG', lines: [{ maHang: 'CB40', soLuongCT: 50 }] }).data.soPhieu;
+  assert.equal(a.post({ action: 'voucher.reverse', session: s, requestId: rid(), phieuGoc: n2, ngay: '2026-10-20', lyDo: 'sai' }).ok, true);
+  assert.equal(pull(a, s).data.vouchers.find(p => p.loai === 'DAO').hieuLuc, 'GOC');
+  assert.equal(a.post({ action: 'period.lock', session: s, requestId: rid(), ngay: '2026-10-31' }).ok, true);
+  const rb = a.post({ action: 'stock.rebuild', session: s, requestId: rid() }); assert.equal(rb.ok, true, JSON.stringify(rb)); assert.equal(rb.data.tinhLai, 0);
+  assert.equal(a.post({ action: 'voucher.get', session: s, soPhieu: x }).data.lines[0].giaTriKho, 5000000);
+});
+test('X9 qua máy chủ: trả NCC từ kho thường cần phiếu nhập gốc cùng NCC, tính theo giá gốc', () => {
+  const { a, s, W, V } = shop();
+  W('supplier.upsert', { isNew: true, supplier: { maNCC: 'NCC2', ten: 'NCC khác' } });
+  V(nhap('2026-10-01', [{ maHang: 'CB40', soLuongCT: 10, gia: 100 }]));
+  const n2 = V(nhap('2026-10-02', [{ maHang: 'CB40', soLuongCT: 10, gia: 200 }])).data.soPhieu;
+  assert.equal(V({ loai: 'TRA_NCC', ngay: '2026-10-03', kho: 'KHO', maNCC: 'NCC1', lines: [{ maHang: 'CB40', soLuongCT: 1 }] }).code, 'VALIDATION');
+  assert.equal(V({ loai: 'TRA_NCC', ngay: '2026-10-03', kho: 'KHO', maNCC: 'NCC2', phieuGoc: n2, lines: [{ maHang: 'CB40', soLuongCT: 1 }] }).code, 'VALIDATION', 'khác NCC phiếu gốc');
+  const t = V({ loai: 'TRA_NCC', ngay: '2026-10-03', kho: 'KHO', maNCC: 'NCC1', phieuGoc: n2, lines: [{ maHang: 'CB40', soLuongCT: 10 }] });
+  assert.equal(t.ok, true, JSON.stringify(t));
+  const d = pull(a, s); assert.deepEqual([tonOf(d, 'CB40').soLuong, tonOf(d, 'CB40').giaTri], [10, 1000]);
+});
+test('tính lại tồn từ chối khi Sheet phiếu có dòng sai kiểu (tránh ghi đè sai)', () => {
+  const { a, s, V } = shop(); V(nhap('2026-10-01', [{ maHang: 'CB40', soLuongCT: 10, gia: 1000 }]));
+  a.sheets.ChiTietPhieu.d[1][6] = 'mười';
+  const r = a.post({ action: 'stock.rebuild', session: s, requestId: rid() });
+  assert.equal(r.code, 'VALIDATION'); assert.match(r.error, /ChiTietPhieu/);
+});
