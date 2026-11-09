@@ -10,7 +10,18 @@ var QSchema=(function(){
     NhatKy:{cols:['thoiGian','email','action','doiTuong','id','truoc','sau','requestId'],text:['id','requestId']},
     Request:{key:'requestId',cols:['requestId','email','thoiGian','ketQua'],text:['requestId','email']},
     GopY:{key:'id',cols:['id','thoiGian','email','sao','loai','noiDung','banDung','thietBi','manHinh','trangThai','note'],num:['sao'],text:['id']},
-    CauHinh:{key:'key',cols:['key','value'],text:['key']}
+    CauHinh:{key:'key',cols:['key','value'],text:['key']},
+    Kho:{key:'maKho',cols:['maKho','ten','diaChi','loai','trangThai'],text:['maKho']},
+    QuyDoiDVT:{key:'id',cols:['id','maHang','dvtPhu','heSo'],num:['heSo'],text:['id','maHang']},
+    KhachHang:{key:'maKH',cols:['maKH','ten','loaiKH','mst','diaChi','lienHe','dienThoai','email','cheDoBHThayThe','trangThai'],text:['maKH','mst','dienThoai']},
+    CongTrinh:{key:'maCongTrinh',cols:['maCongTrinh','ten','maKH','diaChi','chuDauTu','ngayBatDau','ngayNghiemThu','trangThai'],text:['maCongTrinh','maKH','ngayBatDau','ngayNghiemThu']},
+    Phieu:{key:'soPhieu',cols:['soPhieu','stt','loai','ngay','kho','khoDen','maNCC','maKH','maCongTrinh','phieuGoc','daDao','trangThai','nguoiGiaoNhan','lyDo','soCTGoc','ngayCTGoc','tongTien','ghiChu','nguoiTao','thoiGian','requestId'],
+      num:['stt','tongTien'],bool:['daDao'],text:['soPhieu','ngay','kho','khoDen','maNCC','maKH','maCongTrinh','phieuGoc','soCTGoc','ngayCTGoc','requestId']},
+    ChiTietPhieu:{cols:['soPhieu','dong','maHang','dvt','soLuongCT','heSo','soLuong','donGia','thanhTien','giaTriKho','slSoSach','slThucTe','dongGoc','serials'],
+      num:['dong','soLuongCT','heSo','soLuong','donGia','thanhTien','giaTriKho','slSoSach','slThucTe','dongGoc'],text:['soPhieu','maHang']},
+    Serial:{key:'key',cols:['key','hang','serial','maHang','trangThai','kho','capNhat'],text:['key','hang','serial','maHang','kho']},
+    LichSuSerial:{cols:['soPhieu','key','maHang','from','to','khoTu','khoDen','thoiGian'],text:['soPhieu','key','maHang','khoTu','khoDen']},
+    TonKho:{cols:['maHang','kho','soLuong','giaTri','ngayCuoi','sttCuoi'],num:['soLuong','giaTri','sttCuoi'],text:['maHang','kho','ngayCuoi']}
   };
   function check(heads){
     var errs=[];

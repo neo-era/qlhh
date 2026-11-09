@@ -2,7 +2,7 @@
 // Mô phỏng cả việc Sheets TỰ ĐỔI KIỂU khi ghi: chuỗi số → số, chuỗi ngày → Date (trừ cột định dạng '@').
 const fs = require('fs'), path = require('path'), crypto = require('crypto');
 const ROOT = path.join(__dirname, '..');
-const BACKEND_FILES = ['core/auth.js', 'core/idem.js', 'core/schema.js', 'core/validate.js', 'core/perm.js', 'core/price.js', 'backend/Code.gs'];
+const BACKEND_FILES = ['core/auth.js', 'core/idem.js', 'core/schema.js', 'core/validate.js', 'core/perm.js', 'core/price.js', 'core/stock.js', 'core/serial.js', 'backend/Code.gs', 'backend/Kho.gs'];
 
 function env(tokeninfo, ownerEmail = 'MaiVuLam2020@gmail.com') {
   const sheets = {}, props = {}, cache = {};
@@ -25,7 +25,8 @@ function env(tokeninfo, ownerEmail = 'MaiVuLam2020@gmail.com') {
           getValues: () => Array.from({ length: nr }, (_, i) => Array.from({ length: nc }, (_, j) => { const row = me.d[r - 1 + i] || []; const v = row[c - 1 + j]; return v === undefined ? '' : v; })),
           setValues: v => v.forEach((row, i) => { const t = me.d[r - 1 + i] || (me.d[r - 1 + i] = []); row.forEach((x, j) => t[c - 1 + j] = conv(x, me.txt[c - 1 + j])); }),
           setNumberFormat: f => { for (let j = 0; j < nc; j++) me.txt[c - 1 + j] = f === '@'; },
-          createTextFinder: t => ({ matchEntireCell: () => ({ matchCase: function () { return this; }, findNext: () => { for (let i = r - 1; i < r - 1 + nr; i++) for (let j = c - 1; j < c - 1 + nc; j++) if (me.d[i] && String(me.d[i][j]) === t) return { getRow: () => i + 1 }; return null; } }) })
+          createTextFinder: t => ({ matchEntireCell: () => ({ matchCase: function () { return this; }, findNext: () => { for (let i = r - 1; i < r - 1 + nr; i++) for (let j = c - 1; j < c - 1 + nc; j++) if (me.d[i] && String(me.d[i][j]) === t) return { getRow: () => i + 1 }; return null; } }) }),
+          getNumRows: () => nr
         };
       }
     };

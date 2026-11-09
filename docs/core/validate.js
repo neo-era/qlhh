@@ -72,6 +72,56 @@ var QValidate=(function(){
     v.banDung=s(x.banDung).slice(0,40);v.thietBi=s(x.thietBi).slice(0,200);v.manHinh=s(x.manHinh).slice(0,60);
     return done(v,e);
   }
-  return {item:item,group:group,supplier:supplier,price:price,user:user,feedback:feedback,isoDate:isoDate,ROLES:ROLES,FB:FB};
+  function warehouse(x){
+    if(!obj(x))return bad();var e={},v={maKho:code(x.maKho),ten:s(x.ten),diaChi:s(x.diaChi).slice(0,300)};
+    if(!v.maKho)e.maKho='Nhập mã kho';else if(!CODE.test(v.maKho)||v.maKho==='*')e.maKho='Mã kho không hợp lệ';
+    if(!v.ten)e.ten='Nhập tên kho';
+    v.loai=x.loai==='HANG_LOI'?'HANG_LOI':'THUONG';v.trangThai=x.trangThai==='NGUNG'?'NGUNG':'HOAT_DONG';
+    return done(v,e);
+  }
+  function customer(x){
+    if(!obj(x))return bad();var e={},v={};
+    v.maKH=code(x.maKH);if(!v.maKH)e.maKH='Nhập mã khách hàng';else if(!CODE.test(v.maKH))e.maKH='Mã khách không hợp lệ';
+    v.ten=s(x.ten);if(!v.ten)e.ten='Nhập tên khách hàng';else if(v.ten.length>200)e.ten='Tên ≤ 200 ký tự';
+    v.loaiKH=x.loaiKH==='CA_NHAN'?'CA_NHAN':'DN';
+    v.mst=s(x.mst);if(v.mst&&!MST.test(v.mst))e.mst='MST gồm 10 số hoặc 10 số-3 số';
+    v.email=s(x.email).toLowerCase();if(v.email&&!EMAIL.test(v.email))e.email='Email không hợp lệ';
+    v.dienThoai=s(x.dienThoai);if(v.dienThoai&&!PHONE.test(v.dienThoai))e.dienThoai='Số điện thoại không hợp lệ';
+    v.diaChi=s(x.diaChi).slice(0,300);v.lienHe=s(x.lienHe).slice(0,100);
+    v.cheDoBHThayThe=x.cheDoBHThayThe==='CON_LAI'&&v.loaiKH==='DN'?'CON_LAI':'TINH_LAI';
+    v.trangThai=x.trangThai==='NGUNG'?'NGUNG':'HOAT_DONG';
+    return done(v,e);
+  }
+  function project(x){
+    if(!obj(x))return bad();var e={},v={};
+    v.maCongTrinh=code(x.maCongTrinh);if(!v.maCongTrinh)e.maCongTrinh='Nhập mã công trình';else if(!CODE.test(v.maCongTrinh))e.maCongTrinh='Mã công trình không hợp lệ';
+    v.ten=s(x.ten);if(!v.ten)e.ten='Nhập tên công trình';else if(v.ten.length>300)e.ten='Tên ≤ 300 ký tự';
+    v.maKH=code(x.maKH);v.diaChi=s(x.diaChi).slice(0,300);v.chuDauTu=s(x.chuDauTu).slice(0,200);
+    ['ngayBatDau','ngayNghiemThu'].forEach(function(k){v[k]=s(x[k]);if(v[k]&&!isoDate(v[k]))e[k]='Ngày không hợp lệ';});
+    if(v.ngayBatDau&&v.ngayNghiemThu&&v.ngayNghiemThu<v.ngayBatDau)e.ngayNghiemThu='Nghiệm thu không trước ngày bắt đầu';
+    v.trangThai=x.trangThai==='NGUNG'?'NGUNG':'HOAT_DONG';
+    return done(v,e);
+  }
+  function unit(x){
+    if(!obj(x))return bad();var e={},v={maHang:code(x.maHang),dvtPhu:s(x.dvtPhu)};
+    if(!v.maHang)e.maHang='Chọn mã hàng';if(!v.dvtPhu)e.dvtPhu='Nhập ĐVT phụ';else if(v.dvtPhu.length>20)e.dvtPhu='ĐVT ≤ 20 ký tự';
+    var h=Number(x.heSo);if(!(h>0)||!isFinite(h)||Math.abs(Math.round(h*1000)-h*1000)>1e-6)e.heSo='Hệ số > 0, tối đa 3 số lẻ';else v.heSo=h;
+    return done(v,e);
+  }
+  var VTEXT={nguoiGiaoNhan:100,lyDo:300,soCTGoc:60,ghiChu:500};
+  function voucherHead(x){
+    if(!obj(x))return bad();var e={},v={};
+    v.loai=s(x.loai).toUpperCase();v.ngay=s(x.ngay);if(!isoDate(v.ngay))e.ngay='Ngày phiếu không hợp lệ';
+    ['kho','khoDen','maNCC','maKH','maCongTrinh','phieuGoc'].forEach(function(k){v[k]=code(x[k]);});
+    Object.keys(VTEXT).forEach(function(k){v[k]=s(x[k]);if(v[k].length>VTEXT[k])e[k]='Tối đa '+VTEXT[k]+' ký tự';});
+    v.ngayCTGoc=s(x.ngayCTGoc);if(v.ngayCTGoc&&!isoDate(v.ngayCTGoc))e.ngayCTGoc='Ngày chứng từ gốc không hợp lệ';
+    if(v.loai==='NHAP_MUA'&&!v.maNCC)e.maNCC='Phiếu nhập mua phải chọn nhà cung cấp';
+    if(v.loai==='XUAT_BAN'&&!v.maKH)e.maKH='Phiếu xuất bán phải chọn khách hàng';
+    if((v.loai==='XUAT_BAN'||v.loai==='XUAT_CONG_TRINH')&&!v.maCongTrinh)e.maCongTrinh='Chọn công trình';
+    if(v.loai==='KHACH_TRA'&&!v.phieuGoc)e.phieuGoc='Chọn phiếu xuất gốc';
+    if(!Array.isArray(x.lines))e.lines='Phiếu chưa có dòng hàng';else if(x.lines.length>200)e.lines='Tối đa 200 dòng/phiếu';
+    return done(v,e);
+  }
+  return {warehouse:warehouse,customer:customer,project:project,unit:unit,voucherHead:voucherHead,item:item,group:group,supplier:supplier,price:price,user:user,feedback:feedback,isoDate:isoDate,ROLES:ROLES,FB:FB};
 })();
 if(typeof module!=='undefined')module.exports=QValidate;

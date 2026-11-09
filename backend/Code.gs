@@ -1,7 +1,7 @@
-/** QLHH — máy chủ Apps Script v0.1 (đợt ①: danh mục hàng, nhóm, NCC, giá, người dùng, góp ý).
- *  Dán chung 1 file với lõi: core/auth.js, idem.js, schema.js, validate.js, perm.js, price.js (do build.sh ghép).
+/** QLHH — máy chủ Apps Script v0.2 (đợt ①: danh mục, giá, NCC, người dùng, góp ý · đợt ②: kho — xem backend/Kho.gs).
+ *  Dán chung 1 file với lõi: core/auth.js, idem.js, schema.js, validate.js, perm.js, price.js, stock.js, serial.js (do build.sh ghép).
  *  Thiết kế: QLHH-thiet-ke.md. */
-var VER = '0.1.0';
+var VER = '0.2.0';
 var SESSION_TTL = 10 * 3600;
 
 // ======================= CÀI ĐẶT =======================
@@ -21,6 +21,11 @@ function setup() {
   if (!p.getProperty('SESSION_KEY')) p.setProperty('SESSION_KEY', Utilities.getUuid() + Utilities.getUuid());
   if (!p.getProperty('CLIENT_ID')) p.setProperty('CLIENT_ID', 'DIEN_CLIENT_ID_VAO_DAY');
   if (!p.getProperty('dataVersion')) p.setProperty('dataVersion', '1');
+  var kho = ss.getSheetByName('Kho');
+  if (kho.getLastRow() < 2) {   // 2 kho mặc định: kho chính + kho hàng lỗi (nhận hàng bảo hành, không tính giá vốn)
+    kho.appendRow(QSchema.toRow('Kho', { maKho: 'KHO', ten: 'Kho chính', diaChi: '', loai: 'THUONG', trangThai: 'HOAT_DONG' }));
+    kho.appendRow(QSchema.toRow('Kho', { maKho: 'KHO-LOI', ten: 'Kho hàng lỗi', diaChi: '', loai: 'HANG_LOI', trangThai: 'HOAT_DONG' }));
+  }
   Logger.log('Xong setup v%s. Chủ: %s', VER, me);
 }
 
@@ -60,7 +65,17 @@ var HANDLERS = {
   'user.upsert': function (u, r) { return write(u, r, userUpsert); },
   'feedback.add': function (u, r) { return write(u, r, feedbackAdd); },
   'feedback.update': function (u, r) { return write(u, r, feedbackUpdate); },
-  'admin.schemaCheck': function () { return { errors: schemaErrors(true) }; }
+  'admin.schemaCheck': function () { return { errors: schemaErrors(true) }; },
+  'warehouse.upsert': function (u, r) { return write(u, r, warehouseUpsert); },
+  'customer.upsert': function (u, r) { return write(u, r, customerUpsert); },
+  'project.upsert': function (u, r) { return write(u, r, projectUpsert); },
+  'unit.upsert': function (u, r) { return write(u, r, unitUpsert); },
+  'voucher.create': function (u, r) { return write(u, r, voucherCreate); },
+  'voucher.reverse': function (u, r) { return write(u, r, voucherReverse); },
+  'voucher.get': voucherGet,
+  'period.lock': function (u, r) { return write(u, r, periodLock); },
+  'stock.rebuild': function (u, r) { return write(u, r, stockRebuild); },
+  'report.nxt': reportNxt
 };
 
 function route(req) {
@@ -124,7 +139,8 @@ function findUser(email, fresh) {
 }
 
 // ======================= ĐỌC =======================
-var TABLES = { items: 'HangHoa', groups: 'NhomHang', suppliers: 'NhaCungCap', prices: 'BangGia', users: 'NguoiDung', feedback: 'GopY', logs: 'NhatKy' };
+var TABLES = { items: 'HangHoa', groups: 'NhomHang', suppliers: 'NhaCungCap', prices: 'BangGia', users: 'NguoiDung', feedback: 'GopY', logs: 'NhatKy',
+  warehouses: 'Kho', units: 'QuyDoiDVT', customers: 'KhachHang', projects: 'CongTrinh', vouchers: 'Phieu', stock: 'TonKho', serials: 'Serial' };
 function readTable(n) { return QSchema.toObjects(n, sheet(n).getDataRange().getValues()); }
 function readTail(n, k) {
   var s = sheet(n), last = s.getLastRow(), cols = QSchema.SHEETS[n].cols;
@@ -138,8 +154,11 @@ function syncPull(u, req) {
   var raw = {}, warnings = [];
   Object.keys(TABLES).forEach(function (k) {
     if (k === 'logs' && u.vaiTro !== 'QUAN_TRI') { raw[k] = []; return; }
-    var t = k === 'logs' ? readTail('NhatKy', 300) : readTable(TABLES[k]); raw[k] = t.rows; warnings = warnings.concat(t.warnings);
+    var t = k === 'logs' ? readTail('NhatKy', 300) : k === 'vouchers' ? readTail('Phieu', 500) : readTable(TABLES[k]); raw[k] = t.rows; warnings = warnings.concat(t.warnings);
   });
+  raw.vouchers = raw.vouchers.filter(function (p) { return p.trangThai === 'HOAN_TAT'; });
+  raw.serials = raw.serials.filter(function (x) { return x.trangThai === 'TRONG_KHO' || x.trangThai === 'HANG_LOI'; });   // để chọn serial khi xuất
+  raw.config = { ngayKhoaSo: cfg('ngayKhoaSo') };
   return { version: ver, data: QPerm.filterForRole(u.vaiTro, u.email, raw), warnings: u.vaiTro === 'QUAN_TRI' ? warnings : [], today: today(), me: { email: u.email, vaiTro: u.vaiTro, hoTen: u.hoTen } };
 }
 function schemaErrors(force) {
@@ -168,7 +187,7 @@ function write(u, req, fn) {
     };
     var res = QIdem.once(store, u.email, req.requestId, function () {
       var d = fn(u, req, logs);
-      logs.forEach(function (l) { sheet('NhatKy').appendRow(QSchema.toRow('NhatKy', { thoiGian: nowIso(), email: u.email, action: l.action, doiTuong: l.doiTuong, id: String(l.id), truoc: l.truoc ? JSON.stringify(l.truoc) : '', sau: l.sau ? JSON.stringify(l.sau) : '', requestId: String(req.requestId) })); });
+      appendBlock('NhatKy', logs.map(function (l) { return { thoiGian: nowIso(), email: u.email, action: l.action, doiTuong: l.doiTuong, id: String(l.id), truoc: l.truoc ? JSON.stringify(l.truoc).slice(0, 45000) : '', sau: l.sau ? JSON.stringify(l.sau).slice(0, 45000) : '', requestId: String(req.requestId) }; }));   // 1 lần ghi
       bumpVersion();
       return d;
     });

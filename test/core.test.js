@@ -143,3 +143,35 @@ test('đọc ô: bỏ dấu \' thừa trước = + - @; ô có/không đọc đ�
   assert.deepEqual([r[0].ten, r[0].quyCach, r[0].hang], ['=1+1', '-40°C', "'Nhà A"]);
   assert.deepEqual(r.map(x => x.quanLySerial), [true, true, false]);
 });
+
+// ---------- đợt ②: danh mục kho/khách/công trình/quy đổi + quyền ----------
+test('kho / khách hàng / công trình / quy đổi ĐVT: chuẩn hoá + lỗi từng trường', () => {
+  assert.deepEqual(V.warehouse({ maKho: 'kho-chinh', ten: 'Kho chính' }).value, { maKho: 'KHO-CHINH', ten: 'Kho chính', diaChi: '', loai: 'THUONG', trangThai: 'HOAT_DONG' });
+  assert.ok(V.warehouse({ maKho: '*', ten: 'x' }).errors.maKho, 'mã * dành cho dòng tổng');
+  assert.equal(V.warehouse({ maKho: 'L', ten: 'Lỗi', loai: 'HANG_LOI' }).value.loai, 'HANG_LOI');
+  const kh = V.customer({ maKH: 'tn01', ten: 'CP QLVH Tây Ninh', mst: '3900123456', cheDoBHThayThe: 'CON_LAI' });
+  assert.equal(kh.ok, true); assert.equal(kh.value.cheDoBHThayThe, 'CON_LAI');
+  assert.equal(V.customer({ maKH: 'C1', ten: 'Anh A', loaiKH: 'CA_NHAN', cheDoBHThayThe: 'CON_LAI' }).value.cheDoBHThayThe, 'TINH_LAI', 'khách cá nhân luôn tính lại BH');
+  assert.ok(V.project({ maCongTrinh: 'PDG', ten: 'Hẻm 20', ngayBatDau: '2026-11-01', ngayNghiemThu: '2026-10-01' }).errors.ngayNghiemThu);
+  assert.equal(V.unit({ maHang: 'cap', dvtPhu: 'cuộn', heSo: '500' }).value.heSo, 500);
+  assert.ok(V.unit({ maHang: 'CAP', dvtPhu: 'cuộn', heSo: 0 }).errors.heSo);
+});
+test('đầu phiếu: NHAP_MUA cần NCC, XUAT_BAN cần khách + công trình, KHACH_TRA cần phiếu gốc, ≤ 200 dòng', () => {
+  assert.ok(V.voucherHead({ loai: 'NHAP_MUA', ngay: '2026-11-09', kho: 'K1', lines: [] }).errors.maNCC);
+  const x = V.voucherHead({ loai: 'XUAT_BAN', ngay: '2026-11-09', kho: 'K1', lines: [] }).errors;
+  assert.ok(x.maKH && x.maCongTrinh);
+  assert.ok(V.voucherHead({ loai: 'KHACH_TRA', ngay: '2026-11-09', kho: 'K1', lines: [] }).errors.phieuGoc);
+  assert.ok(V.voucherHead({ loai: 'XUAT_SX', ngay: '2026-11-09', kho: 'K1', lines: new Array(201).fill({}) }).errors.lines);
+  assert.equal(V.voucherHead({ loai: 'XUAT_SX', ngay: '2026-11-09', kho: 'k1', lyDo: '=1+1', lines: [{}] }).value.kho, 'K1');
+});
+test('quyền đợt ②: XEM không lập phiếu; NHAP_LIEU lập phiếu nhưng không đảo/khoá sổ/tính lại; lọc giá trị kho', () => {
+  assert.equal(P.can('XEM', 'voucher.create'), false); assert.equal(P.can('XEM', 'voucher.get'), true);
+  assert.equal(P.can('NHAP_LIEU', 'voucher.create'), true);
+  for (const a of ['voucher.reverse', 'period.lock', 'stock.rebuild', 'report.nxt', 'warehouse.upsert']) { assert.equal(P.can('NHAP_LIEU', a), false, a); assert.equal(P.can('QUAN_TRI', a), true, a); }
+  const d = { vouchers: [{ soPhieu: 'PN-1', tongTien: 5 }], stock: [{ maHang: 'A', kho: '*', soLuong: 1, giaTri: 9 }], config: { ngayKhoaSo: '2026-09-30' } };
+  const nl = P.filterForRole('NHAP_LIEU', 'x@y.z', d);
+  assert.equal('tongTien' in nl.vouchers[0], false); assert.equal('giaTri' in nl.stock[0], false); assert.equal(nl.config.ngayKhoaSo, '2026-09-30');
+  assert.equal(P.filterForRole('QUAN_TRI', 'x@y.z', d).stock[0].giaTri, 9);
+  const l = P.filterLines('NHAP_LIEU', [{ maHang: 'A', soLuong: 1, donGia: 5, thanhTien: 5, giaTriKho: 5 }])[0];
+  assert.deepEqual(Object.keys(l).sort(), ['maHang', 'soLuong']);
+});
