@@ -67,9 +67,10 @@ function engineMsg(r) {
 var CT_COL = QSchema.SHEETS.ChiTietPhieu.cols.indexOf('giaTriKho') + 1, CL_COL = QSchema.SHEETS.ChiTietPhieu.cols.indexOf('chenhLechGV') + 1;
 function appendBlock(n, objs) {
   if (!objs.length) return;
-  var s = sheet(n), cols = QSchema.SHEETS[n].cols, r0 = s.getLastRow() + 1;
-  s.getRange(r0, 1, objs.length, cols.length).setValues(objs.map(function (o) { return QSchema.toRow(n, o); }));
-  dirty(n); mark('append ' + n); return r0;
+  var s = sheet(n), cols = QSchema.SHEETS[n].cols;
+  if (objs.length === 1) s.appendRow(QSchema.toRow(n, objs[0]));   // 1 dòng: 1 lệnh gọi (không cần getLastRow)
+  else s.getRange(s.getLastRow() + 1, 1, objs.length, cols.length).setValues(objs.map(function (o) { return QSchema.toRow(n, o); }));
+  dirty(n); mark('append ' + n);
 }
 function applySerials(changes, so) {
   if (!changes.length) return;
@@ -118,7 +119,11 @@ function setVoucherState(so, st, extra, known) {   // known = {row, obj}: phiế
 /* info = {loai, phieuGoc, mas}: đủ để dọn phiếu mồ côi khi đầu phiếu CHƯA kịp ghi (đầu phiếu ghi cuối cùng, 1 lần, trạng thái HOAN_TAT). */
 function markPending(so, info) { var c = CacheService.getScriptCache(), l = JSON.parse(c.get('pendingList') || '[]'); l.push(so); c.put('pendingList', JSON.stringify(l.slice(-50)), 21600); c.put('pending:' + so, JSON.stringify(info || {}), 21600); }
 function clearPending(so) { CacheService.getScriptCache().remove('pending:' + so); }
-function pendingList() { var c = CacheService.getScriptCache(), l = JSON.parse(c.get('pendingList') || '[]'), live = l.filter(function (so) { return c.get('pending:' + so); }); if (live.length !== l.length) c.put('pendingList', JSON.stringify(live), 21600); return live; }
+function pendingList() {   // 1 lần getAll thay cho 1 lần get mỗi phiếu
+  var c = CacheService.getScriptCache(), l = JSON.parse(c.get('pendingList') || '[]'); if (!l.length) return [];
+  var m = c.getAll(l.map(function (so) { return 'pending:' + so; })), live = l.filter(function (so) { return m['pending:' + so]; });
+  if (live.length !== l.length) c.put('pendingList', JSON.stringify(live), 21600); return live;
+}
 
 /** Đầu lệnh ghi: phiếu NHAP_DO còn lại chắc chắn mồ côi (đang giữ khoá) → đánh dấu LOI_GHI, trả serial, tính lại tồn các mã của nó. */
 function revertSerials(so) {

@@ -174,8 +174,8 @@ test('kiểm kê: SL sổ sách lấy từ máy chủ; kho hàng lỗi không nh
 // ===== ca xấu chuyên gia bảo mật/QA + kế toán tái hiện (duyệt v0.2 vòng 1) =====
 test('B2 lỗi sau khi phiếu đã HOAN_TAT (trước khi ghi Request) → gửi lại cùng requestId vẫn chỉ 1 phiếu', () => {
   const { a, s, V } = shop(); V(nhap('2026-10-01', [{ maHang: 'CB40', soLuongCT: 10, gia: 1000 }]));
-  const nk = a.sheets.NhatKy, orig = nk.getRange; let once = true;
-  nk.getRange = function (...x) { if (once) { once = false; nk.getRange = orig; throw new Error('mất kết nối Sheet'); } return orig.apply(this, x); };
+  const nk = a.sheets.NhatKy, orig = nk.appendRow;
+  nk.appendRow = function () { nk.appendRow = orig; throw new Error('mất kết nối Sheet'); };
   const id = rid(), v = { loai: 'XUAT_BAN', ngay: '2026-10-02', kho: 'KHO', maKH: 'TN', maCongTrinh: 'PDG', lines: [{ maHang: 'CB40', soLuongCT: 1 }] };
   assert.equal(a.post({ action: 'voucher.create', session: s, requestId: id, voucher: v }).code, 'INTERNAL');
   const r2 = a.post({ action: 'voucher.create', session: s, requestId: id, voucher: v });
@@ -277,8 +277,8 @@ test('bộ đệm: lỗi giữa chừng sau khi đã ghi TonKho → lệnh sau v
   const { a, s, V } = shop();
   V(nhap('2026-10-01', [{ maHang: 'CB40', soLuongCT: 10, gia: 1000 }]));
   V({ loai: 'XUAT_BAN', ngay: '2026-10-02', kho: 'KHO', maKH: 'TN', maCongTrinh: 'PDG', lines: [{ maHang: 'CB40', soLuongCT: 1 }] });   // làm ấm bộ đệm
-  const nk = a.sheets.NhatKy, orig = nk.getRange; let once = true;
-  nk.getRange = function (...x) { if (once) { once = false; nk.getRange = orig; throw new Error('mất kết nối'); } return orig.apply(this, x); };
+  const nk = a.sheets.NhatKy, orig = nk.appendRow;
+  nk.appendRow = function () { nk.appendRow = orig; throw new Error('mất kết nối'); };
   const out = (n, id) => a.post({ action: 'voucher.create', session: s, requestId: id || rid(), voucher: { loai: 'XUAT_BAN', ngay: '2026-10-03', kho: 'KHO', maKH: 'TN', maCongTrinh: 'PDG', lines: [{ maHang: 'CB40', soLuongCT: n }] } });
   assert.equal(out(6).code, 'INTERNAL');   // TonKho đã ghi 3, phiếu HOAN_TAT, rồi lỗi ở NhatKy
   assert.equal(out(6).code, 'STOCK_NOT_ENOUGH', 'còn 3 cái — bộ đệm cũ (9) không được dùng');
@@ -337,8 +337,8 @@ test('bộ đệm luôn trùng nội dung sheet thật sau chuỗi thao tác h�
 test('máy chủ chết TRƯỚC khi ghi đầu phiếu (đầu phiếu ghi cuối cùng): lệnh sau dọn — trả serial, tồn đúng, phiếu không tồn tại', () => {
   const { a, s, V } = shop();
   V(nhap('2026-10-01', [{ maHang: 'LOGO', soLuongCT: 1, gia: 100, serials: ['S1'] }]));
-  const ph = a.sheets.Phieu, orig = ph.getRange; let armed = true;
-  ph.getRange = function (r, c, nr, nc) { if (armed && typeof r === 'number' && r === ph.getLastRow() + 1) { armed = false; ph.getRange = orig; throw new Error('chết khi ghi đầu phiếu'); } return orig.apply(this, arguments); };
+  const ph = a.sheets.Phieu, orig = ph.appendRow;
+  ph.appendRow = function () { ph.appendRow = orig; throw new Error('chết khi ghi đầu phiếu'); };
   assert.equal(V(nhap('2026-10-02', [{ maHang: 'LOGO', soLuongCT: 1, gia: 300, serials: ['S2'] }])).code, 'INTERNAL');
   assert.equal(V(nhap('2026-10-03', [{ maHang: 'CB40', soLuongCT: 1, gia: 1 }])).ok, true);   // lệnh sau dọn mồ côi
   const d = pull(a, s);
@@ -351,8 +351,8 @@ test('máy chủ chết TRƯỚC khi ghi đầu phiếu (đầu phiếu ghi cu�
 test('đảo phiếu: chết trước khi ghi đầu phiếu đảo → phiếu gốc trở lại chưa đảo, tồn như cũ', () => {
   const { a, s, V } = shop();
   const p1 = V(nhap('2026-10-01', [{ maHang: 'CB40', soLuongCT: 10, gia: 100 }])).data.soPhieu;
-  const ph = a.sheets.Phieu, orig = ph.getRange; let armed = true;
-  ph.getRange = function (r) { if (armed && typeof r === 'number' && r === ph.getLastRow() + 1) { armed = false; ph.getRange = orig; throw new Error('chết'); } return orig.apply(this, arguments); };
+  const ph = a.sheets.Phieu, orig = ph.appendRow;
+  ph.appendRow = function () { ph.appendRow = orig; throw new Error('chết'); };
   assert.equal(a.post({ action: 'voucher.reverse', session: s, requestId: rid(), phieuGoc: p1, ngay: '2026-10-02', lyDo: 'x' }).code, 'INTERNAL');
   assert.equal(V(nhap('2026-10-03', [{ maHang: 'CB40', soLuongCT: 1, gia: 100 }])).ok, true);
   const d = pull(a, s);
