@@ -172,6 +172,7 @@ function voucherCreate(u, req, logs) {
     var y = { dong: d, maHang: ma, dvt: it.dvt, soLuongCT: '', heSo: 1, soLuong: '', donGia: '', thanhTien: '', giaTriKho: '', slSoSach: '', slThucTe: '', dongGoc: Number(l.dongGoc) || '', serials: ser };
     if (h.loai === 'KIEM_KE') { y.slThucTe = Number(l.slThucTe); y.soLuongCT = y.slThucTe; }
     else {
+      if (typeof l.soLuongCT !== 'number' && typeof l.soLuongCT !== 'string' || !(Number(l.soLuongCT) > 0)) { le.push({ dong: d, field: 'soLuongCT', msg: 'Số lượng phải là số > 0' }); return; }
       var c = QStock.convert({ maHang: ma, dvt: String(l.dvt || it.dvt), soLuongCT: l.soLuongCT, gia: priced ? l.gia : undefined }, it, qd);
       if (c.error) { le.push({ dong: d, field: 'dvt', msg: c.error }); return; }
       y.dvt = c.dvt; y.soLuongCT = Number(l.soLuongCT); y.heSo = c.heSo; y.soLuong = c.soLuong;

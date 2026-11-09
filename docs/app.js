@@ -476,7 +476,7 @@
       else if (r.fields) showErrors(d, r.fields);
       dlgMsg(d, 'Chưa lưu: ' + (r.error || r.code) + (r.code === 'NETWORK' ? ' — kiểm tra mạng rồi bấm Lưu lại' : '')); return false;
     }
-    d._guard = null; toast((r.data.lapLai ? 'Phiếu đã lưu từ lần bấm trước: ' + r.data.soPhieu : okMsg(r.data.soPhieu)) + (r.data.tinhLai ? ` · đã tính lại giá vốn ${r.data.tinhLai} dòng phiếu sau` : '')); await sync(); return true;
+    d._guard = null; toast((r.data.lapLai || r.replay ? 'Phiếu đã lưu từ lần bấm trước: ' + r.data.soPhieu : okMsg(r.data.soPhieu)) + (r.data.tinhLai ? ` · đã tính lại giá vốn ${r.data.tinhLai} dòng phiếu sau` : '')); await sync(); return true;
   }
 
   // ---------- lập phiếu ----------
@@ -547,7 +547,7 @@
       const start = JSON.stringify(lines); dlg._guard = () => JSON.stringify(lines) !== start;
       dlg.addEventListener('keydown', e => {   // Enter trong dòng hàng: sang ô kế tiếp (không lưu vội); Ctrl+Enter = Lưu phiếu
         if (e.key !== 'Enter' || e.target.tagName === 'TEXTAREA' || !e.target.closest || !e.target.closest('#vLines')) return;
-        if (e.ctrlKey || e.metaKey) return;
+        if (e.ctrlKey || e.metaKey) { e.preventDefault(); $('form', dlg).requestSubmit(); return; }   // Ctrl+Enter = Lưu phiếu
         e.preventDefault(); const ins = $$('#vLines input:not([type=checkbox]),#vLines select', dlg), i = ins.indexOf(e.target);
         if (i >= 0 && i < ins.length - 1) ins[i + 1].focus(); else $('#addLine', dlg).click();
       });

@@ -104,6 +104,8 @@ const toast = p => p.$$eval('.toast', ts => ts.map(t => t.textContent).join(' | 
   p.once('dialog', dg => dg.dismiss()); await p.keyboard.press('Escape'); await p.waitForTimeout(200);
   ok(await p.evaluate(() => document.querySelector('#dlg').open), 'Esc khi phiếu đang nhập dở → hỏi lại, bấm Huỷ thì giữ phiếu');
   p.once('dialog', dg => dg.accept()); await p.keyboard.press('Escape'); ok(await closed(p), 'đồng ý bỏ → đóng');
+  await p.click('#newV'); await p.click('[data-t="XUAT_CONG_TRINH"]'); await fill(p, { maCongTrinh: 'PDG' }); await line(p, 0, { maHang: 'CB40', soLuongCT: 1 });
+  await p.focus('#l_sl_0'); await p.keyboard.press('Control+Enter'); ok(await closed(p), 'Ctrl+Enter trong dòng hàng = Lưu phiếu');
   // kiểm kê
   await p.goto(BASE + '#/kho'); await p.click('[data-km="CB40"]'); await p.click('#kKK'); await line(p, 0, { slThucTe: 9 });
   await p.click('#dlgOk'); ok(await closed(p), 'kiểm kê từ chi tiết tồn'); await p.waitForTimeout(200);
