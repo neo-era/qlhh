@@ -32,6 +32,7 @@ function writeTon(ton, mas) {
     Object.keys(t.kho).forEach(function (k) { set(k, { soLuong: t.kho[k], giaTri: '' }); });
   });
   if (rows.length) s.getRange(2, 1, rows.length, cols.length).setValues(rows.map(function (r) { return QSchema.toRow('TonKho', r); }));
+  dirty('TonKho'); mark('write TonKho');
 }
 /** Đọc phiếu HOÀN TẤT có dòng thuộc `mas` (chỉ giữ các dòng của `mas` → tính lại riêng các mã đó). mas=null → tất cả. */
 function loadVouchers(mas) {
@@ -67,6 +68,7 @@ function appendBlock(n, objs) {
   if (!objs.length) return;
   var s = sheet(n), cols = QSchema.SHEETS[n].cols, r0 = s.getLastRow() + 1;
   s.getRange(r0, 1, objs.length, cols.length).setValues(objs.map(function (o) { return QSchema.toRow(n, o); }));
+  dirty(n); mark('append ' + n); return r0;
 }
 function applySerials(changes, so) {
   if (!changes.length) return;
@@ -76,12 +78,12 @@ function applySerials(changes, so) {
     var rec = { key: c.key, hang: c.hang, serial: c.serial, maHang: c.maHang, trangThai: c.to, kho: c.kho || '', capNhat: t };
     if (cur[c.key]) s.getRange(cur[c.key]._row, 1, 1, cols.length).setValues([QSchema.toRow('Serial', rec)]); else add.push(rec);
   });
-  appendBlock('Serial', add);
+  appendBlock('Serial', add); dirty('Serial');
 }
 function applyChanges(changes, rowOf, mas) {
   var s = sheet('ChiTietPhieu'), n = 0, want = mapBy(mas.map(function (m) { return { m: m }; }), 'm'), sos = {};
   changes.forEach(function (c) { if (!want[c.maHang]) return; var row = rowOf[c.soPhieu + '#' + c.dong]; if (row) { s.getRange(row, CT_COL, 1, 1).setValues([[c.new]]); s.getRange(row, CL_COL, 1, 1).setValues([[c.adj || '']]); n++; sos[c.soPhieu] = 1; } });
-  if (n) refreshTotals(Object.keys(sos));   // tổng tiền đầu phiếu theo giá vốn mới
+  if (n) { dirty('ChiTietPhieu'); refreshTotals(Object.keys(sos)); }   // tổng tiền đầu phiếu theo giá vốn mới
   return n;
 }
 /** Tổng tiền đầu phiếu = Σ thành tiền (phiếu có đơn giá) hoặc Σ (giá trị kho + chênh lệch GV) — tính lại sau khi giá vốn dòng đổi. sos=null → mọi phiếu. */
@@ -95,6 +97,7 @@ function refreshTotals(sos) {
     var t = L.reduce(function (a, l) { return a + (priced ? Number(l.thanhTien) || 0 : (Number(l.giaTriKho) || 0) + (Number(l.chenhLechGV) || 0)); }, 0);
     if (t !== Number(h.tongTien)) { var x = strip(h); x.tongTien = t; ps.getRange(h._row, 1, 1, cols.length).setValues([QSchema.toRow('Phieu', x)]); n++; }
   });
+  if (n) dirty('Phieu');
   return n;
 }
 function updateCost(ton, mas) {
@@ -102,18 +105,23 @@ function updateCost(ton, mas) {
   items.forEach(function (it) {
     if (mas.indexOf(it.maHang) < 0) return; var t = ton[it.maHang]; if (!t) return;
     var g = t.pool.q > 0 ? Math.round(t.pool.v / t.pool.q) : it.giaVon;
-    if (g !== it.giaVon) { var x = strip(it); x.giaVon = g; s.getRange(it._row, 1, 1, cols.length).setValues([QSchema.toRow('HangHoa', x)]); }
+    if (g !== it.giaVon) { var x = strip(it); x.giaVon = g; s.getRange(it._row, 1, 1, cols.length).setValues([QSchema.toRow('HangHoa', x)]); dirty('HangHoa'); }
   });
 }
-function setVoucherState(so, st, extra) {
-  var h = findByKey('Phieu', so); if (!h) return; var x = strip(h); x.trangThai = st; for (var k in (extra || {})) x[k] = extra[k];
+function setVoucherState(so, st, extra, known) {   // known = {row, obj}: phiếu vừa ghi, khỏi tìm lại
+  var h = known ? Object.assign({ _row: known.row }, known.obj) : findByKey('Phieu', so); if (!h) return; var x = strip(h); x.trangThai = st; for (var k in (extra || {})) x[k] = extra[k];
   delete x.lines; putRow('Phieu', x, h._row);
+  if (st !== 'NHAP_DO') CacheService.getScriptCache().remove('pending:' + so);
 }
+/* Phiếu đang ghi dở: đánh dấu trong cache để lệnh sau biết có phiếu mồ côi mà KHÔNG phải quét sheet Phieu mỗi lần. */
+function markPending(so) { var c = CacheService.getScriptCache(), l = JSON.parse(c.get('pendingList') || '[]'); l.push(so); c.put('pendingList', JSON.stringify(l.slice(-50)), 21600); c.put('pending:' + so, '1', 21600); }
+function pendingList() { var c = CacheService.getScriptCache(), l = JSON.parse(c.get('pendingList') || '[]'), live = l.filter(function (so) { return c.get('pending:' + so); }); if (live.length !== l.length) c.put('pendingList', JSON.stringify(live), 21600); return live; }
 
 /** Đầu lệnh ghi: phiếu NHAP_DO còn lại chắc chắn mồ côi (đang giữ khoá) → đánh dấu LOI_GHI, trả serial, tính lại tồn các mã của nó. */
-function cleanupOrphans(logs) {
+function cleanupOrphans(logs, full) {
+  var pend = pendingList(); if (!pend.length && !full) { mark('orphans none'); return; }   // cache mất (hiếm) → stock.rebuild quét đầy đủ
   var s = sheet('Phieu'); if (s.getLastRow() < 2) return;
-  var orphans = readTail('Phieu', 50).rows.filter(function (p) { return p.trangThai === 'NHAP_DO'; });
+  var orphans = readTail('Phieu', full ? 300 : 50).rows.filter(function (p) { return p.trangThai === 'NHAP_DO'; });
   orphans.forEach(function (p) {
     setVoucherState(p.soPhieu, 'LOI_GHI');
     var hist = readTable('LichSuSerial').rows.filter(function (h) { return h.soPhieu === p.soPhieu; });
@@ -145,10 +153,11 @@ function rebuildFor(mas) {
 var SX_ONLY = ['NHAP_TP', 'NHAP_LAI_SX', 'XUAT_SX'], GOC_OK = ['KHACH_TRA', 'TRA_NCC'];
 var SERIAL_RE = /^[A-Z0-9][A-Z0-9._\/\-]{0,59}$/;
 /** Phiếu đã HOÀN TẤT với cùng requestId của cùng người (lỗi xảy ra sau khi ghi phiếu, trước khi ghi Request) → trả lại kết quả cũ. */
-function doneByRequest(id, email) {
-  var r = readTail('Phieu', 300).rows.filter(function (p) { return p.requestId === String(id) && p.nguoiTao === email && p.trangThai === 'HOAN_TAT'; })[0];
-  return r ? { soPhieu: r.soPhieu, stt: r.stt, tinhLai: 0, lapLai: true } : null;
+function doneByRequest(id, email) {   // ghi ở cache NGAY khi phiếu HOÀN TẤT (trước NhatKy/Request) — tra O(1), không quét sheet
+  var v = CacheService.getScriptCache().get('done:' + email + ':' + id); if (!v) return null;
+  var r = JSON.parse(v); r.lapLai = true; r.tinhLai = 0; return r;
 }
+function markDone(id, email, so, stt) { CacheService.getScriptCache().put('done:' + email + ':' + id, JSON.stringify({ soPhieu: so, stt: stt }), 21600); }
 function noFuture(h) {
   var t = today();
   if (h.ngay > t) throw fail('VALIDATION', 'Ngày phiếu không được sau hôm nay (' + t + ')', { ngay: 'Không quá hôm nay' });
@@ -224,13 +233,13 @@ function voucherCreate(u, req, logs) {
   var head = { soPhieu: so, stt: stt, loai: h.loai, ngay: h.ngay, kho: h.kho, khoDen: h.khoDen, maNCC: h.maNCC, maKH: h.maKH, maCongTrinh: h.maCongTrinh, phieuGoc: h.phieuGoc, daDao: false,
     trangThai: 'NHAP_DO', nguoiGiaoNhan: h.nguoiGiaoNhan, lyDo: h.lyDo, soCTGoc: h.soCTGoc, ngayCTGoc: h.ngayCTGoc, tongTien: tong, ghiChu: h.ghiChu, nguoiTao: u.email, thoiGian: nowIso(), requestId: String(req.requestId), hieuLuc: '' };
   if (lines.some(function (l) { return JSON.stringify(l.serials).length > 45000; })) throw fail('VALIDATION', 'Quá nhiều serial trong 1 dòng — tách phiếu', null);
-  appendBlock('Phieu', [head]);
+  markPending(so); var hr = appendBlock('Phieu', [head]);
   appendBlock('ChiTietPhieu', lines.map(function (l) { var c = {}; for (var k in l) c[k] = l[k]; c.serials = l.serials.length ? JSON.stringify(l.serials.map(QSerial.norm)) : ''; return c; }));
   applySerials(sr.changes, so);
   var changed = all ? applyChanges(r.changes, all.rowOf, mas) : 0;
   Object.keys(r.result.ton).forEach(function (m) { var t = r.result.ton[m]; if (t.last && t.last.stt === sttTry) t.last.stt = stt; });
   writeTon(r.result.ton, mas); updateCost(r.result.ton, mas);
-  setVoucherState(so, 'HOAN_TAT');
+  setVoucherState(so, 'HOAN_TAT', null, { row: hr, obj: head }); markDone(req.requestId, u.email, so, stt);
   logs.push({ action: 'voucher.create', doiTuong: 'Phieu', id: so, truoc: null, sau: { loai: h.loai, ngay: h.ngay, kho: h.kho, soDong: lines.length, tinhLai: changed } });
   return { soPhieu: so, stt: stt, tinhLai: changed };
 }
@@ -255,14 +264,14 @@ function voucherReverse(u, req, logs) {
   var stt = nextId('stt'), yr = ngay.slice(0, 4), so = 'DA-' + yr + '-' + pad(nextId('PH:DA:' + yr), 5), tong = 0;
   var lines = g.lines.map(function (l) { var v = r.result.lines['~MOI#' + l.dong] || 0; tong += v;
     return { soPhieu: so, dong: l.dong, maHang: l.maHang, dvt: l.dvt, soLuongCT: l.soLuongCT, heSo: l.heSo, soLuong: l.soLuong, donGia: l.donGia, thanhTien: l.thanhTien, giaTriKho: v, slSoSach: l.slSoSach, slThucTe: l.slThucTe, dongGoc: l.dong, serials: l.serials.length ? JSON.stringify(l.serials) : '', chenhLechGV: r.result.adj['~MOI#' + l.dong] || '' }; });
-  appendBlock('Phieu', [{ soPhieu: so, stt: stt, loai: 'DAO', ngay: ngay, kho: g.kho, khoDen: g.khoDen, maNCC: g.maNCC, maKH: g.maKH, maCongTrinh: g.maCongTrinh, phieuGoc: gso, daDao: false,
-    trangThai: 'NHAP_DO', nguoiGiaoNhan: '', lyDo: lyDo, soCTGoc: gso, ngayCTGoc: g.ngay, tongTien: tong, ghiChu: '', nguoiTao: u.email, thoiGian: nowIso(), requestId: String(req.requestId), hieuLuc: r.hieuLuc }]);
+  markPending(so); var dhead = { soPhieu: so, stt: stt, loai: 'DAO', ngay: ngay, kho: g.kho, khoDen: g.khoDen, maNCC: g.maNCC, maKH: g.maKH, maCongTrinh: g.maCongTrinh, phieuGoc: gso, daDao: false,
+    trangThai: 'NHAP_DO', nguoiGiaoNhan: '', lyDo: lyDo, soCTGoc: gso, ngayCTGoc: g.ngay, tongTien: tong, ghiChu: '', nguoiTao: u.email, thoiGian: nowIso(), requestId: String(req.requestId), hieuLuc: r.hieuLuc }, dr = appendBlock('Phieu', [dhead]);
   appendBlock('ChiTietPhieu', lines);
   applySerials(sr.changes, so);
   var changed = applyChanges(r.changes, all.rowOf, mas);
   writeTon(r.result.ton, mas); updateCost(r.result.ton, mas);
   setVoucherState(gso, 'HOAN_TAT', { daDao: true });
-  setVoucherState(so, 'HOAN_TAT');
+  setVoucherState(so, 'HOAN_TAT', null, { row: dr, obj: dhead }); markDone(req.requestId, u.email, so, stt);
   logs.push({ action: 'voucher.reverse', doiTuong: 'Phieu', id: so, truoc: { phieuGoc: gso }, sau: { ngay: ngay, lyDo: lyDo, tinhLai: changed } });
   return { soPhieu: so, tinhLai: changed };
 }
@@ -286,7 +295,7 @@ function periodLock(u, req, logs) {
 function stockRebuild(u, req, logs) {
   var w = readTable('Phieu').warnings.concat(readTable('ChiTietPhieu').warnings);
   if (w.length) throw fail('VALIDATION', 'Sheet phiếu có ' + w.length + ' ô sai kiểu, sửa trước khi tính lại (vd ' + w[0] + ')', null);
-  cleanupOrphans(logs);
+  cleanupOrphans(logs, true);
   var mas = uniq(readTable('HangHoa').rows.map(function (i) { return i.maHang; }).concat(readTable('ChiTietPhieu').rows.map(function (l) { return l.maHang; })));
   var r = rebuildFor(mas);
   logs.push({ action: 'stock.rebuild', doiTuong: 'TonKho', id: '*', truoc: null, sau: { ma: mas.length, tinhLai: r.changes, loi: r.errors.length } });

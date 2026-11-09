@@ -137,6 +137,7 @@ test('phiếu mồ côi NHAP_DO (máy chủ chết giữa chừng) → lệnh gh
   V(nhap('2026-10-01', [{ maHang: 'LOGO', soLuongCT: 1, gia: 100, serials: ['S1'] }]));
   const so = V(nhap('2026-10-02', [{ maHang: 'LOGO', soLuongCT: 1, gia: 300, serials: ['S2'] }])).data.soPhieu;
   const row = a.sheets.Phieu.d.findIndex(r => r[0] === so); a.sheets.Phieu.d[row][11] = 'NHAP_DO';   // giả lập chết trước khi đổi HOAN_TAT
+  a.cache['pending:' + so] = '1'; a.cache.pendingList = JSON.stringify([so]);   // dấu "đang ghi" còn lại khi máy chủ chết
   assert.equal(V(nhap('2026-10-03', [{ maHang: 'CB40', soLuongCT: 1, gia: 1 }])).ok, true);
   assert.equal(a.sheets.Phieu.d[row][11], 'LOI_GHI');
   const d = pull(a, s);

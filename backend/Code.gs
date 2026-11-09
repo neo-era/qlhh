@@ -35,7 +35,9 @@ function doPost(e) {
   var t0 = Date.now();
   try {
     var req = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+    MEMO = {}; PROF = [[ 'start', t0 ]];
     var res = route(req); res.ms = Date.now() - t0; res.ver = VER;
+    if (req.prof && res.ok) res.prof = PROF.map(function (x, i) { return x[0] + ':' + (i ? x[1] - PROF[i - 1][1] : 0); }).join(' ');
     return out(res);
   } catch (err) {
     if (err && err.qlhh) return out(err.qlhh);
@@ -141,8 +143,14 @@ function findUser(email, fresh) {
 // ======================= ĐỌC =======================
 var TABLES = { items: 'HangHoa', groups: 'NhomHang', suppliers: 'NhaCungCap', prices: 'BangGia', users: 'NguoiDung', feedback: 'GopY', logs: 'NhatKy',
   warehouses: 'Kho', units: 'QuyDoiDVT', customers: 'KhachHang', projects: 'CongTrinh', vouchers: 'Phieu', stock: 'TonKho', serials: 'Serial' };
-function readTable(n) { return QSchema.toObjects(n, sheet(n).getDataRange().getValues()); }
-function readTail(n, k) {
+/* Bộ nhớ tạm trong 1 lệnh: mỗi sheet chỉ đọc 1 lần; ghi vào sheet nào thì xoá bản nhớ của sheet đó (dirty). Trả bản sao nông để nơi gọi sửa không ảnh hưởng. */
+var MEMO = {}, PROF = [];
+function mark(l) { PROF.push([l, Date.now()]); }
+function dirty(n) { delete MEMO[n]; Object.keys(MEMO).forEach(function (k) { if (k.indexOf(n + '#') === 0) delete MEMO[k]; }); }
+function cloneT(t) { return { rows: t.rows.map(function (r) { var c = {}; for (var k in r) c[k] = r[k]; return c; }), warnings: t.warnings }; }
+function readTable(n) { if (!MEMO[n]) { MEMO[n] = QSchema.toObjects(n, sheet(n).getDataRange().getValues()); mark('read ' + n); } return cloneT(MEMO[n]); }
+function readTail(n, k) { var key = n + '#tail' + k; if (MEMO[n]) { var t = MEMO[n], rows = t.rows.slice(-k); return cloneT({ rows: rows, warnings: t.warnings }); } if (!MEMO[key]) { MEMO[key] = readTail0(n, k); mark('tail ' + n); } return cloneT(MEMO[key]); }
+function readTail0(n, k) {
   var s = sheet(n), last = s.getLastRow(), cols = QSchema.SHEETS[n].cols;
   if (last < 2) return { rows: [], warnings: [] };
   var from = Math.max(2, last - k + 1);
@@ -220,6 +228,7 @@ function findByKey(n, key) {
   o._row = cell.getRow(); return o;
 }
 function putRow(n, obj, row) {
+  dirty(n);
   var s = sheet(n), vals = QSchema.toRow(n, obj);
   if (row) s.getRange(row, 1, 1, vals.length).setValues([vals]); else s.appendRow(vals);
 }
