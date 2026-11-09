@@ -163,9 +163,9 @@ function noFuture(h) {
   if (h.ngay > t) throw fail('VALIDATION', 'Ngày phiếu không được sau hôm nay (' + t + ')', { ngay: 'Không quá hôm nay' });
   if (h.ngayCTGoc && h.ngayCTGoc > t) throw fail('VALIDATION', 'Ngày chứng từ gốc không được sau hôm nay', { ngayCTGoc: 'Không quá hôm nay' });
 }
-function voucherCreate(u, req, logs) {
-  cleanupOrphans(logs);
-  var dup = doneByRequest(req.requestId, u.email); if (dup) return dup;
+/* Chuẩn bị NGOÀI khoá: kiểm đầu phiếu, danh mục, quy đổi dòng — chỉ đọc bảng danh mục, không đụng tồn kho. */
+function voucherPrep(u, req) {
+  var dup = doneByRequest(req.requestId, u.email); if (dup) return { done: dup };
   var x = req.voucher || {}, h = need(QValidate.voucherHead(x));
   if (!QStock.TYPES[h.loai] || h.loai === 'DAO') throw fail('VALIDATION', 'Loại phiếu không hợp lệ', { loai: 'Chọn loại phiếu' });
   if (SX_ONLY.indexOf(h.loai) >= 0) throw fail('VALIDATION', 'Phiếu sản xuất được lập từ Lệnh sản xuất', { loai: 'Không lập trực tiếp' });
@@ -177,9 +177,10 @@ function voucherCreate(u, req, logs) {
     if (!k[1]) return; var w = kho[k[1]];
     if (!w || w.trangThai !== 'HOAT_DONG') throw fail('VALIDATION', 'Kho ' + k[1] + ' không có hoặc đã ngừng', mk(k[0], 'Chọn kho đang hoạt động'));
   });
-  if (h.maNCC && !findByKey('NhaCungCap', h.maNCC)) throw fail('VALIDATION', 'Nhà cung cấp ' + h.maNCC + ' chưa có', { maNCC: 'Chọn NCC có sẵn' });
-  if (h.maKH && !findByKey('KhachHang', h.maKH)) throw fail('VALIDATION', 'Khách hàng ' + h.maKH + ' chưa có', { maKH: 'Chọn khách có sẵn' });
-  if (h.maCongTrinh && !findByKey('CongTrinh', h.maCongTrinh)) throw fail('VALIDATION', 'Công trình ' + h.maCongTrinh + ' chưa có', { maCongTrinh: 'Chọn công trình có sẵn' });
+  var has = function (n, k, v) { return v && readTable(n).rows.some(function (r) { return r[k] === v; }); };   // 1 lần đọc bảng nhỏ thay cho tìm từng dòng
+  if (h.maNCC && !has('NhaCungCap', 'maNCC', h.maNCC)) throw fail('VALIDATION', 'Nhà cung cấp ' + h.maNCC + ' chưa có', { maNCC: 'Chọn NCC có sẵn' });
+  if (h.maKH && !has('KhachHang', 'maKH', h.maKH)) throw fail('VALIDATION', 'Khách hàng ' + h.maKH + ' chưa có', { maKH: 'Chọn khách có sẵn' });
+  if (h.maCongTrinh && !has('CongTrinh', 'maCongTrinh', h.maCongTrinh)) throw fail('VALIDATION', 'Công trình ' + h.maCongTrinh + ' chưa có', { maCongTrinh: 'Chọn công trình có sẵn' });
   if (h.loai === 'TRA_NCC' && h.phieuGoc) { var gN = findByKey('Phieu', h.phieuGoc); if (gN && gN.maNCC && gN.maNCC !== h.maNCC) throw fail('VALIDATION', 'Phiếu gốc ' + h.phieuGoc + ' là của NCC ' + gN.maNCC, { maNCC: 'Trả đúng NCC đã nhập' }); }
   var items = mapBy(readTable('HangHoa').rows, 'maHang'), qd = readTable('QuyDoiDVT').rows, priced = QStock.TYPES[h.loai].cost === 'PRICE';
   var lines = [], le = [];
@@ -210,15 +211,23 @@ function voucherCreate(u, req, logs) {
     lines.push(y);
   });
   if (le.length) throw fail('VALIDATION', 'Dòng ' + le[0].dong + ': ' + le[0].msg, le);
+  mark('prep');
+  return { h: h, o: o, items: items, lines: lines, priced: priced };
+}
+/* Phần TRONG khoá: tồn kho, kiểm sổ, cấp số, ghi. */
+function voucherCreate(u, req, logs, ctx) {
+  ctx = ctx || voucherPrep(u, req);
+  if (ctx.done) return ctx.done;
+  var dup = doneByRequest(req.requestId, u.email); if (dup) return dup;
+  cleanupOrphans(logs);
+  var h = ctx.h, o = ctx.o, items = ctx.items, lines = ctx.lines, priced = ctx.priced;
+  o.ngayKhoaSo = cfg('ngayKhoaSo');   // ngày khoá đọc lại trong khoá
   var mas = uniq(lines.map(function (l) { return l.maHang; }));
   var ton = readTon(), sttTry = Number(props().getProperty('seq:stt') || 0) + 1;
   if (h.loai === 'KIEM_KE') lines.forEach(function (l) { l.slSoSach = (ton[l.maHang] && ton[l.maHang].kho[h.kho]) || 0; });
   var cand = { soPhieu: '~MOI', stt: sttTry, loai: h.loai, ngay: h.ngay, kho: h.kho, khoDen: h.khoDen, phieuGoc: h.phieuGoc, lines: lines };
   var r = QStock.applyFast(ton, cand, o), all = null;
-  if (!r) {
-    if (h.loai === 'KIEM_KE') throw fail('VALIDATION', 'Phiếu kiểm kê phải có ngày không trước phiếu cuối cùng của mã hàng', { ngay: 'Chọn ngày mới hơn' });
-    all = loadVouchers(mas); r = QStock.check(all.vouchers, cand, o);
-  }
+  if (!r) { all = loadVouchers(mas); r = QStock.check(all.vouchers, cand, o); }   // lùi ngày / trả NCC / kiểm kê khi tồn 0 → tính lại đầy đủ (lõi kiểm 'kiểm kê phải mới nhất')
   if (!r.ok) throw fail(r.code, engineMsg(r), r.errors);
   var sr = { changes: [] };
   if (lines.some(function (l) { return items[l.maHang].quanLySerial; })) {

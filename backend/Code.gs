@@ -72,7 +72,7 @@ var HANDLERS = {
   'customer.upsert': function (u, r) { return write(u, r, customerUpsert); },
   'project.upsert': function (u, r) { return write(u, r, projectUpsert); },
   'unit.upsert': function (u, r) { return write(u, r, unitUpsert); },
-  'voucher.create': function (u, r) { return write(u, r, voucherCreate); },
+  'voucher.create': function (u, r) { return write(u, r, voucherCreate, voucherPrep); },
   'voucher.reverse': function (u, r) { return write(u, r, voucherReverse); },
   'voucher.get': voucherGet,
   'period.lock': function (u, r) { return write(u, r, periodLock); },
@@ -180,8 +180,10 @@ function schemaErrors(force) {
 }
 
 // ======================= GHI (khoá + idempotent + nhật ký) =======================
-function write(u, req, fn) {
+function write(u, req, fn, pre) {
   if (!QIdem.validId(req.requestId)) return { ok: false, code: 'VALIDATION', error: 'requestId không hợp lệ' };
+  var ctx = null;
+  if (pre) { try { ctx = pre(u, req); } catch (err) { if (err && err.qlhh) return err.qlhh; throw err; } }   // kiểm/đọc danh mục NGOÀI khoá → giữ khoá ngắn
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(30000)) return { ok: false, code: 'LOCK_TIMEOUT', error: 'Máy chủ bận, thử lại' };
   var t0 = Date.now();
@@ -194,7 +196,7 @@ function write(u, req, fn) {
       set: function (id, v) { rq.appendRow(QSchema.toRow('Request', { requestId: String(id), email: String(v.email), thoiGian: nowIso(), ketQua: JSON.stringify(v.data) })); }
     };
     var res = QIdem.once(store, u.email, req.requestId, function () {
-      var d = fn(u, req, logs);
+      var d = fn(u, req, logs, ctx);
       appendBlock('NhatKy', logs.map(function (l) { return { thoiGian: nowIso(), email: u.email, action: l.action, doiTuong: l.doiTuong, id: String(l.id), truoc: l.truoc ? JSON.stringify(l.truoc).slice(0, 45000) : '', sau: l.sau ? JSON.stringify(l.sau).slice(0, 45000) : '', requestId: String(req.requestId) }; }));   // 1 lần ghi
       bumpVersion();
       return d;

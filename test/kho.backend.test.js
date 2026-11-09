@@ -262,3 +262,12 @@ test('tính lại giá vốn lùi ngày → cập nhật cả tổng tiền đ�
   assert.equal(a.post({ action: 'stock.rebuild', session: s, requestId: rid() }).ok, true);
   assert.equal(pull(a, s).data.vouchers.find(p => p.soPhieu === x1).tongTien, 7200000);
 });
+test('kiểm kê thừa khi tồn đã về 0 qua máy chủ → lấy giá BQ gần nhất; kiểm kê lùi ngày → chặn', () => {
+  const { a, s, V } = shop();
+  V(nhap('2026-10-01', [{ maHang: 'CB40', soLuongCT: 2, gia: 500 }]));
+  V({ loai: 'XUAT_CONG_TRINH', ngay: '2026-10-02', kho: 'KHO', maCongTrinh: 'PDG', lines: [{ maHang: 'CB40', soLuongCT: 2 }] });
+  const k = V({ loai: 'KIEM_KE', ngay: '2026-10-03', kho: 'KHO', lines: [{ maHang: 'CB40', slThucTe: 1 }] });
+  assert.equal(k.ok, true, JSON.stringify(k));
+  assert.equal(a.post({ action: 'voucher.get', session: s, soPhieu: k.data.soPhieu }).data.lines[0].giaTriKho, 500);
+  assert.equal(V({ loai: 'KIEM_KE', ngay: '2026-10-02', kho: 'KHO', lines: [{ maHang: 'CB40', slThucTe: 1 }] }).code, 'VALIDATION');
+});
