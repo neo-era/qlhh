@@ -238,6 +238,9 @@ function write(u, req, fn, pre) {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(30000)) return { ok: false, code: 'LOCK_TIMEOUT', error: 'Máy chủ bận, thử lại' };
   var t0 = Date.now(); mark('lock');
+  // CÓ KHOÁ RỒI: bỏ mọi thứ đã đọc/nhớ trước khi có khoá (tiến trình khác có thể vừa ghi) — đọc lại phiên bản bảng từ ScriptProperties.
+  // Dữ liệu chuẩn bị ngoài khoá (ctx) chỉ là danh mục đã kiểm; mọi số liệu dùng để GHI đều đọc lại trong khoá.
+  MEMO = {}; VERS = null;
   try {
     var se = schemaErrors(false); mark('schema');
     if (se.length) return { ok: false, code: 'SCHEMA', error: 'Sheet sai cấu trúc: ' + se[0].sheet + ' – ' + se[0].msg, fields: se };

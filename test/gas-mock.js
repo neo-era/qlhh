@@ -4,8 +4,10 @@ const fs = require('fs'), path = require('path'), crypto = require('crypto');
 const ROOT = path.join(__dirname, '..');
 const BACKEND_FILES = ['core/auth.js', 'core/idem.js', 'core/schema.js', 'core/validate.js', 'core/perm.js', 'core/price.js', 'core/stock.js', 'core/serial.js', 'backend/Code.gs', 'backend/Kho.gs'];
 
-function env(tokeninfo, ownerEmail = 'MaiVuLam2020@gmail.com') {
-  const sheets = {}, props = {}, cache = {}, reads = {};
+function env(tokeninfo, ownerEmail = 'MaiVuLam2020@gmail.com', shared) {
+  // shared: dùng chung Sheet/Properties/Cache giữa 2 "tiến trình" (mỗi env có biến toàn cục riêng như 2 lần chạy Apps Script)
+  const sheets = shared ? shared.sheets : {}, props = shared ? shared.props : {}, cache = shared ? shared.cache : {}, reads = shared ? shared.reads : {};
+  const hold = {};
   // Mô phỏng Sheets: "'abc" → lưu 'abc' dạng văn bản; "=..." ở ô thường → CHẠY công thức (ở đây trả 'CONG_THUC_DA_CHAY' để test bắt rò rỉ)
   const conv = (v, txt) => { if (typeof v !== 'string') return v; if (v[0] === "'") return v.slice(1); if (txt) return v; if (/^=/.test(v)) return 'CONG_THUC_DA_CHAY'; if (/^-?\d+(\.\d+)?$/.test(v)) return Number(v); if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return new Date(v + 'T00:00:00Z'); return v; };
   const colIdx = a => a.charCodeAt(0) - 65;
@@ -48,14 +50,14 @@ function env(tokeninfo, ownerEmail = 'MaiVuLam2020@gmail.com') {
     UrlFetchApp: { fetch: () => tokeninfo() },
     CacheService: { getScriptCache: () => ({ get: k => (k in cache ? cache[k] : null), put: (k, v) => { if (String(v).length > 100000) throw new Error('Argument too large: value'); cache[k] = String(v); }, remove: k => { delete cache[k]; },
       getAll: ks => { const o = {}; ks.forEach(k => { if (k in cache) o[k] = cache[k]; }); return o; }, putAll: o => { for (const k in o) { if (String(o[k]).length > 100000) throw new Error('Argument too large'); cache[k] = String(o[k]); } }, removeAll: ks => ks.forEach(k => delete cache[k]) }) },
-    LockService: { getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) },
+    LockService: { getScriptLock: () => ({ tryLock: () => { const h = hold.api && hold.api.onLock; if (h) { hold.api.onLock = null; h(); } return true; }, releaseLock() {} }) },   // onLock: chen 1 tiến trình khác chạy trọn TRƯỚC khi lệnh này có khoá
     ContentService: { MimeType: { JSON: 'json' }, createTextOutput: t => ({ t, setMimeType() { return this; } }) },
     Logger: { log() {} }, console: { error() {}, log() {} }
   };
   const src = BACKEND_FILES.map(f => fs.readFileSync(path.join(ROOT, f), 'utf8')).join('\n') + '\nreturn {setup,doPost};';
   const names = Object.keys(G);
   const api = new Function(...names, 'module', 'Buffer', src)(...names.map(k => G[k]), undefined, undefined);
-  Object.assign(api, { sheets, raw: props, cache, reads });
+  Object.assign(api, { sheets, raw: props, cache, reads }); hold.api = api;
   api.post = o => JSON.parse(api.doPost({ postData: { contents: JSON.stringify(o) } }).t);
   return api;
 }
@@ -71,6 +73,7 @@ function ready(users = {}) {
   for (const [email, role] of Object.entries(users)) a.sheets.NguoiDung.appendRow([email, '', role, 'HOAT_DONG', '']);
   a.login = (email = 'maivulam2020@gmail.com') => { st.email = email; st.nonce = a.post({ action: 'auth.nonce' }).data.nonce; const r = a.post({ action: 'auth.login', idToken: 'tok-' + Math.random() }); return r.ok ? r.data.session : r; };
   a.st = st;
+  a.twin = () => { const b = env(google(st), undefined, { sheets: a.sheets, props: a.raw, cache: a.cache, reads: a.reads }); b.post = o => JSON.parse(b.doPost({ postData: { contents: JSON.stringify(o) } }).t); return b; };
   return a;
 }
 let n = 0; const rid = () => 'req-' + (++n).toString().padStart(8, '0') + '-' + Math.random().toString(36).slice(2, 6);

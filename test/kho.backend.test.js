@@ -367,3 +367,27 @@ test('idempotent khi bộ đệm bị xoá sạch (Google dọn cache): vẫn t�
   const r2 = a.post({ action: 'voucher.create', session: s, requestId: id, voucher: v });
   assert.equal(r2.data.soPhieu, r1.data.soPhieu); assert.equal(a.sheets.Phieu.d.length - 1, 1);
 });
+test('ĐỒNG THỜI: tiến trình khác ghi xen giữa lúc chuẩn bị và lúc có khoá → không mất lượt ghi (lỗi thật đo trên Google 10/11)', () => {
+  const { a, s, V } = shop(); const b = a.twin();
+  V(nhap('2026-10-01', [{ maHang: 'CB40', soLuongCT: 10, gia: 1000 }]));
+  const X = (who, n) => who.post({ action: 'voucher.create', session: s, requestId: rid(), voucher: { loai: 'XUAT_BAN', ngay: '2026-10-02', kho: 'KHO', maKH: 'TN', maCongTrinh: 'PDG', lines: [{ maHang: 'CB40', soLuongCT: n }] } });
+  assert.equal(X(a, 1).ok, true);   // làm ấm bộ đệm (TonKho, HangHoa)
+  for (let i = 0; i < 3; i++) {
+    let inner = null; a.onLock = () => { inner = X(b, 2); };
+    const r = X(a, 1); assert.equal(r.ok, true, JSON.stringify(r)); assert.equal(inner.ok, true, JSON.stringify(inner));
+  }
+  const d = pull(a, s);
+  assert.equal(tonOf(d, 'CB40').soLuong, 10 - 1 - 3 * 3, 'mất lượt ghi khi xen kẽ');
+  assert.equal(tonOf(d, 'CB40', 'KHO').soLuong, 0);
+  // bộ đệm phải trùng sheet sau xen kẽ
+  const QS = require('../core/schema.js'), v = a.raw['ver:TonKho'], meta = a.cache['tbl:TonKho:' + v];
+  if (meta) { let str = ''; for (let i = 0; i < Number(meta); i++) str += a.cache['tbl:TonKho:' + v + '#' + i]; assert.deepEqual(JSON.parse(str), JSON.parse(JSON.stringify(QS.toObjects('TonKho', a.sheets.TonKho.d)))); }
+});
+test('ĐỒNG THỜI: giá vốn hàng (HangHoa) không bị ghi đè bằng bản cũ khi xen kẽ sửa danh mục', () => {
+  const { a, s, V } = shop(); const b = a.twin();
+  V(nhap('2026-10-01', [{ maHang: 'CB40', soLuongCT: 10, gia: 1000 }]));
+  a.onLock = () => { const r = b.post({ action: 'item.upsert', session: s, requestId: rid(), item: { maHang: 'CB40', ten: 'Tên mới khi xen kẽ', dvt: 'cái', tonToiThieu: 5 } }); assert.equal(r.ok, true); };
+  assert.equal(V(nhap('2026-10-02', [{ maHang: 'CB40', soLuongCT: 10, gia: 3000 }])).ok, true);   // đổi giá vốn → ghi HangHoa
+  const it = pull(a, s).data.items.find(i => i.maHang === 'CB40');
+  assert.equal(it.ten, 'Tên mới khi xen kẽ'); assert.equal(it.giaVon, 2000);
+});
