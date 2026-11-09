@@ -237,13 +237,13 @@ function write(u, req, fn, pre) {
   if (pre) { try { ctx = pre(u, req); } catch (err) { if (err && err.qlhh) return err.qlhh; throw err; } }   // kiểm/đọc danh mục NGOÀI khoá → giữ khoá ngắn
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(30000)) return { ok: false, code: 'LOCK_TIMEOUT', error: 'Máy chủ bận, thử lại' };
-  var t0 = Date.now();
+  var t0 = Date.now(); mark('lock');
   try {
-    var se = schemaErrors(false);
+    var se = schemaErrors(false); mark('schema');
     if (se.length) return { ok: false, code: 'SCHEMA', error: 'Sheet sai cấu trúc: ' + se[0].sheet + ' – ' + se[0].msg, fields: se };
     var rq = sheet('Request'), logs = [];
     var store = {
-      get: function (id) { return findRequest(rq, id); },
+      get: function (id) { var r = findRequest(rq, id); mark('request?'); return r; },
       set: function (id, v) { rq.appendRow(QSchema.toRow('Request', { requestId: String(id), email: String(v.email), thoiGian: nowIso(), ketQua: JSON.stringify(v.data) })); }
     };
     var res = QIdem.once(store, u.email, req.requestId, function () {
@@ -252,7 +252,7 @@ function write(u, req, fn, pre) {
       bumpVersion();
       return d;
     });
-    SpreadsheetApp.flush();
+    mark('request+'); SpreadsheetApp.flush(); mark('flush');
     if (res.ok) { res.code = 'OK'; res.lockMs = Date.now() - t0; }
     return res;
   } catch (err) {
