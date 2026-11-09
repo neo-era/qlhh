@@ -334,3 +334,36 @@ test('bộ đệm luôn trùng nội dung sheet thật sau chuỗi thao tác h�
     assert.deepEqual(JSON.parse(str), JSON.parse(JSON.stringify(QS.toObjects(n, a.sheets[n].d))), 'bộ đệm lệch sheet: ' + n);
   }
 });
+test('máy chủ chết TRƯỚC khi ghi đầu phiếu (đầu phiếu ghi cuối cùng): lệnh sau dọn — trả serial, tồn đúng, phiếu không tồn tại', () => {
+  const { a, s, V } = shop();
+  V(nhap('2026-10-01', [{ maHang: 'LOGO', soLuongCT: 1, gia: 100, serials: ['S1'] }]));
+  const ph = a.sheets.Phieu, orig = ph.getRange; let armed = true;
+  ph.getRange = function (r, c, nr, nc) { if (armed && typeof r === 'number' && r === ph.getLastRow() + 1) { armed = false; ph.getRange = orig; throw new Error('chết khi ghi đầu phiếu'); } return orig.apply(this, arguments); };
+  assert.equal(V(nhap('2026-10-02', [{ maHang: 'LOGO', soLuongCT: 1, gia: 300, serials: ['S2'] }])).code, 'INTERNAL');
+  assert.equal(V(nhap('2026-10-03', [{ maHang: 'CB40', soLuongCT: 1, gia: 1 }])).ok, true);   // lệnh sau dọn mồ côi
+  const d = pull(a, s);
+  assert.deepEqual([tonOf(d, 'LOGO').soLuong, tonOf(d, 'LOGO').giaTri], [1, 100]);
+  assert.deepEqual(d.data.serials.map(x => x.serial), ['S1']);
+  assert.equal(d.data.vouchers.filter(p => p.loai === 'NHAP_MUA').length, 2);
+  assert.ok(a.sheets.NhatKy.d.some(r => r[2] === 'voucher.orphan'));
+  assert.equal(V(nhap('2026-10-04', [{ maHang: 'LOGO', soLuongCT: 1, gia: 300, serials: ['S2'] }])).ok, true, 'serial S2 nhập lại được');
+});
+test('đảo phiếu: chết trước khi ghi đầu phiếu đảo → phiếu gốc trở lại chưa đảo, tồn như cũ', () => {
+  const { a, s, V } = shop();
+  const p1 = V(nhap('2026-10-01', [{ maHang: 'CB40', soLuongCT: 10, gia: 100 }])).data.soPhieu;
+  const ph = a.sheets.Phieu, orig = ph.getRange; let armed = true;
+  ph.getRange = function (r) { if (armed && typeof r === 'number' && r === ph.getLastRow() + 1) { armed = false; ph.getRange = orig; throw new Error('chết'); } return orig.apply(this, arguments); };
+  assert.equal(a.post({ action: 'voucher.reverse', session: s, requestId: rid(), phieuGoc: p1, ngay: '2026-10-02', lyDo: 'x' }).code, 'INTERNAL');
+  assert.equal(V(nhap('2026-10-03', [{ maHang: 'CB40', soLuongCT: 1, gia: 100 }])).ok, true);
+  const d = pull(a, s);
+  assert.equal(d.data.vouchers.find(p => p.soPhieu === p1).daDao, false);
+  assert.equal(tonOf(d, 'CB40').soLuong, 11);
+  assert.equal(a.post({ action: 'voucher.reverse', session: s, requestId: rid(), phieuGoc: p1, ngay: '2026-10-04', lyDo: 'đảo lại' }).ok, true);
+});
+test('idempotent khi bộ đệm bị xoá sạch (Google dọn cache): vẫn tìm được yêu cầu cũ trong sheet Request → không tạo phiếu thứ 2', () => {
+  const { a, s } = shop(); const id = rid(), v = nhap('2026-10-01', [{ maHang: 'CB40', soLuongCT: 1, gia: 1 }]);
+  const r1 = a.post({ action: 'voucher.create', session: s, requestId: id, voucher: v });
+  for (const k of Object.keys(a.cache)) if (!k.startsWith('u:')) delete a.cache[k];
+  const r2 = a.post({ action: 'voucher.create', session: s, requestId: id, voucher: v });
+  assert.equal(r2.data.soPhieu, r1.data.soPhieu); assert.equal(a.sheets.Phieu.d.length - 1, 1);
+});

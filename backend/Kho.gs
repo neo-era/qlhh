@@ -113,27 +113,37 @@ function updateCost(ton, mas) {
 function setVoucherState(so, st, extra, known) {   // known = {row, obj}: phiếu vừa ghi, khỏi tìm lại
   var h = known ? Object.assign({ _row: known.row }, known.obj) : findByKey('Phieu', so); if (!h) return; var x = strip(h); x.trangThai = st; for (var k in (extra || {})) x[k] = extra[k];
   delete x.lines; putRow('Phieu', x, h._row);
-  if (st !== 'NHAP_DO') CacheService.getScriptCache().remove('pending:' + so);
 }
 /* Phiếu đang ghi dở: đánh dấu trong cache để lệnh sau biết có phiếu mồ côi mà KHÔNG phải quét sheet Phieu mỗi lần. */
-function markPending(so) { var c = CacheService.getScriptCache(), l = JSON.parse(c.get('pendingList') || '[]'); l.push(so); c.put('pendingList', JSON.stringify(l.slice(-50)), 21600); c.put('pending:' + so, '1', 21600); }
+/* info = {loai, phieuGoc, mas}: đủ để dọn phiếu mồ côi khi đầu phiếu CHƯA kịp ghi (đầu phiếu ghi cuối cùng, 1 lần, trạng thái HOAN_TAT). */
+function markPending(so, info) { var c = CacheService.getScriptCache(), l = JSON.parse(c.get('pendingList') || '[]'); l.push(so); c.put('pendingList', JSON.stringify(l.slice(-50)), 21600); c.put('pending:' + so, JSON.stringify(info || {}), 21600); }
+function clearPending(so) { CacheService.getScriptCache().remove('pending:' + so); }
 function pendingList() { var c = CacheService.getScriptCache(), l = JSON.parse(c.get('pendingList') || '[]'), live = l.filter(function (so) { return c.get('pending:' + so); }); if (live.length !== l.length) c.put('pendingList', JSON.stringify(live), 21600); return live; }
 
 /** Đầu lệnh ghi: phiếu NHAP_DO còn lại chắc chắn mồ côi (đang giữ khoá) → đánh dấu LOI_GHI, trả serial, tính lại tồn các mã của nó. */
+function revertSerials(so) {
+  var hist = readTable('LichSuSerial').rows.filter(function (h) { return h.soPhieu === so; }); if (!hist.length) return;
+  var cur = mapBy(readTable('Serial').rows, 'key'), ss = sheet('Serial'), cols = QSchema.SHEETS.Serial.cols;
+  hist.reverse().forEach(function (h) { var c = cur[h.key]; if (!c) return; var x = strip(c); x.trangThai = h.from || 'HUY'; x.kho = h.from ? h.khoTu : ''; x.capNhat = nowIso(); ss.getRange(c._row, 1, 1, cols.length).setValues([QSchema.toRow('Serial', x)]); });
+  dirty('Serial');
+}
 function cleanupOrphans(logs, full) {
-  var pend = pendingList(); if (!pend.length && !full) { mark('orphans none'); return; }   // cache mất (hiếm) → stock.rebuild quét đầy đủ
-  var s = sheet('Phieu'); if (s.getLastRow() < 2) return;
-  var orphans = readTail('Phieu', full ? 300 : 50).rows.filter(function (p) { return p.trangThai === 'NHAP_DO'; });
-  orphans.forEach(function (p) {
-    setVoucherState(p.soPhieu, 'LOI_GHI');
-    var hist = readTable('LichSuSerial').rows.filter(function (h) { return h.soPhieu === p.soPhieu; });
-    if (hist.length) {
-      var cur = mapBy(readTable('Serial').rows, 'key'), ss = sheet('Serial'), cols = QSchema.SHEETS.Serial.cols;
-      hist.reverse().forEach(function (h) { var c = cur[h.key]; if (!c) return; var x = strip(c); x.trangThai = h.from || 'HUY'; x.kho = h.from ? h.khoTu : ''; x.capNhat = nowIso(); ss.getRange(c._row, 1, 1, cols.length).setValues([QSchema.toRow('Serial', x)]); });
-    }
-    var mas = readTable('ChiTietPhieu').rows.filter(function (l) { return l.soPhieu === p.soPhieu; }).map(function (l) { return l.maHang; });
-    if (p.loai === 'DAO') { var g = loadVoucher(p.phieuGoc); if (g) { mas = mas.concat(g.lines.map(function (l) { return l.maHang; })); if (g.daDao) setVoucherState(g.soPhieu, g.trangThai, { daDao: false }); } }
-    if (mas.length) rebuildFor(uniq(mas));
+  var pend = pendingList(), c = CacheService.getScriptCache();
+  if (!pend.length && !full) { mark('orphans none'); return; }   // cache mất (hiếm) → stock.rebuild quét đầy đủ
+  pend.forEach(function (so) {
+    var info = {}; try { info = JSON.parse(c.get('pending:' + so) || '{}'); } catch (e) { }
+    var h = findByKey('Phieu', so);
+    if (h && h.trangThai === 'HOAN_TAT') { clearPending(so); return; }   // chết sau khi ghi đầu phiếu: phiếu đã đủ
+    if (h) setVoucherState(so, 'LOI_GHI');
+    revertSerials(so);
+    var mas = (info.mas || []).concat(readTable('ChiTietPhieu').rows.filter(function (l) { return l.soPhieu === so; }).map(function (l) { return l.maHang; }));
+    if (info.loai === 'DAO' && info.phieuGoc) { var g = loadVoucher(info.phieuGoc); if (g) { mas = mas.concat(g.lines.map(function (l) { return l.maHang; })); if (g.daDao) setVoucherState(g.soPhieu, g.trangThai, { daDao: false }); } }
+    if (mas.length) rebuildFor(uniq(mas));   // dòng phiếu không có đầu phiếu bị bỏ qua khi tính → TonKho, giá vốn về đúng
+    clearPending(so);
+    logs.push({ action: 'voucher.orphan', doiTuong: 'Phieu', id: so, truoc: { trangThai: h ? h.trangThai : 'CHUA_GHI_DAU_PHIEU' }, sau: { trangThai: 'LOI_GHI' } });
+  });
+  if (full) readTail('Phieu', 300).rows.filter(function (p) { return p.trangThai === 'NHAP_DO'; }).forEach(function (p) {   // phiếu dở dang kiểu cũ / bộ đệm mất
+    setVoucherState(p.soPhieu, 'LOI_GHI'); revertSerials(p.soPhieu);
     logs.push({ action: 'voucher.orphan', doiTuong: 'Phieu', id: p.soPhieu, truoc: { trangThai: 'NHAP_DO' }, sau: { trangThai: 'LOI_GHI' } });
   });
 }
@@ -242,15 +252,16 @@ function voucherCreate(u, req, logs, ctx) {
   var tong = 0;
   lines.forEach(function (l) { l.soPhieu = so; l.giaTriKho = r.result.lines['~MOI#' + l.dong]; l.chenhLechGV = (r.result.adj && r.result.adj['~MOI#' + l.dong]) || ''; tong += priced ? Number(l.thanhTien) : Number(l.giaTriKho) || 0; });
   var head = { soPhieu: so, stt: stt, loai: h.loai, ngay: h.ngay, kho: h.kho, khoDen: h.khoDen, maNCC: h.maNCC, maKH: h.maKH, maCongTrinh: h.maCongTrinh, phieuGoc: h.phieuGoc, daDao: false,
-    trangThai: 'NHAP_DO', nguoiGiaoNhan: h.nguoiGiaoNhan, lyDo: h.lyDo, soCTGoc: h.soCTGoc, ngayCTGoc: h.ngayCTGoc, tongTien: tong, ghiChu: h.ghiChu, nguoiTao: u.email, thoiGian: nowIso(), requestId: String(req.requestId), hieuLuc: '' };
+    trangThai: 'HOAN_TAT', nguoiGiaoNhan: h.nguoiGiaoNhan, lyDo: h.lyDo, soCTGoc: h.soCTGoc, ngayCTGoc: h.ngayCTGoc, tongTien: tong, ghiChu: h.ghiChu, nguoiTao: u.email, thoiGian: nowIso(), requestId: String(req.requestId), hieuLuc: '' };
   if (lines.some(function (l) { return JSON.stringify(l.serials).length > 45000; })) throw fail('VALIDATION', 'Quá nhiều serial trong 1 dòng — tách phiếu', null);
-  markPending(so); var hr = appendBlock('Phieu', [head]);
+  markPending(so, { loai: h.loai, mas: mas });
   appendBlock('ChiTietPhieu', lines.map(function (l) { var c = {}; for (var k in l) c[k] = l[k]; c.serials = l.serials.length ? JSON.stringify(l.serials.map(QSerial.norm)) : ''; return c; }));
   applySerials(sr.changes, so);
   var changed = all ? applyChanges(r.changes, all.rowOf, mas) : 0;
   Object.keys(r.result.ton).forEach(function (m) { var t = r.result.ton[m]; if (t.last && t.last.stt === sttTry) t.last.stt = stt; });
   writeTon(r.result.ton, mas); updateCost(r.result.ton, mas);
-  setVoucherState(so, 'HOAN_TAT', null, { row: hr, obj: head }); markDone(req.requestId, u.email, so, stt);
+  appendBlock('Phieu', [head]);   // ĐẦU PHIẾU GHI CUỐI, 1 LẦN: có đầu phiếu = phiếu đủ (thiếu đầu phiếu thì dòng phiếu bị bỏ qua và được dọn)
+  clearPending(so); markDone(req.requestId, u.email, so, stt);
   logs.push({ action: 'voucher.create', doiTuong: 'Phieu', id: so, truoc: null, sau: { loai: h.loai, ngay: h.ngay, kho: h.kho, soDong: lines.length, tinhLai: changed } });
   return { soPhieu: so, stt: stt, tinhLai: changed };
 }
@@ -275,14 +286,15 @@ function voucherReverse(u, req, logs) {
   var stt = nextId('stt'), yr = ngay.slice(0, 4), so = 'DA-' + yr + '-' + pad(nextId('PH:DA:' + yr), 5), tong = 0;
   var lines = g.lines.map(function (l) { var v = r.result.lines['~MOI#' + l.dong] || 0; tong += v;
     return { soPhieu: so, dong: l.dong, maHang: l.maHang, dvt: l.dvt, soLuongCT: l.soLuongCT, heSo: l.heSo, soLuong: l.soLuong, donGia: l.donGia, thanhTien: l.thanhTien, giaTriKho: v, slSoSach: l.slSoSach, slThucTe: l.slThucTe, dongGoc: l.dong, serials: l.serials.length ? JSON.stringify(l.serials) : '', chenhLechGV: r.result.adj['~MOI#' + l.dong] || '' }; });
-  markPending(so); var dhead = { soPhieu: so, stt: stt, loai: 'DAO', ngay: ngay, kho: g.kho, khoDen: g.khoDen, maNCC: g.maNCC, maKH: g.maKH, maCongTrinh: g.maCongTrinh, phieuGoc: gso, daDao: false,
-    trangThai: 'NHAP_DO', nguoiGiaoNhan: '', lyDo: lyDo, soCTGoc: gso, ngayCTGoc: g.ngay, tongTien: tong, ghiChu: '', nguoiTao: u.email, thoiGian: nowIso(), requestId: String(req.requestId), hieuLuc: r.hieuLuc }, dr = appendBlock('Phieu', [dhead]);
+  markPending(so, { loai: 'DAO', phieuGoc: gso, mas: mas }); var dhead = { soPhieu: so, stt: stt, loai: 'DAO', ngay: ngay, kho: g.kho, khoDen: g.khoDen, maNCC: g.maNCC, maKH: g.maKH, maCongTrinh: g.maCongTrinh, phieuGoc: gso, daDao: false,
+    trangThai: 'HOAN_TAT', nguoiGiaoNhan: '', lyDo: lyDo, soCTGoc: gso, ngayCTGoc: g.ngay, tongTien: tong, ghiChu: '', nguoiTao: u.email, thoiGian: nowIso(), requestId: String(req.requestId), hieuLuc: r.hieuLuc };
   appendBlock('ChiTietPhieu', lines);
   applySerials(sr.changes, so);
   var changed = applyChanges(r.changes, all.rowOf, mas);
   writeTon(r.result.ton, mas); updateCost(r.result.ton, mas);
   setVoucherState(gso, 'HOAN_TAT', { daDao: true });
-  setVoucherState(so, 'HOAN_TAT', null, { row: dr, obj: dhead }); markDone(req.requestId, u.email, so, stt);
+  appendBlock('Phieu', [dhead]);   // đầu phiếu đảo ghi cuối
+  clearPending(so); markDone(req.requestId, u.email, so, stt);
   logs.push({ action: 'voucher.reverse', doiTuong: 'Phieu', id: so, truoc: { phieuGoc: gso }, sau: { ngay: ngay, lyDo: lyDo, tinhLai: changed } });
   return { soPhieu: so, tinhLai: changed };
 }

@@ -244,7 +244,10 @@ function write(u, req, fn, pre) {
     var rq = sheet('Request'), logs = [];
     var store = {
       get: function (id) { var r = findRequest(rq, id); mark('request?'); return r; },
-      set: function (id, v) { rq.appendRow(QSchema.toRow('Request', { requestId: String(id), email: String(v.email), thoiGian: nowIso(), ketQua: JSON.stringify(v.data) })); }
+      set: function (id, v) {
+        rq.appendRow(QSchema.toRow('Request', { requestId: String(id), email: String(v.email), thoiGian: nowIso(), ketQua: JSON.stringify(v.data) }));
+        try { CacheService.getScriptCache().put('req:' + id, JSON.stringify({ email: String(v.email), data: v.data }), 21600); } catch (e) { }
+      }
     };
     var res = QIdem.once(store, u.email, req.requestId, function () {
       var d = fn(u, req, logs, ctx);
@@ -260,13 +263,18 @@ function write(u, req, fn, pre) {
     throw err;
   } finally { try { flushVers(); } finally { lock.releaseLock(); } }   // phiên bản bảng lên TRƯỚC khi nhả khoá
 }
+/* Tra requestId đã xử lý: bộ đệm trước (lần gửi lại thường trong vài giây), rồi đọc 300 dòng cuối của Request trong 1 lần gọi
+   (thay cho tìm kiếm toàn cột). Gửi lại sau hơn 300 lệnh ghi không xảy ra với cách client giữ requestId theo hộp thoại. */
 function findRequest(rq, id) {
-  if (rq.getLastRow() < 2) return null;
-  var cell = rq.getRange(2, 1, rq.getLastRow() - 1, 1).createTextFinder(String(id)).matchEntireCell(true).matchCase(true).findNext();
-  if (!cell) return null;
-  var r = rq.getRange(cell.getRow(), 1, 1, 4).getValues()[0], data;
-  try { data = JSON.parse(r[3]); } catch (e) { data = { loi: 'ketQua hỏng' }; }
-  return { email: String(r[1]), data: data };
+  var c = CacheService.getScriptCache(), hit = c.get('req:' + id);
+  if (hit) { try { return JSON.parse(hit); } catch (e) { } }
+  var last = rq.getLastRow(); if (last < 2) return null;
+  var n = Math.min(300, last - 1), v = rq.getRange(last - n + 1, 1, n, 4).getValues();
+  for (var i = v.length - 1; i >= 0; i--) if (String(v[i][0]) === String(id)) {
+    var data; try { data = JSON.parse(v[i][3]); } catch (e) { data = { loi: 'ketQua hỏng' }; }
+    return { email: String(v[i][1]), data: data };
+  }
+  return null;
 }
 function bumpVersion() { var p = props(); p.setProperty('dataVersion', String(Number(p.getProperty('dataVersion') || 1) + 1)); }
 function nextId(key) { var p = props(), v = Number(p.getProperty('seq:' + key) || 0) + 1; p.setProperty('seq:' + key, String(v)); return v; }
