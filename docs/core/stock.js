@@ -48,7 +48,7 @@ var QStock=(function(){
     opts=opts||{};var loi=loiSet(opts),lock=opts.ngayKhoaSo||'';
     var act=active(vouchers),by={};act.forEach(function(p){by[key(p)]=p;});
     var ev=act.map(function(p){return {p:p,pos:posOfIn(p,by,lock)};}).sort(function(a,b){return cmpPos(a.pos,b.pos);});
-    var st={},lines={},errors=[];
+    var st={},lines={},errors=[],adj={};
     function S(ma){return st[ma]||(st[ma]={pq:0,pv:0,kho:{},last:null,la:0});}
     // chốt chặn giá trị: không âm, hết số lượng thì hết giá trị; ghi nhận giá BQ gần nhất
     function vguard(ma,p){var s=S(ma);if(s.pq>0)s.la=s.pv/s.pq;
@@ -58,6 +58,10 @@ var QStock=(function(){
     function out(ma,kh,q,p){var s=S(ma),v=0;s.kho[kh]=(s.kho[kh]||0)-q;
       if(!loi[kh]){if(s.pq>0)v=q>=s.pq?s.pv:money(s.pv*q/s.pq);s.pq-=q;s.pv-=v;if(s.pq<=0&&s.kho[kh]>=0){s.pv=s.pq===0?0:s.pv;}}
       neg(ma,kh,p);return v;}
+    /* Giảm tồn theo một giá trị đích (giá gốc): trừ tối đa giá trị đang tồn; SL về 0 thì trừ trọn phần còn lại.
+       Phần lệch so với giá đích → adj (điều chỉnh giá vốn, TK 632) để không kẹt khi giá trị tồn không đủ. */
+    function capOut(ma,kh,q,target,p){var s=S(ma);if(loi[kh]){out(ma,kh,q,p);return {v:0,d:0};}
+      var pq0=s.pq,pv0=s.pv;out(ma,kh,q,p);var rem=q>=pq0?pv0:Math.max(0,Math.min(target,pv0));s.pv=pv0-rem;return {v:rem,d:target-rem};}
     function avgVal(ma,q){var s=S(ma);return s.pq>0?(q>=s.pq?s.pv:money(s.pv*q/s.pq)):money(s.la*q);}
     function doLine(p,l,dir,valueIn){
       var ma=l.maHang,q,v=0;
@@ -68,7 +72,7 @@ var QStock=(function(){
       if(p.loai==='KIEM_KE'||(p._rev&&p._rev==='KIEM_KE')){
         var d=Q(l.slThucTe)-Q(l.slSoSach);if(dir<0)d=-d;
         if(d>0){v=valueIn!==undefined?valueIn:avgVal(ma,d);inn(ma,p.kho,d,v);}
-        else if(d<0){v=out(ma,p.kho,-d,p);if(valueIn!==undefined&&!loi[p.kho]&&v!==valueIn){S(ma).pv+=v-valueIn;v=valueIn;}}
+        else if(d<0){if(valueIn!==undefined&&!loi[p.kho]){var cr=capOut(ma,p.kho,-d,valueIn,p);v=cr.v;if(cr.d)adj[p.soPhieu+'#'+l.dong]=cr.d;}else v=out(ma,p.kho,-d,p);}
         return v;
       }
       q=Q(l.soLuong);
@@ -78,14 +82,17 @@ var QStock=(function(){
     ev.forEach(function(e){
       var p=e.p,t=T[p.loai];if(!t)return;
       if(p.loai==='DAO'){
-        var g=by[p.phieuGoc];if(!g||!T[g.loai])return;var tg=T[g.loai];
+        var g=by[p.phieuGoc];if(!g||!T[g.loai])return;var tg=T[g.loai],atGoc=daoMode(p,g,lock)==='GOC';
         var rp={soPhieu:p.soPhieu,ngay:p.ngay,kho:g.kho,khoDen:g.khoDen,loai:'DAO',_rev:g.loai};
         (g.lines||[]).forEach(function(l){
           var gv=lines[g.soPhieu+'#'+l.dong]||0,v;
           if(g.loai==='CHUYEN_KHO')v=doLine(rp,l,-1);
           else if(g.loai==='KIEM_KE')v=doLine(rp,l,-1,gv);
-          else if(tg.dir>0){v=out(l.maHang,g.kho,Q(l.soLuong),rp);if(!loi[g.kho]&&v!==gv){var s=S(l.maHang);s.pv+=v-gv;v=gv;}}
-          else{inn(l.maHang,g.kho,Q(l.soLuong),loi[g.kho]?0:gv);v=gv;}
+          else if(tg.dir>0){
+            if(atGoc){v=out(l.maHang,g.kho,Q(l.soLuong),rp);if(!loi[g.kho]&&v!==gv){var s=S(l.maHang);s.pv+=v-gv;v=gv;}}   // ngay sau phiếu gốc: luôn đủ giá trị
+            else{var cr=capOut(l.maHang,g.kho,Q(l.soLuong),gv,rp);v=cr.v;if(cr.d)adj[p.soPhieu+'#'+l.dong]=cr.d;}
+          }
+          else{inn(l.maHang,g.kho,Q(l.soLuong),loi[g.kho]?0:gv);v=gv;var ga=adj[g.soPhieu+'#'+l.dong];if(ga)adj[p.soPhieu+'#'+l.dong]=-ga;}
           lines[p.soPhieu+'#'+l.dong]=v;S(l.maHang).last={ngay:p.ngay,stt:Number(p.stt)||0};vguard(l.maHang,rp);
         });
         return;
@@ -101,14 +108,14 @@ var QStock=(function(){
           v=doLine(p,l,1,loi[p.kho]?0:v);
         }else if(p.loai==='TRA_NCC'&&!loi[p.kho]&&p.phieuGoc){   // trả NCC: theo giá của dòng nhập gốc (khớp công nợ 331)
           var g3=by[p.phieuGoc],gl3=gocLine(g3,l),gv3=gl3&&gl3!=='MULTI'?money((lines[g3.soPhieu+'#'+gl3.dong]||0)*Q(l.soLuong)/Q(gl3.soLuong)):0;
-          v=out(ma,p.kho,Q(l.soLuong),p);S(ma).pv+=v-gv3;v=gv3;
+          var cr3=capOut(ma,p.kho,Q(l.soLuong),gv3,p);v=cr3.v;if(cr3.d)adj[p.soPhieu+'#'+l.dong]=cr3.d;
         }else v=doLine(p,l,t.dir||1);
         lines[p.soPhieu+'#'+l.dong]=v;S(ma).last={ngay:p.ngay,stt:Number(p.stt)||0};vguard(ma,p);
       });
     });
     var ton={};Object.keys(st).forEach(function(ma){var s=st[ma],k={};Object.keys(s.kho).forEach(function(x){k[x]=R(s.kho[x]);});
       ton[ma]={pool:{q:R(s.pq),v:s.pv},kho:k,last:s.last};});
-    return {ton:ton,lines:lines,errors:errors};
+    return {ton:ton,lines:lines,errors:errors,adj:adj};
   }
 
   // ---------- kiểm phiếu (không cần lịch sử) ----------
@@ -221,8 +228,8 @@ var QStock=(function(){
     }
     var changes=[];
     active(all).forEach(function(x){(x.lines||[]).forEach(function(l){
-      if(x.loai==='DAO')return;var nv=after.lines[x.soPhieu+'#'+l.dong];
-      if(l.giaTriKho!==undefined&&l.giaTriKho!==''&&nv!==undefined&&Number(l.giaTriKho)!==nv)changes.push({soPhieu:x.soPhieu,dong:l.dong,maHang:l.maHang,ngay:x.ngay,old:Number(l.giaTriKho),new:nv});
+      if(x.loai==='DAO')return;var k=x.soPhieu+'#'+l.dong,nv=after.lines[k],na=after.adj[k]||0;
+      if(l.giaTriKho!==undefined&&l.giaTriKho!==''&&nv!==undefined&&(Number(l.giaTriKho)!==nv||(Number(l.chenhLechGV)||0)!==na))changes.push({soPhieu:x.soPhieu,dong:l.dong,maHang:l.maHang,ngay:x.ngay,old:Number(l.giaTriKho),new:nv,adj:na});
     });});
     if(lock&&changes.some(function(c){return c.ngay<=lock;}))return {ok:false,code:'PERIOD_LOCKED',errors:[{dong:0,field:'ngay',msg:'Phiếu làm đổi giá vốn trong kỳ đã khoá sổ'}]};
     return {ok:true,result:after,changes:changes,pos:posOfIn(cand,by,lock),hieuLuc:hl};
@@ -254,7 +261,7 @@ var QStock=(function(){
     var out={};Object.keys(ton||{}).forEach(function(m){out[m]=ton[m];});
     Object.keys(mas).forEach(function(m){var x=r.ton[m];out[m]={pool:x.pool,kho:Object.assign({},(ton&&ton[m]&&ton[m].kho)||{},x.kho),last:{ngay:p.ngay,stt:Number(p.stt)||0}};});
     var ln={};(p.lines||[]).forEach(function(l){ln[p.soPhieu+'#'+l.dong]=r.lines[p.soPhieu+'#'+l.dong];});
-    return {ok:true,result:{ton:out,lines:ln,errors:[]},changes:[],pos:pos};
+    return {ok:true,result:{ton:out,lines:ln,errors:[],adj:{}},changes:[],pos:pos};
   }
 
   // ---------- quy đổi ĐVT: dòng nhập theo ĐVT phụ → ĐVT chính ----------
@@ -273,10 +280,11 @@ var QStock=(function(){
   function nxt(vouchers,from,to,opts){
     opts=opts||{};var lock=opts.ngayKhoaSo||'',loi=loiSet(opts),act=active(vouchers),by={};act.forEach(function(p){by[key(p)]=p;});
     var all=replay(act,opts),dau=replay(act.filter(function(p){return effDate(p,by,lock)<from;}),opts),cuoi=replay(act.filter(function(p){return effDate(p,by,lock)<=to;}),opts);
-    var rows={};function R0(m){return rows[m]||(rows[m]={maHang:m,dauQ:0,dauV:0,nhapQ:0,nhapV:0,xuatQ:0,xuatV:0,cuoiQ:0,cuoiV:0});}
+    var rows={};function R0(m){return rows[m]||(rows[m]={maHang:m,dauQ:0,dauV:0,nhapQ:0,nhapV:0,xuatQ:0,xuatV:0,cuoiQ:0,cuoiV:0,dcV:0});}
     function add(m,sign,q,v){var r=R0(m);if(sign>0){r.nhapQ+=q;r.nhapV+=v;}else{r.xuatQ+=q;r.xuatV+=v;}}
     act.forEach(function(p){
       var d=effDate(p,by,lock);if(d<from||d>to)return;var t=T[p.loai];if(!t||p.loai==='CHUYEN_KHO')return;
+      Object.keys(all.adj).forEach(function(k){if(k.indexOf(p.soPhieu+'#')!==0)return;var dg=Number(k.split('#')[1]),src=p.loai==='DAO'?by[p.phieuGoc]:p,ln=src&&(src.lines||[]).filter(function(x){return Number(x.dong)===dg;})[0];if(ln)R0(ln.maHang).dcV+=all.adj[k];});
       if(p.loai==='DAO'){var g=by[p.phieuGoc];if(!g||g.loai==='CHUYEN_KHO'||!T[g.loai])return;var tg=T[g.loai];
         (g.lines||[]).forEach(function(l){if(loi[g.kho])return;var v=all.lines[p.soPhieu+'#'+l.dong]||0;
           if(g.loai==='KIEM_KE'){var dd=Q(l.slThucTe)-Q(l.slSoSach);add(l.maHang,dd>0?1:-1,-Math.abs(dd),-v);}

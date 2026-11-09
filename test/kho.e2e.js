@@ -84,7 +84,7 @@ const toast = p => p.$$eval('.toast', ts => ts.map(t => t.textContent).join(' | 
   await p.evaluate(() => { window.print = () => { window.__printed = document.querySelector('#printArea').innerText; }; });
   await p.click('#vPrint'); await p.waitForTimeout(300);
   const pd = await p.evaluate(() => window.__printed || '');
-  ok(/PHIẾU XUẤT KHO \(ĐẢO\)/.test(pd) && /Mẫu số 02 - VT/.test(pd) && /Đảo chứng từ số PX-/.test(pd) && /-7/.test(pd) && /Âm/.test(pd), 'in phiếu đảo: mẫu phiếu gốc, số âm, ghi rõ chứng từ bị đảo');
+  ok(/PHIẾU XUẤT KHO \(ĐẢO\)/.test(pd) && /Mẫu số 02 - VT/.test(pd) && /Đảo chứng từ số PX-/.test(pd) && /-7/.test(pd) && /ghi âm/.test(pd), 'in phiếu đảo: mẫu phiếu gốc, số âm, ghi rõ chứng từ bị đảo');
   ok(/Địa chỉ|Số 63\/23A/.test(pd), 'bản in có địa chỉ đơn vị');
   await p.evaluate(() => { const x = document.querySelector('#printArea'); if (x) x.remove(); document.body.classList.remove('printing'); }); await p.keyboard.press('Escape');
   // trả NCC từ phiếu nhập gốc

@@ -17,8 +17,8 @@ var QSchema=(function(){
     CongTrinh:{key:'maCongTrinh',cols:['maCongTrinh','ten','maKH','diaChi','chuDauTu','ngayBatDau','ngayNghiemThu','trangThai'],text:['maCongTrinh','maKH','ngayBatDau','ngayNghiemThu']},
     Phieu:{key:'soPhieu',cols:['soPhieu','stt','loai','ngay','kho','khoDen','maNCC','maKH','maCongTrinh','phieuGoc','daDao','trangThai','nguoiGiaoNhan','lyDo','soCTGoc','ngayCTGoc','tongTien','ghiChu','nguoiTao','thoiGian','requestId','hieuLuc'],
       num:['stt','tongTien'],bool:['daDao'],text:['soPhieu','ngay','kho','khoDen','maNCC','maKH','maCongTrinh','phieuGoc','soCTGoc','ngayCTGoc','requestId','hieuLuc']},
-    ChiTietPhieu:{cols:['soPhieu','dong','maHang','dvt','soLuongCT','heSo','soLuong','donGia','thanhTien','giaTriKho','slSoSach','slThucTe','dongGoc','serials'],
-      num:['dong','soLuongCT','heSo','soLuong','donGia','thanhTien','giaTriKho','slSoSach','slThucTe','dongGoc'],text:['soPhieu','maHang']},
+    ChiTietPhieu:{cols:['soPhieu','dong','maHang','dvt','soLuongCT','heSo','soLuong','donGia','thanhTien','giaTriKho','slSoSach','slThucTe','dongGoc','serials','chenhLechGV'],
+      num:['dong','soLuongCT','heSo','soLuong','donGia','thanhTien','giaTriKho','slSoSach','slThucTe','dongGoc','chenhLechGV'],text:['soPhieu','maHang']},
     Serial:{key:'key',cols:['key','hang','serial','maHang','trangThai','kho','capNhat'],text:['key','hang','serial','maHang','kho']},
     LichSuSerial:{cols:['soPhieu','key','maHang','from','to','khoTu','khoDen','thoiGian'],text:['soPhieu','key','maHang','khoTu','khoDen']},
     TonKho:{cols:['maHang','kho','soLuong','giaTri','ngayCuoi','sttCuoi'],num:['soLuong','giaTri','sttCuoi'],text:['maHang','kho','ngayCuoi']}

@@ -258,11 +258,13 @@ test('X2 khoá sổ SAU khi đảo không được đổi giá vốn kỳ đã k
   assert.equal(val(r, v[2].soPhieu), 5000000, 'khoá sổ sau không làm đổi');
   assert.equal(K.nxt([...v, dao], '2026-10-01', '2026-10-31', { ngayKhoaSo: '2026-10-31' })[0].cuoiV, 5000000);
 });
-test('X1 đảo phiếu nhập kỳ đã khoá làm giá trị tồn âm → từ chối', () => {
+test('X1 đảo phiếu nhập kỳ đã khoá khi giá trị tồn không đủ: không để giá trị âm — trừ tối đa giá trị tồn, phần thiếu → điều chỉnh giá vốn', () => {
   const n2 = nhap('2026-09-02', 1, 10000);
   const v = [nhap('2026-09-01', 10, 100), n2, xuat('2026-10-05', 5)];
-  const c = K.check(v, P('DAO', '2026-10-20', 'K1', [], { phieuGoc: n2.soPhieu }), { ngayKhoaSo: '2026-09-30' });
-  assert.equal(c.ok, false); assert.equal(c.code, 'VALIDATION'); assert.match(c.errors[0].msg, /giá trị tồn/);
+  const d = P('DAO', '2026-10-20', 'K1', [], { phieuGoc: n2.soPhieu });
+  const c = K.check(v, d, { ngayKhoaSo: '2026-09-30' });
+  assert.equal(c.ok, true, JSON.stringify(c));
+  assert.ok(c.result.ton.A.pool.v >= 0); assert.equal(c.result.ton.A.pool.v, 0); assert.equal(c.result.adj[d.soPhieu + '#1'], 4000);
 });
 test('X3 đảo phiếu xuất đã có khách trả → chặn (đảo phiếu khách trả trước)', () => {
   const v = [nhap('2026-10-01', 10, 100), xuat('2026-10-02', 5)];
@@ -307,4 +309,35 @@ test('kiểm kê phải là phiếu mới nhất của mã tại kho', () => {
   const v = [nhap('2026-10-01', 10, 100), xuat('2026-10-06', 1)];
   assert.equal(K.check(v, P('KIEM_KE', '2026-10-05', 'K1', [{ maHang: 'A', slSoSach: 10, slThucTe: 9 }]), {}).code, 'VALIDATION');
   assert.equal(K.check(v, P('KIEM_KE', '2026-10-06', 'K1', [{ maHang: 'A', slSoSach: 9, slThucTe: 9 }]), {}).ok, true);
+});
+
+// ===== duyệt vòng 2: trả NCC theo giá gốc khi giá trị tồn không đủ =====
+test('Y1 trả NCC lô giá cao khi giá trị tồn ít hơn: trừ hết giá trị tồn, chênh lệch → điều chỉnh giá vốn (632)', () => {
+  const n1 = nhap('2026-10-01', 10, 100), n2 = nhap('2026-10-02', 10, 1000), x = xuat('2026-10-03', 15);
+  const tn = P('TRA_NCC', '2026-10-04', 'K1', [{ maHang: 'A', soLuong: 5 }], { phieuGoc: n2.soPhieu });
+  const c = K.check([n1, n2, x], tn, {});
+  assert.equal(c.ok, true, JSON.stringify(c));
+  assert.equal(val(c.result, tn.soPhieu), 2750); assert.equal(c.result.adj[tn.soPhieu + '#1'], 2250);
+  assert.deepEqual([c.result.ton.A.pool.q, c.result.ton.A.pool.v], [0, 0]);
+  const r = K.nxt([n1, n2, x, { ...tn, trangThai: 'HOAN_TAT', stt: 99 }], '2026-10-01', '2026-10-31', {})[0];
+  assert.equal(r.dcV, 2250); assert.equal(r.dauV + r.nhapV - r.xuatV, r.cuoiV);
+});
+test('Y2 trả NCC toàn bộ lô giá thấp khiến SL về 0: trừ trọn giá trị còn lại, chênh lệch âm (giảm giá vốn)', () => {
+  const n1 = nhap('2026-10-01', 10, 100), n2 = nhap('2026-10-02', 10, 200), x = xuat('2026-10-03', 10);
+  const tn = P('TRA_NCC', '2026-10-04', 'K1', [{ maHang: 'A', soLuong: 10 }], { phieuGoc: n1.soPhieu });
+  const c = K.check([n1, n2, x], tn, {});
+  assert.equal(c.ok, true, JSON.stringify(c));
+  assert.equal(val(c.result, tn.soPhieu), 1500); assert.equal(c.result.adj[tn.soPhieu + '#1'], -500);
+  assert.deepEqual([c.result.ton.A.pool.q, c.result.ton.A.pool.v], [0, 0]);
+});
+test('Y2b đảo phiếu trả NCC có chênh lệch → trả lại đúng giá trị đã trừ', () => {
+  const n1 = nhap('2026-10-01', 10, 100), n2 = nhap('2026-10-02', 10, 200), x = xuat('2026-10-03', 10);
+  const tn = P('TRA_NCC', '2026-10-04', 'K1', [{ maHang: 'A', soLuong: 10 }], { phieuGoc: n1.soPhieu });
+  const c = K.check([n1, n2, x, tn], P('DAO', '2026-10-05', 'K1', [], { phieuGoc: tn.soPhieu }), {});
+  assert.equal(c.ok, true); assert.deepEqual([c.result.ton.A.pool.q, c.result.ton.A.pool.v], [10, 1500]);
+});
+test('đảo phiếu nhập ở kỳ đã khoá làm SL về 0: trừ trọn giá trị còn lại, chênh lệch → điều chỉnh (không kẹt)', () => {
+  const n1 = nhap('2026-09-01', 10, 100), n2 = nhap('2026-09-02', 10, 300), x = xuat('2026-10-02', 10);
+  const c = K.check([n1, n2, x], P('DAO', '2026-10-05', 'K1', [], { phieuGoc: n2.soPhieu }), { ngayKhoaSo: '2026-09-30' });
+  assert.equal(c.ok, true, JSON.stringify(c)); assert.deepEqual([c.result.ton.A.pool.q, c.result.ton.A.pool.v], [0, 0]);
 });

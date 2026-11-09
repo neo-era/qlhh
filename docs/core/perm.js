@@ -25,7 +25,7 @@ var QPerm=(function(){
   /* Dòng phiếu: người không phải Quản trị không thấy đơn giá / thành tiền / giá trị kho (kể cả phiếu nhập do chính họ lập). */
   function filterLines(role,lines){
     var c=copy(lines);if(role==='QUAN_TRI')return c;
-    c.forEach(function(l){delete l.donGia;delete l.thanhTien;delete l.giaTriKho;});return c;
+    c.forEach(function(l){delete l.donGia;delete l.thanhTien;delete l.giaTriKho;delete l.chenhLechGV;});return c;
   }
   return {can:can,filterForRole:filterForRole,filterLines:filterLines,ACT:ACT};
 })();

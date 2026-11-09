@@ -236,3 +236,15 @@ test('tính lại tồn từ chối khi Sheet phiếu có dòng sai kiểu (trá
   const r = a.post({ action: 'stock.rebuild', session: s, requestId: rid() });
   assert.equal(r.code, 'VALIDATION'); assert.match(r.error, /ChiTietPhieu/);
 });
+test('Y2 qua máy chủ: trả NCC toàn bộ lô giá thấp → lưu chênh lệch giá vốn, N-X-T có cột điều chỉnh, Nhập liệu không thấy', () => {
+  const { a, s, V } = shop();
+  const n1 = V(nhap('2026-10-01', [{ maHang: 'CB40', soLuongCT: 10, gia: 100 }])).data.soPhieu;
+  V(nhap('2026-10-02', [{ maHang: 'CB40', soLuongCT: 10, gia: 200 }]));
+  V({ loai: 'XUAT_BAN', ngay: '2026-10-03', kho: 'KHO', maKH: 'TN', maCongTrinh: 'PDG', lines: [{ maHang: 'CB40', soLuongCT: 10 }] });
+  const t = V({ loai: 'TRA_NCC', ngay: '2026-10-04', kho: 'KHO', maNCC: 'NCC1', phieuGoc: n1, lines: [{ maHang: 'CB40', soLuongCT: 10, dongGoc: 1 }] });
+  assert.equal(t.ok, true, JSON.stringify(t));
+  const g = a.post({ action: 'voucher.get', session: s, soPhieu: t.data.soPhieu }).data.lines[0];
+  assert.deepEqual([g.giaTriKho, g.chenhLechGV], [1500, -500]);
+  assert.equal(a.post({ action: 'report.nxt', session: s, from: '2026-10-01', to: '2026-10-31' }).data.rows[0].dcV, -500);
+  assert.equal('chenhLechGV' in a.post({ action: 'voucher.get', session: a.login(NV), soPhieu: t.data.soPhieu }).data.lines[0], false);
+});

@@ -453,7 +453,7 @@
         ${p.lyDo ? `<dt>Lý do</dt><dd>${esc(p.lyDo)}</dd>` : ''}${p.soCTGoc ? `<dt>Chứng từ gốc</dt><dd>${esc(p.soCTGoc)}${p.ngayCTGoc ? ' ngày ' + esc(p.ngayCTGoc) : ''}</dd>` : ''}
         <dt>Người lập</dt><dd>${esc(p.nguoiTao)}</dd>${p.daDao ? '<dt>Trạng thái</dt><dd><span class="tag stop">Đã đảo</span></dd>' : ''}</dl>
       <div class="tbl" style="max-height:none"><table><thead><tr><th>#</th><th>Hàng</th><th class="n">${p.loai === 'KIEM_KE' ? 'Sổ sách → Thực tế' : 'Số lượng'}</th>${showMoney ? '<th class="n">Giá trị kho</th>' : ''}</tr></thead><tbody>
-        ${L.map(l => { const i = itemOf(l.maHang); return `<tr><td>${l.dong}</td><td><span class="mono">${esc(l.maHang)}</span> ${esc(i.ten)}${l.serials && l.serials.length ? `<br><small class="mono">${l.serials.map(esc).join(', ')}</small>` : ''}</td><td class="n">${p.loai === 'KIEM_KE' ? num(l.slSoSach) + ' → ' + num(l.slThucTe) : num(l.soLuongCT) + ' ' + esc(l.dvt)}${l.heSo && l.heSo !== 1 ? `<br><small class="mut">= ${num(l.soLuong)} ${esc(i.dvt)}</small>` : ''}</td>${showMoney ? `<td class="n">${money(l.giaTriKho)}</td>` : ''}</tr>`; }).join('')}</tbody></table></div>
+        ${L.map(l => { const i = itemOf(l.maHang); return `<tr><td>${l.dong}</td><td><span class="mono">${esc(l.maHang)}</span> ${esc(i.ten)}${l.serials && l.serials.length ? `<br><small class="mono">${l.serials.map(esc).join(', ')}</small>` : ''}</td><td class="n">${p.loai === 'KIEM_KE' ? num(l.slSoSach) + ' → ' + num(l.slThucTe) : num(l.soLuongCT) + ' ' + esc(l.dvt)}${l.heSo && l.heSo !== 1 ? `<br><small class="mut">= ${num(l.soLuong)} ${esc(i.dvt)}</small>` : ''}</td>${showMoney ? `<td class="n">${money(l.giaTriKho)}${Number(l.chenhLechGV) ? `<br><small class="mut">chênh lệch GV ${money(l.chenhLechGV)}</small>` : ''}</td>` : ''}</tr>`; }).join('')}</tbody></table></div>
       ${showMoney ? `<p style="text-align:right"><b>Tổng: ${money(p.tongTien)}</b></p>` : '<p class="mut" style="font-size:12.5px">Đơn giá, giá trị chỉ Quản trị xem được.</p>'}
       <div class="acts" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"><button class="btn" type="button" id="vPrint">In phiếu</button>${canRet ? '<button class="btn" type="button" id="vRet">Khách trả hàng</button>' : ''}${canTn ? '<button class="btn" type="button" id="vTn">Trả nhà cung cấp</button>' : ''}${canRev ? '<button class="btn danger" type="button" id="vRev">Đảo phiếu</button>' : ''}</div>`, null, d => {
       d.classList.add('wide');
@@ -574,15 +574,16 @@
     const title = (kk ? 'BIÊN BẢN KIỂM KÊ VẬT TƯ, HÀNG HÓA' : ck ? 'PHIẾU ĐIỀU CHUYỂN KHO (NỘI BỘ)' : nhapKho ? 'PHIẾU NHẬP KHO' : 'PHIẾU XUẤT KHO') + (sign < 0 ? ' (ĐẢO)' : '');
     const mau = kk ? 'Mẫu số 05 - VT' : nhapKho ? 'Mẫu số 01 - VT' : 'Mẫu số 02 - VT';
     const showMoney = isQT(), sg = n => n === '' || n === undefined || n === null ? '' : sign * Number(n);
-    const amt = l => Number(priced ? l.thanhTien : l.giaTriKho) || 0, tot = sign * L.reduce((a, l) => a + amt(l), 0);
+    const amt = l => (Number(priced ? l.thanhTien : l.giaTriKho) || 0) + (Number(l.chenhLechGV) || 0), tot = sign * L.reduce((a, l) => a + amt(l), 0);   // trả NCC: thành tiền = giá gốc (khớp công nợ)
+    const adjTot = sign * L.reduce((a, l) => a + (Number(l.chenhLechGV) || 0), 0);
     const d0 = p.ngay.split('-'), ngay = `Ngày ${d0[2]} tháng ${d0[1]} năm ${d0[0]}`;
     const partner = base.maNCC ? (d => d && { ten: d.ten, dc: d.diaChi, mst: d.mst })((S.data.suppliers || []).find(x => x.maNCC === base.maNCC))
       : base.maKH ? (d => d && { ten: d.ten, dc: d.diaChi, mst: d.mst })((S.data.customers || []).find(x => x.maKH === base.maKH)) : null;
-    const price = l => priced ? Number(l.donGia) : (Number(l.giaTriKho) && Number(l.soLuong) ? Number(l.giaTriKho) / Number(l.soLuong) : '');
+    const price = l => priced ? Number(l.donGia) : (amt(l) && Number(l.soLuong) ? amt(l) / Number(l.soLuong) : '');
     const p2 = n => n === '' ? '' : Number(n).toLocaleString('vi-VN', { maximumFractionDigits: 2 });
     const rows = L.map((l, i) => { const it = itemOf(l.maHang);
       if (kk) { const dd = Number(l.slThucTe) - Number(l.slSoSach), u = price(l) || Number(it.giaVon) || '';
-        return `<tr><td>${i + 1}</td><td>${esc(it.ten)}</td><td>${esc(l.maHang)}</td><td>${esc(it.dvt)}</td><td class="n">${showMoney ? p2(u) : ''}</td><td class="n">${num(sg(l.slSoSach))}</td><td class="n">${num(sg(l.slThucTe))}</td><td class="n">${dd > 0 ? num(sg(dd)) : ''}</td><td class="n">${dd < 0 ? num(sg(-dd)) : ''}</td><td class="n">${showMoney ? num(sg(l.giaTriKho)) : ''}</td></tr>`; }
+        return `<tr><td>${i + 1}</td><td>${esc(it.ten)}</td><td>${esc(l.maHang)}</td><td>${esc(it.dvt)}</td><td class="n">${showMoney ? p2(u) : ''}</td><td class="n">${num(l.slSoSach)}</td><td class="n">${num(l.slThucTe)}</td><td class="n">${dd > 0 ? num(sg(dd)) : ''}</td><td class="n">${dd < 0 ? num(sg(-dd)) : ''}</td><td class="n">${showMoney ? num(sg(l.giaTriKho)) : ''}</td></tr>`; }
       const ct = l.dvt && l.dvt !== it.dvt ? `${num(sg(l.soLuongCT))} ${esc(l.dvt)}` : num(sg(l.soLuongCT !== '' && l.soLuongCT !== undefined ? l.soLuongCT : l.soLuong));
       return `<tr><td>${i + 1}</td><td>${esc(it.ten)}${l.serials && l.serials.length ? `<br><small>Serial: ${l.serials.map(esc).join(', ')}</small>` : ''}</td><td>${esc(l.maHang)}</td><td>${esc(it.dvt)}</td><td class="n">${ct}</td><td class="n">${num(sg(l.soLuong))}</td><td class="n">${showMoney ? p2(price(l)) : ''}</td><td class="n">${showMoney ? num(sg(amt(l))) : ''}</td></tr>`; }).join('');
     const co = S.co, host = document.createElement('div'); host.id = 'printArea';
@@ -596,7 +597,7 @@
       <table class="pv-t"><thead>${kk ? '<tr><th rowspan="2">STT</th><th rowspan="2">Tên vật tư, hàng hóa</th><th rowspan="2">Mã số</th><th rowspan="2">ĐVT</th><th rowspan="2">Đơn giá</th><th colspan="2">Số lượng</th><th colspan="2">Chênh lệch</th><th rowspan="2">Giá trị chênh lệch</th></tr><tr><th>Theo sổ sách</th><th>Theo kiểm kê</th><th>Thừa</th><th>Thiếu</th></tr>'
         : `<tr><th rowspan="2">STT</th><th rowspan="2">Tên, nhãn hiệu, quy cách vật tư, hàng hóa</th><th rowspan="2">Mã số</th><th rowspan="2">ĐVT</th><th colspan="2">Số lượng</th><th rowspan="2">Đơn giá</th><th rowspan="2">Thành tiền</th></tr><tr><th>Theo chứng từ</th><th>Thực ${nhapKho ? 'nhập' : 'xuất'}</th></tr>`}</thead>
         <tbody>${rows}<tr><td></td><td><b>Cộng</b></td><td></td><td></td><td></td><td></td><td></td>${kk ? '<td></td><td></td>' : ''}<td class="n"><b>${showMoney ? num(tot) : ''}</b></td></tr></tbody></table>
-      ${kk ? '' : `<p>- Tổng số tiền (viết bằng chữ): ${showMoney ? '<i>' + esc(QWords.money(tot)) + '</i>' : '……………………………………………'}<br>- Số chứng từ gốc kèm theo: ${esc((sign < 0 ? p.phieuGoc : p.soCTGoc) || '……')}</p>`}
+      ${kk ? '' : `<p>- Tổng số tiền (viết bằng chữ): ${showMoney ? '<i>' + esc(QWords.money(Math.abs(tot))) + (tot < 0 ? ' (ghi âm)' : '') + '</i>' : '……………………………………………'}${showMoney && adjTot ? `<br>- Trong đó chênh lệch giá vốn (điều chỉnh TK 632): ${num(adjTot)} đ` : ''}<br>- Số chứng từ gốc kèm theo: ${esc((sign < 0 ? p.phieuGoc : p.soCTGoc) || '……')}</p>`}
       <p class="pv-date">${ngay}</p>
       <div class="pv-sign">${(kk ? ['Thủ kho', 'Kế toán trưởng', 'Trưởng ban kiểm kê', 'Giám đốc'] : ['Người lập phiếu', nhapKho ? 'Người giao hàng' : 'Người nhận hàng', 'Thủ kho', 'Kế toán trưởng', 'Giám đốc']).map(x => `<div><b>${x}</b><br><i>(Ký, họ tên)</i></div>`).join('')}</div>
       <p class="pv-foot">In từ QLHH v${VER} · người lập ${esc(p.nguoiTao)}${showMoney ? '' : ' · bản in không gồm đơn giá (vai trò ' + esc(ROLE[S.user.vaiTro]) + ')'}</p></div>`;
@@ -671,14 +672,14 @@
       const r = await call('report.nxt', { from: RP.from, to: RP.to }, 3); b.classList.remove('busy');
       if (!r.ok) return toast('Lỗi: ' + (r.error || r.code)); RP.rows = r.data.rows; viewReport(m);
     };
-    $('#rXls').onclick = () => exportRows(`NXT_${RP.from}_${RP.to}`, RP.rows.map(r => ({ 'Mã hàng': r.maHang, 'Tên hàng': r.ten, 'ĐVT': r.dvt, 'Tồn đầu SL': r.dauQ, 'Tồn đầu GT': r.dauV, 'Nhập SL': r.nhapQ, 'Nhập GT': r.nhapV, 'Xuất SL': r.xuatQ, 'Xuất GT': r.xuatV, 'Tồn cuối SL': r.cuoiQ, 'Tồn cuối GT': r.cuoiV })));
+    $('#rXls').onclick = () => exportRows(`NXT_${RP.from}_${RP.to}`, RP.rows.map(r => ({ 'Mã hàng': r.maHang, 'Tên hàng': r.ten, 'ĐVT': r.dvt, 'Tồn đầu SL': r.dauQ, 'Tồn đầu GT': r.dauV, 'Nhập SL': r.nhapQ, 'Nhập GT': r.nhapV, 'Xuất SL': r.xuatQ, 'Xuất GT': r.xuatV, 'Tồn cuối SL': r.cuoiQ, 'Tồn cuối GT': r.cuoiV, 'Điều chỉnh giá vốn (632)': r.dcV })));
   }
   function reportTable() {
     const R = RP.rows, s = k => R.reduce((a, r) => a + r[k], 0);
     if (!R.length) return '<div class="empty">Không có phát sinh trong kỳ.</div>';
-    return `<table><thead><tr><th>Mã</th><th>Tên hàng</th><th>ĐVT</th><th class="n">Đầu kỳ SL</th><th class="n">Đầu kỳ GT</th><th class="n">Nhập SL</th><th class="n">Nhập GT</th><th class="n">Xuất SL</th><th class="n">Xuất GT</th><th class="n">Cuối kỳ SL</th><th class="n">Cuối kỳ GT</th></tr></thead><tbody>
-      ${R.map(r => `<tr><td class="mono">${esc(r.maHang)}</td><td>${esc(r.ten)}</td><td>${esc(r.dvt)}</td><td class="n">${num(r.dauQ)}</td><td class="n">${num(r.dauV)}</td><td class="n">${num(r.nhapQ)}</td><td class="n">${num(r.nhapV)}</td><td class="n">${num(r.xuatQ)}</td><td class="n">${num(r.xuatV)}</td><td class="n">${num(r.cuoiQ)}</td><td class="n">${num(r.cuoiV)}</td></tr>`).join('')}
-      <tr><td></td><td><b>Cộng giá trị</b></td><td></td><td></td><td class="n"><b>${num(s('dauV'))}</b></td><td></td><td class="n"><b>${num(s('nhapV'))}</b></td><td></td><td class="n"><b>${num(s('xuatV'))}</b></td><td></td><td class="n"><b>${num(s('cuoiV'))}</b></td></tr></tbody></table>`;
+    return `<table><thead><tr><th>Mã</th><th>Tên hàng</th><th>ĐVT</th><th class="n">Đầu kỳ SL</th><th class="n">Đầu kỳ GT</th><th class="n">Nhập SL</th><th class="n">Nhập GT</th><th class="n">Xuất SL</th><th class="n">Xuất GT</th><th class="n">Cuối kỳ SL</th><th class="n">Cuối kỳ GT</th><th class="n" title="Chênh lệch khi trả NCC/đảo theo giá gốc — hạch toán TK 632">Điều chỉnh GV</th></tr></thead><tbody>
+      ${R.map(r => `<tr><td class="mono">${esc(r.maHang)}</td><td>${esc(r.ten)}</td><td>${esc(r.dvt)}</td><td class="n">${num(r.dauQ)}</td><td class="n">${num(r.dauV)}</td><td class="n">${num(r.nhapQ)}</td><td class="n">${num(r.nhapV)}</td><td class="n">${num(r.xuatQ)}</td><td class="n">${num(r.xuatV)}</td><td class="n">${num(r.cuoiQ)}</td><td class="n">${num(r.cuoiV)}</td><td class="n">${r.dcV ? num(r.dcV) : ''}</td></tr>`).join('')}
+      <tr><td></td><td><b>Cộng giá trị</b></td><td></td><td></td><td class="n"><b>${num(s('dauV'))}</b></td><td></td><td class="n"><b>${num(s('nhapV'))}</b></td><td></td><td class="n"><b>${num(s('xuatV'))}</b></td><td></td><td class="n"><b>${num(s('cuoiV'))}</b></td><td class="n"><b>${s('dcV') ? num(s('dcV')) : ''}</b></td></tr></tbody></table>`;
   }
   async function exportRows(name, rows) {
     name = `QLHH_${S.co.id}_${name}`;
