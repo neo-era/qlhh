@@ -2,7 +2,7 @@
  *  Dùng lõi đã test: core/stock.js (QStock), core/serial.js (QSerial). Ghép sau Code.gs bởi build.sh. */
 
 // ---------- cấu hình & đọc ----------
-function cfg(k) { var r = findByKey('CauHinh', k); return r ? String(r.value) : ''; }
+function cfg(k) { var r = readTable('CauHinh').rows.filter(function (x) { return x.key === k; })[0]; return r ? String(r.value) : ''; }   // đọc qua bộ đệm
 function setCfg(k, v) { var r = findByKey('CauHinh', k); putRow('CauHinh', { key: k, value: String(v) }, r && r._row); }
 function stockOpts() {
   var kho = readTable('Kho').rows;
@@ -33,6 +33,7 @@ function writeTon(ton, mas) {
   });
   if (rows.length) s.getRange(2, 1, rows.length, cols.length).setValues(rows.map(function (r) { return QSchema.toRow('TonKho', r); }));
   dirty('TonKho'); mark('write TonKho');
+  writeThrough('TonKho', rows.map(function (r, i) { var o = {}; cols.forEach(function (c) { o[c] = r[c] === undefined ? '' : r[c]; }); o._row = i + 2; return o; }));
 }
 /** Đọc phiếu HOÀN TẤT có dòng thuộc `mas` (chỉ giữ các dòng của `mas` → tính lại riêng các mã đó). mas=null → tất cả. */
 function loadVouchers(mas) {
@@ -101,12 +102,13 @@ function refreshTotals(sos) {
   return n;
 }
 function updateCost(ton, mas) {
-  var items = readTable('HangHoa').rows, s = sheet('HangHoa'), cols = QSchema.SHEETS.HangHoa.cols;
+  var tb = readTable('HangHoa'), items = tb.rows, s = sheet('HangHoa'), cols = QSchema.SHEETS.HangHoa.cols, ch = false;
   items.forEach(function (it) {
     if (mas.indexOf(it.maHang) < 0) return; var t = ton[it.maHang]; if (!t) return;
     var g = t.pool.q > 0 ? Math.round(t.pool.v / t.pool.q) : it.giaVon;
-    if (g !== it.giaVon) { var x = strip(it); x.giaVon = g; s.getRange(it._row, 1, 1, cols.length).setValues([QSchema.toRow('HangHoa', x)]); dirty('HangHoa'); }
+    if (g !== it.giaVon) { var x = strip(it); x.giaVon = g; s.getRange(it._row, 1, 1, cols.length).setValues([QSchema.toRow('HangHoa', x)]); it.giaVon = g; ch = true; }
   });
+  if (ch) { dirty('HangHoa'); if (!tb.warnings.length) writeThrough('HangHoa', items); }
 }
 function setVoucherState(so, st, extra, known) {   // known = {row, obj}: phiếu vừa ghi, khỏi tìm lại
   var h = known ? Object.assign({ _row: known.row }, known.obj) : findByKey('Phieu', so); if (!h) return; var x = strip(h); x.trangThai = st; for (var k in (extra || {})) x[k] = extra[k];
@@ -302,6 +304,7 @@ function periodLock(u, req, logs) {
   return { ngayKhoaSo: d };
 }
 function stockRebuild(u, req, logs) {
+  FRESH = true;   // tính lại: luôn đọc thẳng sheet, không tin bộ đệm
   var w = readTable('Phieu').warnings.concat(readTable('ChiTietPhieu').warnings);
   if (w.length) throw fail('VALIDATION', 'Sheet phiếu có ' + w.length + ' ô sai kiểu, sửa trước khi tính lại (vd ' + w[0] + ')', null);
   cleanupOrphans(logs, true);

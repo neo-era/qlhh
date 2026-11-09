@@ -60,7 +60,7 @@ const toast = p => p.$$eval('.toast', ts => ts.map(t => t.textContent).join(' | 
   ok(/Không đủ tồn/.test(await msg(p)), 'xuất quá tồn → báo "Không đủ tồn" trong hộp thoại');
   await line(p, 0, { soLuongCT: 7 });
   await p.click('#addLine'); await line(p, 1, { maHang: 'LOGO' });
-  ok(await p.isVisible('[data-s="VPC4H20512"]'), 'xuất hàng serial: chọn serial đang trong kho');
+  ok(await p.waitForSelector('[data-s="VPC4H20512"]', { timeout: 3000 }).then(() => true).catch(() => false), 'xuất hàng serial: chọn serial đang trong kho');
   await p.check('[data-s="VPC4H20512"]');
   await p.click('#dlgOk'); ok(await closed(p), 'lưu phiếu xuất bán'); await p.waitForTimeout(200);
   ok((await p.textContent('#stockRes')).includes('⚠') || (await p.textContent('#main')).includes('Dưới tồn tối thiểu (1)'), 'CB40 còn 3 < 5 → cảnh báo dưới tồn tối thiểu');

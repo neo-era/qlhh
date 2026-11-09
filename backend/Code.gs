@@ -21,6 +21,7 @@ function setup() {
   if (!p.getProperty('SESSION_KEY')) p.setProperty('SESSION_KEY', Utilities.getUuid() + Utilities.getUuid());
   if (!p.getProperty('CLIENT_ID')) p.setProperty('CLIENT_ID', 'DIEN_CLIENT_ID_VAO_DAY');
   if (!p.getProperty('dataVersion')) p.setProperty('dataVersion', '1');
+  CACHE_T.forEach(function (n) { p.setProperty('ver:' + n, newVer()); });   // setup có thể đổi sheet → bỏ toàn bộ bộ đệm
   var kho = ss.getSheetByName('Kho');
   if (kho.getLastRow() < 2) {   // 2 kho mặc định: kho chính + kho hàng lỗi (nhận hàng bảo hành, không tính giá vốn)
     kho.appendRow(QSchema.toRow('Kho', { maKho: 'KHO', ten: 'Kho chính', diaChi: '', loai: 'THUONG', trangThai: 'HOAT_DONG' }));
@@ -35,8 +36,9 @@ function doPost(e) {
   var t0 = Date.now();
   try {
     var req = JSON.parse((e && e.postData && e.postData.contents) || '{}');
-    MEMO = {}; PROF = [[ 'start', t0 ]];
-    var res = route(req); res.ms = Date.now() - t0; res.ver = VER;
+    MEMO = {}; PROF = [[ 'start', t0 ]]; DIRTY = {}; WT = {}; VERS = null; FRESH = false;
+    var res; try { res = route(req); } finally { flushVers(); }
+    res.ms = Date.now() - t0; res.ver = VER;
     if (req.prof && res.ok) res.prof = PROF.map(function (x, i) { return x[0] + ':' + (i ? x[1] - PROF[i - 1][1] : 0); }).join(' ');
     return out(res);
   } catch (err) {
@@ -143,12 +145,61 @@ function findUser(email, fresh) {
 // ======================= ĐỌC =======================
 var TABLES = { items: 'HangHoa', groups: 'NhomHang', suppliers: 'NhaCungCap', prices: 'BangGia', users: 'NguoiDung', feedback: 'GopY', logs: 'NhatKy',
   warehouses: 'Kho', units: 'QuyDoiDVT', customers: 'KhachHang', projects: 'CongTrinh', vouchers: 'Phieu', stock: 'TonKho', serials: 'Serial' };
-/* Bộ nhớ tạm trong 1 lệnh: mỗi sheet chỉ đọc 1 lần; ghi vào sheet nào thì xoá bản nhớ của sheet đó (dirty). Trả bản sao nông để nơi gọi sửa không ảnh hưởng. */
-var MEMO = {}, PROF = [];
+/* Bộ nhớ tạm trong 1 lệnh (MEMO): mỗi sheet chỉ đọc 1 lần; ghi sheet nào thì xoá bản nhớ sheet đó (dirty). Trả bản sao nông.
+   Bộ đệm GIỮA các lệnh (CacheService) cho bảng danh mục + TonKho, khoá theo PHIÊN BẢN của từng sheet (ScriptProperties 'ver:<sheet>'):
+   - ghi sheet → cấp phiên bản mới (DIRTY), đẩy lên ScriptProperties TRƯỚC khi nhả khoá (kể cả khi lỗi) → không lệnh nào đọc phải bản cũ;
+   - ghi xong cả bảng (TonKho, HangHoa) → đặt luôn bản mới vào bộ đệm (write-through) để lệnh sau khỏi đọc lại;
+   - sheet bị sửa tay ngoài app: bộ đệm sống tối đa 10 phút; "Tính lại tồn" luôn đọc thẳng sheet (FRESH). */
+var MEMO = {}, PROF = [], DIRTY = {}, WT = {}, VERS = null, FRESH = false;
+var CACHE_T = ['HangHoa', 'NhomHang', 'NhaCungCap', 'BangGia', 'Kho', 'QuyDoiDVT', 'KhachHang', 'CongTrinh', 'TonKho', 'CauHinh'];
 function mark(l) { PROF.push([l, Date.now()]); }
-function dirty(n) { delete MEMO[n]; Object.keys(MEMO).forEach(function (k) { if (k.indexOf(n + '#') === 0) delete MEMO[k]; }); }
+function newVer() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+function vers() { if (!VERS) VERS = props().getProperties(); return VERS; }
+function cachedT(n) { return CACHE_T.indexOf(n) >= 0; }
+function dirty(n) {
+  delete MEMO[n]; Object.keys(MEMO).forEach(function (k) { if (k.indexOf(n + '#') === 0) delete MEMO[k]; });
+  if (cachedT(n) && (!DIRTY[n] || WT[n])) { DIRTY[n] = newVer(); WT[n] = false; }
+}
+function flushVers() {   // gọi trước khi nhả khoá / cuối lệnh
+  var ks = Object.keys(DIRTY); if (!ks.length) return;
+  var o = {}; ks.forEach(function (n) { o['ver:' + n] = DIRTY[n]; }); props().setProperties(o);
+  if (VERS) ks.forEach(function (n) { VERS['ver:' + n] = DIRTY[n]; }); DIRTY = {}; WT = {};
+}
+var CH = 30000;
+function tkey(n, v) { return 'tbl:' + n + ':' + v; }
+function cacheGetT(n) {
+  var v = vers()['ver:' + n]; if (!v) return null;
+  var c = CacheService.getScriptCache(), meta = c.get(tkey(n, v)); if (!meta) return null;
+  var keys = []; for (var i = 0; i < Number(meta); i++) keys.push(tkey(n, v) + '#' + i);
+  var m = c.getAll(keys), str = '';
+  for (var j = 0; j < keys.length; j++) { if (!(keys[j] in m)) return null; str += m[keys[j]]; }
+  try { return JSON.parse(str); } catch (e) { return null; }
+}
+function cachePutT(n, v, t) {
+  try {
+    var str = JSON.stringify(t), k = Math.ceil(str.length / CH) || 1; if (k > 30) return;   // bảng quá lớn (> ~900 nghìn ký tự): không đệm
+    var o = {}; for (var i = 0; i < k; i++) o[tkey(n, v) + '#' + i] = str.slice(i * CH, (i + 1) * CH);
+    o[tkey(n, v)] = String(k); CacheService.getScriptCache().putAll(o, 600);
+  } catch (e) { /* bộ đệm lỗi thì thôi, đọc sheet */ }
+}
+/** Đặt nội dung mới của cả bảng vào MEMO + bộ đệm (sau khi chính lệnh này vừa ghi toàn bảng). */
+function writeThrough(n, rows) {
+  MEMO[n] = { rows: rows, warnings: [] };
+  if (!cachedT(n)) return;
+  if (!DIRTY[n]) DIRTY[n] = newVer();
+  cachePutT(n, DIRTY[n], MEMO[n]); WT[n] = true;
+}
 function cloneT(t) { return { rows: t.rows.map(function (r) { var c = {}; for (var k in r) c[k] = r[k]; return c; }), warnings: t.warnings }; }
-function readTable(n) { if (!MEMO[n]) { MEMO[n] = QSchema.toObjects(n, sheet(n).getDataRange().getValues()); mark('read ' + n); } return cloneT(MEMO[n]); }
+function readTable(n) {
+  if (MEMO[n]) return cloneT(MEMO[n]);
+  if (cachedT(n) && !DIRTY[n] && !FRESH) { var t = cacheGetT(n); if (t) { MEMO[n] = t; mark('cache ' + n); return cloneT(t); } }
+  MEMO[n] = QSchema.toObjects(n, sheet(n).getDataRange().getValues()); mark('read ' + n);
+  if (cachedT(n) && !DIRTY[n]) {
+    var v = vers()['ver:' + n]; if (!v) { v = newVer(); props().setProperty('ver:' + n, v); VERS['ver:' + n] = v; }
+    cachePutT(n, v, MEMO[n]);
+  }
+  return cloneT(MEMO[n]);
+}
 function readTail(n, k) { var key = n + '#tail' + k; if (MEMO[n]) { var t = MEMO[n], rows = t.rows.slice(-k); return cloneT({ rows: rows, warnings: t.warnings }); } if (!MEMO[key]) { MEMO[key] = readTail0(n, k); mark('tail ' + n); } return cloneT(MEMO[key]); }
 function readTail0(n, k) {
   var s = sheet(n), last = s.getLastRow(), cols = QSchema.SHEETS[n].cols;
@@ -207,7 +258,7 @@ function write(u, req, fn, pre) {
   } catch (err) {
     if (err && err.qlhh) return err.qlhh;
     throw err;
-  } finally { lock.releaseLock(); }
+  } finally { try { flushVers(); } finally { lock.releaseLock(); } }   // phiên bản bảng lên TRƯỚC khi nhả khoá
 }
 function findRequest(rq, id) {
   if (rq.getLastRow() < 2) return null;

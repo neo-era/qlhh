@@ -5,7 +5,7 @@ const ROOT = path.join(__dirname, '..');
 const BACKEND_FILES = ['core/auth.js', 'core/idem.js', 'core/schema.js', 'core/validate.js', 'core/perm.js', 'core/price.js', 'core/stock.js', 'core/serial.js', 'backend/Code.gs', 'backend/Kho.gs'];
 
 function env(tokeninfo, ownerEmail = 'MaiVuLam2020@gmail.com') {
-  const sheets = {}, props = {}, cache = {};
+  const sheets = {}, props = {}, cache = {}, reads = {};
   // Mô phỏng Sheets: "'abc" → lưu 'abc' dạng văn bản; "=..." ở ô thường → CHẠY công thức (ở đây trả 'CONG_THUC_DA_CHAY' để test bắt rò rỉ)
   const conv = (v, txt) => { if (typeof v !== 'string') return v; if (v[0] === "'") return v.slice(1); if (txt) return v; if (/^=/.test(v)) return 'CONG_THUC_DA_CHAY'; if (/^-?\d+(\.\d+)?$/.test(v)) return Number(v); if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return new Date(v + 'T00:00:00Z'); return v; };
   const colIdx = a => a.charCodeAt(0) - 65;
@@ -16,7 +16,7 @@ function env(tokeninfo, ownerEmail = 'MaiVuLam2020@gmail.com') {
       getLastRow() { return this.d.length; },
       getLastColumn() { return this.d.reduce((m, r) => Math.max(m, r.length), 0); },
       setFrozenRows() {}, clear() { this.d = []; }, getName() { return n; },
-      getDataRange() { const me = this; return { getValues: () => me.d.map(r => r.slice()) }; },
+      getDataRange() { const me = this; reads[n] = (reads[n] || 0) + 1; return { getValues: () => me.d.map(r => r.slice()) }; },
       getRange(r, c, nr, nc) {
         const me = this;
         if (typeof r === 'string') { const [a, b] = r.split(':'); return { setNumberFormat: f => { for (let i = colIdx(a); i <= colIdx(b || a); i++) me.txt[i] = f === '@'; } }; }
@@ -36,7 +36,7 @@ function env(tokeninfo, ownerEmail = 'MaiVuLam2020@gmail.com') {
   const G = {
     SpreadsheetApp: { getActive: () => ({ getSheetByName: n => sheets[n] || null, insertSheet: mk }), flush() {} },
     Session: { getEffectiveUser: () => ({ getEmail: () => ownerEmail }) },
-    PropertiesService: { getScriptProperties: () => ({ getProperty: k => (k in props ? props[k] : null), setProperty: (k, v) => props[k] = String(v) }) },
+    PropertiesService: { getScriptProperties: () => ({ getProperty: k => (k in props ? props[k] : null), setProperty: (k, v) => props[k] = String(v), getProperties: () => ({ ...props }), setProperties: o => { for (const k in o) props[k] = String(o[k]); } }) },
     Utilities: {
       getUuid: () => crypto.randomUUID(), sleep() {}, Charset: { UTF_8: 'utf8' }, DigestAlgorithm: { SHA_256: 'sha256' },
       computeDigest: (a, s) => [...crypto.createHash('sha256').update(s).digest()],
@@ -46,7 +46,8 @@ function env(tokeninfo, ownerEmail = 'MaiVuLam2020@gmail.com') {
       newBlob: b => ({ getDataAsString: () => Buffer.from(b).toString('utf8') })
     },
     UrlFetchApp: { fetch: () => tokeninfo() },
-    CacheService: { getScriptCache: () => ({ get: k => cache[k] || null, put: (k, v) => cache[k] = v, remove: k => { delete cache[k]; } }) },
+    CacheService: { getScriptCache: () => ({ get: k => (k in cache ? cache[k] : null), put: (k, v) => { if (String(v).length > 100000) throw new Error('Argument too large: value'); cache[k] = String(v); }, remove: k => { delete cache[k]; },
+      getAll: ks => { const o = {}; ks.forEach(k => { if (k in cache) o[k] = cache[k]; }); return o; }, putAll: o => { for (const k in o) { if (String(o[k]).length > 100000) throw new Error('Argument too large'); cache[k] = String(o[k]); } }, removeAll: ks => ks.forEach(k => delete cache[k]) }) },
     LockService: { getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) },
     ContentService: { MimeType: { JSON: 'json' }, createTextOutput: t => ({ t, setMimeType() { return this; } }) },
     Logger: { log() {} }, console: { error() {}, log() {} }
@@ -54,7 +55,7 @@ function env(tokeninfo, ownerEmail = 'MaiVuLam2020@gmail.com') {
   const src = BACKEND_FILES.map(f => fs.readFileSync(path.join(ROOT, f), 'utf8')).join('\n') + '\nreturn {setup,doPost};';
   const names = Object.keys(G);
   const api = new Function(...names, 'module', 'Buffer', src)(...names.map(k => G[k]), undefined, undefined);
-  Object.assign(api, { sheets, raw: props, cache });
+  Object.assign(api, { sheets, raw: props, cache, reads });
   api.post = o => JSON.parse(api.doPost({ postData: { contents: JSON.stringify(o) } }).t);
   return api;
 }

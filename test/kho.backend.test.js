@@ -271,3 +271,66 @@ test('kiểm kê thừa khi tồn đã về 0 qua máy chủ → lấy giá BQ g
   assert.equal(a.post({ action: 'voucher.get', session: s, soPhieu: k.data.soPhieu }).data.lines[0].giaTriKho, 500);
   assert.equal(V({ loai: 'KIEM_KE', ngay: '2026-10-02', kho: 'KHO', lines: [{ maHang: 'CB40', slThucTe: 1 }] }).code, 'VALIDATION');
 });
+
+// ===== tối ưu tốc độ: bộ đệm bảng theo phiên bản — KHÔNG được đánh đổi độ đúng =====
+test('bộ đệm: lỗi giữa chừng sau khi đã ghi TonKho → lệnh sau vẫn thấy tồn mới (không dùng bộ đệm cũ)', () => {
+  const { a, s, V } = shop();
+  V(nhap('2026-10-01', [{ maHang: 'CB40', soLuongCT: 10, gia: 1000 }]));
+  V({ loai: 'XUAT_BAN', ngay: '2026-10-02', kho: 'KHO', maKH: 'TN', maCongTrinh: 'PDG', lines: [{ maHang: 'CB40', soLuongCT: 1 }] });   // làm ấm bộ đệm
+  const nk = a.sheets.NhatKy, orig = nk.getRange; let once = true;
+  nk.getRange = function (...x) { if (once) { once = false; nk.getRange = orig; throw new Error('mất kết nối'); } return orig.apply(this, x); };
+  const out = (n, id) => a.post({ action: 'voucher.create', session: s, requestId: id || rid(), voucher: { loai: 'XUAT_BAN', ngay: '2026-10-03', kho: 'KHO', maKH: 'TN', maCongTrinh: 'PDG', lines: [{ maHang: 'CB40', soLuongCT: n }] } });
+  assert.equal(out(6).code, 'INTERNAL');   // TonKho đã ghi 3, phiếu HOAN_TAT, rồi lỗi ở NhatKy
+  assert.equal(out(6).code, 'STOCK_NOT_ENOUGH', 'còn 3 cái — bộ đệm cũ (9) không được dùng');
+  assert.equal(out(3).ok, true);
+});
+test('bộ đệm: sửa danh mục (kho ngừng, hàng mới) có hiệu lực ngay ở lệnh lập phiếu sau', () => {
+  const { a, s, W, V } = shop();
+  V(nhap('2026-10-01', [{ maHang: 'CB40', soLuongCT: 1, gia: 1 }]));
+  W('warehouse.upsert', { warehouse: { maKho: 'KHO', ten: 'Kho chính', trangThai: 'NGUNG' } });
+  assert.equal(V(nhap('2026-10-02', [{ maHang: 'CB40', soLuongCT: 1, gia: 1 }])).code, 'VALIDATION');
+  W('warehouse.upsert', { warehouse: { maKho: 'KHO', ten: 'Kho chính', trangThai: 'HOAT_DONG' } });
+  W('item.upsert', { isNew: true, item: { maHang: 'MOI', ten: 'Hàng mới', dvt: 'cái' } });
+  assert.equal(V(nhap('2026-10-02', [{ maHang: 'MOI', soLuongCT: 1, gia: 1 }])).ok, true);
+});
+test('tốc độ: lập phiếu liên tiếp (đã ấm) không đọc lại sheet danh mục / TonKho / CauHinh / Request', () => {
+  const { a, V } = shop();
+  V(nhap('2026-10-01', [{ maHang: 'CB40', soLuongCT: 100, gia: 1000 }]));
+  V({ loai: 'XUAT_BAN', ngay: '2026-10-02', kho: 'KHO', maKH: 'TN', maCongTrinh: 'PDG', lines: [{ maHang: 'CB40', soLuongCT: 1 }] });
+  for (const k of Object.keys(a.reads)) delete a.reads[k];
+  const r = V({ loai: 'XUAT_BAN', ngay: '2026-10-03', kho: 'KHO', maKH: 'TN', maCongTrinh: 'PDG', lines: [{ maHang: 'CB40', soLuongCT: 1 }] });
+  assert.equal(r.ok, true);
+  for (const n of ['Kho', 'HangHoa', 'QuyDoiDVT', 'KhachHang', 'CongTrinh', 'TonKho', 'CauHinh', 'Request', 'NguoiDung']) assert.equal(a.reads[n] || 0, 0, 'đọc lại ' + n);
+});
+test('idempotent vẫn đúng khi tra yêu cầu bằng bộ đệm: gửi lại 3 lần → 1 phiếu; người khác dùng lại requestId → FORBIDDEN', () => {
+  const { a, s } = shop(); const id = rid();
+  const v = nhap('2026-10-01', [{ maHang: 'CB40', soLuongCT: 1, gia: 1 }]);
+  const r = [1, 2, 3].map(() => a.post({ action: 'voucher.create', session: s, requestId: id, voucher: v }));
+  assert.equal(new Set(r.map(x => x.data && x.data.soPhieu)).size, 1); assert.equal(a.sheets.Phieu.d.length - 1, 1);
+  assert.equal(a.post({ action: 'voucher.create', session: a.login(NV), requestId: id, voucher: v }).code, 'FORBIDDEN');
+  assert.equal(a.sheets.Request.d.filter(x => x[0] === id).length, 1, 'Request vẫn ghi làm nhật ký');
+});
+test('khoá sổ đọc nhanh nhưng đổi là có hiệu lực ngay', () => {
+  const { a, s, V } = shop();
+  V(nhap('2026-10-01', [{ maHang: 'CB40', soLuongCT: 5, gia: 1 }]));
+  assert.equal(a.post({ action: 'period.lock', session: s, requestId: rid(), ngay: '2026-10-05' }).ok, true);
+  assert.equal(V(nhap('2026-10-05', [{ maHang: 'CB40', soLuongCT: 1, gia: 1 }])).code, 'PERIOD_LOCKED');
+  assert.equal(a.post({ action: 'period.lock', session: s, requestId: rid(), ngay: '' }).ok, true);
+  assert.equal(V(nhap('2026-10-05', [{ maHang: 'CB40', soLuongCT: 1, gia: 1 }])).ok, true);
+});
+test('bộ đệm luôn trùng nội dung sheet thật sau chuỗi thao tác hỗn hợp (ghi thẳng TonKho/HangHoa đúng kiểu)', () => {
+  const QS = require('../core/schema.js');
+  const { a, s, W, V } = shop();
+  V(nhap('2026-10-01', [{ maHang: 'CB40', soLuongCT: 10, gia: 1000 }, { maHang: 'CAP', dvt: 'cuộn', soLuongCT: 1, gia: 500000 }]));
+  V({ loai: 'XUAT_BAN', ngay: '2026-10-02', kho: 'KHO', maKH: 'TN', maCongTrinh: 'PDG', lines: [{ maHang: 'CB40', soLuongCT: 3 }] });
+  V(nhap('2026-10-01', [{ maHang: 'CB40', soLuongCT: 5, gia: 3000 }]));   // lùi ngày → tính lại
+  V({ loai: 'CHUYEN_KHO', ngay: '2026-10-03', kho: 'KHO', khoDen: 'KHO-LOI', lines: [{ maHang: 'CB40', soLuongCT: 1 }] });   // bị chặn (kho lỗi) — không đổi gì
+  W('item.upsert', { item: { maHang: 'CB40', ten: 'CB 2P 40A (sửa tên)', dvt: 'cái', tonToiThieu: 5 } });
+  a.post({ action: 'sync.pull', session: s });   // đọc lại toàn bộ → nạp bộ đệm
+  for (const n of ['TonKho', 'HangHoa', 'Kho', 'KhachHang', 'CongTrinh', 'QuyDoiDVT', 'NhaCungCap', 'CauHinh']) {
+    const v = a.raw['ver:' + n], meta = v && a.cache['tbl:' + n + ':' + v];
+    if (!meta) continue;
+    let str = ''; for (let i = 0; i < Number(meta); i++) str += a.cache['tbl:' + n + ':' + v + '#' + i];
+    assert.deepEqual(JSON.parse(str), JSON.parse(JSON.stringify(QS.toObjects(n, a.sheets[n].d))), 'bộ đệm lệch sheet: ' + n);
+  }
+});
