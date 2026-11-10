@@ -2,6 +2,7 @@
  *  kiểm tra xuất xưởng (KCS), phiếu xuất xưởng (PXX), huỷ lệnh, tra cứu, báo cáo dở dang. Lõi: core/sx.js (QSX) + core/stock.js. Ghép sau Kho.gs bởi build.sh.
  *  Chống ghi trùng khi gửi lại (chết giữa chừng): mọi dòng ghi chính có cột requestId → trong khoá tìm theo requestId, có rồi thì trả kết quả cũ. */
 
+var KCLOG = [];   // điều chỉnh kết chuyển huỷ phát sinh trong lệnh này → ghi NhatKy
 var CP_LOAI = ['NC_TRUC_TIEP', 'SX_CHUNG', 'GIA_CONG_NGOAI'];
 function congTy() { return (cfg('maCongTy') || 'LAVIPCO').toUpperCase(); }
 function txt(v, n) { return String(v === undefined || v === null ? '' : v).trim().slice(0, n); }
@@ -74,7 +75,7 @@ function syncKcHuy(lsxState) {
   Object.keys(lsxState).forEach(function (so) {
     if (!huy[so]) return; var st = lsxState[so], kc = cps.filter(function (c) { return c.soLSX === so && c.loai === 'KC_HUY'; })[0]; if (!kc) return;
     var cp = cps.reduce(function (a, c) { return c.soLSX === so && c.loai !== 'KC_HUY' ? a + (Number(c.soTien) || 0) : a; }, 0), want = -(st.xv + cp - st.nv - st.tv);
-    if (Number(kc.soTien) !== want) { kc.soTien = want; ch.push(kc); }
+    if (Number(kc.soTien) !== want) { KCLOG.push({ action: 'lsx.ketChuyenDoi', doiTuong: 'ChiPhiLSX', id: kc.id, truoc: { soLSX: so, soTien: Number(kc.soTien) }, sau: { soTien: want, lyDo: 'Giá linh kiện của lệnh đã huỷ được tính lại — điều chỉnh bút toán kết chuyển' } }); kc.soTien = want; ch.push(kc); }
   });
   putMany('ChiPhiLSX', ch);
 }

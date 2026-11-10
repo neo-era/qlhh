@@ -288,6 +288,7 @@ test('KT-A2 kế toán: lệnh đã huỷ — nhập lùi ngày phụ kiện là
   x.W('voucher.create', { voucher: { loai: 'NHAP_MUA', ngay: '2026-11-03', kho: 'KHO', maNCC: 'NCC1', lines: [{ maHang: 'PK', soLuongCT: 2, gia: 500000 }] } });
   const g = x.W('sx.get', { soLSX: so });
   assert.equal(g.doDang, 0); assert.deepEqual(g.chiPhi.map(c => [c.loai, c.soTien]), [['KC_HUY', -450000]]);
+  assert.ok(x.a.sheets.NhatKy.d.some(r => r[2] === 'lsx.ketChuyenDoi' && /-350000/.test(r[5]) && /-450000/.test(r[6])), 'nhật ký ghi điều chỉnh kết chuyển cũ → mới');
 });
 
 test('KT-B2 huỷ dòng chi phí ghi sai → giá thành tính lại; báo cáo dở dang theo kỳ (QT)', () => {

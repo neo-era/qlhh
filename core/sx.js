@@ -27,14 +27,14 @@ var QSX=(function(){
     var dau=wip(vouchers,opts,prev),cuoi=wip(vouchers,opts,to),full=K.replay(vouchers,opts),eff=K.effDates(vouchers,opts),by={},rows={};
     (vouchers||[]).forEach(function(p){by[p.soPhieu]=p;});
     Object.keys(L).forEach(function(s){rows[s]={soLSX:s,dauKy:dau[s]||0,linhKien:0,cp:{},kcHuy:0,nhapTP:0,cuoiKy:cuoi[s]||0};
-      (L[s].chiPhi||[]).forEach(function(c){if(c.ngay<from||c.ngay>to)return;var t=Math.round(Number(c.soTien)||0);if(c.loai==='KC_HUY')rows[s].kcHuy+=t;else rows[s].cp[c.loai||'KHAC']=(rows[s].cp[c.loai||'KHAC']||0)+t;});});
+      (L[s].chiPhi||[]).forEach(function(c){if(c.ngay<from||c.ngay>to)return;rows[s].co=1;var t=Math.round(Number(c.soTien)||0);if(c.loai==='KC_HUY')rows[s].kcHuy+=t;else rows[s].cp[c.loai||'KHAC']=(rows[s].cp[c.loai||'KHAC']||0)+t;});});
     (vouchers||[]).forEach(function(p){
       if(p.trangThai!=='HOAN_TAT')return;var d=eff[p.soPhieu];if(!d||d<from||d>to)return;
-      var g=p.loai==='DAO'?by[p.phieuGoc]:p,sign=p.loai==='DAO'?-1:1;if(!g||!g.soLSX||!rows[g.soLSX])return;var r=rows[g.soLSX];
+      var g=p.loai==='DAO'?by[p.phieuGoc]:p,sign=p.loai==='DAO'?-1:1;if(!g||!g.soLSX||!rows[g.soLSX])return;var r=rows[g.soLSX];r.co=1;
       (g.lines||[]).forEach(function(l){var v=p.loai==='DAO'?(full.lines[g.soPhieu+'#'+l.dong]||0):(full.lines[p.soPhieu+'#'+l.dong]||0);
         if(g.loai==='XUAT_SX')r.linhKien+=sign*v;else if(g.loai==='NHAP_LAI_SX')r.linhKien-=sign*v;else if(g.loai==='NHAP_TP')r.nhapTP+=sign*v;});
     });
-    return Object.keys(rows).sort().map(function(s){return rows[s];}).filter(function(r){return r.dauKy||r.cuoiKy||r.linhKien||r.nhapTP||r.kcHuy||Object.keys(r.cp).length;});
+    return Object.keys(rows).sort().map(function(s){return rows[s];}).filter(function(r){var k=r.dauKy||r.cuoiKy||r.co;delete r.co;return k;});
   }
   function planIssue(bom,n){return (bom||[]).map(function(b){return {maHang:b.maHang,soLuong:Math.round(Q(b.soLuong)*n)/1000};});}
 

@@ -43,7 +43,7 @@ function doPost(e) {
   var t0 = Date.now();
   try {
     var req = JSON.parse((e && e.postData && e.postData.contents) || '{}');
-    MEMO = {}; PROF = [[ 'start', t0 ]]; DIRTY = {}; WT = {}; VERS = null; FRESH = false;
+    KCLOG = []; MEMO = {}; PROF = [[ 'start', t0 ]]; DIRTY = {}; WT = {}; VERS = null; FRESH = false;
     var res; try { res = route(req); } finally { flushVers(); }
     res.ms = Date.now() - t0; res.ver = VER;
     if (req.prof && res.ok) res.prof = PROF.map(function (x, i) { return x[0] + ':' + (i ? x[1] - PROF[i - 1][1] : 0); }).join(' ');
@@ -277,6 +277,7 @@ function write(u, req, fn, pre) {
     };
     var res = QIdem.once(store, u.email, req.requestId, function () {
       var d = fn(u, req, logs, ctx);
+      logs.push.apply(logs, KCLOG); KCLOG = [];
       appendBlock('NhatKy', logs.map(function (l) { return { thoiGian: nowIso(), email: u.email, action: l.action, doiTuong: l.doiTuong, id: String(l.id), truoc: l.truoc ? JSON.stringify(l.truoc).slice(0, 45000) : '', sau: l.sau ? JSON.stringify(l.sau).slice(0, 45000) : '', requestId: String(req.requestId) }; }));   // 1 lần ghi
       bumpVersion();
       return d;
