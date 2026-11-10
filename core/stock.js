@@ -8,7 +8,7 @@ var QStock=(function(){
     NHAP_MUA:{dir:1,cost:'PRICE',pre:'PN',ten:'Nhập mua'},
     KHACH_TRA:{dir:1,cost:'GOC',pre:'KT',ten:'Khách trả hàng'},
     NHAP_TP:{dir:1,cost:'GIVEN',pre:'NT',ten:'Nhập thành phẩm'},
-    NHAP_LAI_SX:{dir:1,cost:'GIVEN',pre:'NL',ten:'Nhập lại từ sản xuất'},
+    NHAP_LAI_SX:{dir:1,cost:'GOC',pre:'NL',ten:'Nhập lại từ sản xuất'},
     NHAP_HANG_LOI:{dir:1,cost:'ZERO',pre:'HL',ten:'Nhận hàng lỗi'},
     CHUYEN_KHO:{dir:0,pre:'CK',ten:'Chuyển kho'},
     KIEM_KE:{dir:0,pre:'KK',ten:'Kiểm kê'},
@@ -49,6 +49,11 @@ var QStock=(function(){
     var act=active(vouchers),by={};act.forEach(function(p){by[key(p)]=p;});
     var ev=act.map(function(p){return {p:p,pos:posOfIn(p,by,lock)};}).sort(function(a,b){return cmpPos(a.pos,b.pos);});
     var st={},lines={},errors=[],adj={};
+    /* Lệnh sản xuất (soLSX): xv = giá trị linh kiện đã xuất, nq/nv = SL/giá trị thành phẩm đã nhập, tv = giá trị nhập lại.
+       Dở dang = xv + chi phí khác (đến ngày) − nv − tv. Nhập TP lấy phần dở dang theo tỷ lệ số tủ còn lại (lần cuối lấy trọn). */
+    var Lc=opts.lsx||{},L={};
+    function LS(s){return L[s]||(L[s]={xv:0,nq:0,nv:0,tv:0});}
+    function cpTo(s,ngay){return ((Lc[s]&&Lc[s].chiPhi)||[]).reduce(function(a,c){return c.ngay<=ngay?a+money(c.soTien):a;},0);}
     function S(ma){return st[ma]||(st[ma]={pq:0,pv:0,kho:{},last:null,la:0});}
     // chốt chặn giá trị: không âm, hết số lượng thì hết giá trị; ghi nhận giá BQ gần nhất
     function vguard(ma,p){var s=S(ma);if(s.pq>0)s.la=s.pv/s.pq;
@@ -93,6 +98,10 @@ var QStock=(function(){
             else{var cr=capOut(l.maHang,g.kho,Q(l.soLuong),gv,rp);v=cr.v;if(cr.d)adj[p.soPhieu+'#'+l.dong]=cr.d;}
           }
           else{inn(l.maHang,g.kho,Q(l.soLuong),loi[g.kho]?0:gv);v=gv;var ga=adj[g.soPhieu+'#'+l.dong];if(ga)adj[p.soPhieu+'#'+l.dong]=-ga;}
+          if(g.soLSX){var x=LS(g.soLSX);
+            if(g.loai==='XUAT_SX')x.xv-=v;
+            else if(g.loai==='NHAP_LAI_SX')x.tv-=v;
+            else if(g.loai==='NHAP_TP'&&Lc[g.soLSX]){x.nq-=Q(l.soLuong);x.nv-=v;delete adj[p.soPhieu+'#'+l.dong];}}   // trả đúng phần đã rời kho về dở dang
           lines[p.soPhieu+'#'+l.dong]=v;S(l.maHang).last={ngay:p.ngay,stt:Number(p.stt)||0};vguard(l.maHang,rp);
         });
         return;
@@ -101,21 +110,25 @@ var QStock=(function(){
         var v,ma=l.maHang;
         if(t.dir>0){
           if(t.cost==='PRICE')v=l.thanhTien!==undefined&&l.thanhTien!==''?money(l.thanhTien):money(Number(l.soLuong)*Number(l.donGia));
+          else if(p.loai==='NHAP_TP'&&p.soLSX&&Lc[p.soLSX]){var c=Lc[p.soLSX],x=LS(p.soLSX),k=Q(l.soLuong),rem=Q(c.n)-x.nq,bal=x.xv+cpTo(p.soLSX,p.ngay)-x.nv-x.tv;
+            v=k>=rem?bal:money(bal*k/rem);x.nq+=k;x.nv+=v;}
           else if(t.cost==='GIVEN')v=money(l.giaTriKho);
           else if(t.cost==='ZERO')v=0;
           else if(t.cost==='GOC'){var g=by[p.phieuGoc],gl=gocLine(g,l);
             v=gl&&gl!=='MULTI'?money((lines[g.soPhieu+'#'+gl.dong]||0)*Q(l.soLuong)/Q(gl.soLuong)):0;}
           v=doLine(p,l,1,loi[p.kho]?0:v);
+          if(p.loai==='NHAP_LAI_SX'&&p.soLSX)LS(p.soLSX).tv+=v;
         }else if(p.loai==='TRA_NCC'&&!loi[p.kho]&&p.phieuGoc){   // trả NCC: theo giá của dòng nhập gốc (khớp công nợ 331)
           var g3=by[p.phieuGoc],gl3=gocLine(g3,l),gv3=gl3&&gl3!=='MULTI'?money((lines[g3.soPhieu+'#'+gl3.dong]||0)*Q(l.soLuong)/Q(gl3.soLuong)):0;
           var cr3=capOut(ma,p.kho,Q(l.soLuong),gv3,p);v=cr3.v;if(cr3.d)adj[p.soPhieu+'#'+l.dong]=cr3.d;
-        }else v=doLine(p,l,t.dir||1);
+        }else{v=doLine(p,l,t.dir||1);if(p.loai==='XUAT_SX'&&p.soLSX)LS(p.soLSX).xv+=v;}
         lines[p.soPhieu+'#'+l.dong]=v;S(ma).last={ngay:p.ngay,stt:Number(p.stt)||0};vguard(ma,p);
       });
     });
     var ton={};Object.keys(st).forEach(function(ma){var s=st[ma],k={};Object.keys(s.kho).forEach(function(x){k[x]=R(s.kho[x]);});
       ton[ma]={pool:{q:R(s.pq),v:s.pv},kho:k,last:s.last};});
-    return {ton:ton,lines:lines,errors:errors,adj:adj};
+    var lsx={};Object.keys(L).forEach(function(s){var x=L[s];lsx[s]={xv:x.xv,nq:R(x.nq),nv:x.nv,tv:x.tv};});
+    return {ton:ton,lines:lines,errors:errors,adj:adj,lsx:lsx};
   }
 
   // ---------- kiểm phiếu (không cần lịch sử) ----------
@@ -140,7 +153,7 @@ var QStock=(function(){
         }else if(!(Number(l.soLuong)>0)||!dec3(l.soLuong)||Number(l.soLuong)>1e9)e.push({dong:d,field:'soLuong',msg:'Số lượng > 0, tối đa 3 số lẻ'});
         if(t.cost==='PRICE'&&(l.donGia===''||l.donGia===undefined||!(Number(l.donGia)>=0)||Number(l.donGia)>MAXP))e.push({dong:d,field:'donGia',msg:'Đơn giá từ 0 đến 1.000 tỷ'});
         else if(t.cost==='PRICE'&&!Number.isSafeInteger(money(Number(l.thanhTien!==undefined&&l.thanhTien!==''?l.thanhTien:Number(l.soLuong)*Number(l.donGia)))))e.push({dong:d,field:'donGia',msg:'Thành tiền quá lớn'});
-        if(t.cost==='GIVEN'&&!(Number.isSafeInteger(Number(l.giaTriKho))&&Number(l.giaTriKho)>=0))e.push({dong:d,field:'giaTriKho',msg:'Giá trị nhập kho phải là số nguyên ≥ 0'});
+        if(t.cost==='GIVEN'&&!(p.loai==='NHAP_TP'&&p.soLSX)&&!(Number.isSafeInteger(Number(l.giaTriKho))&&Number(l.giaTriKho)>=0))e.push({dong:d,field:'giaTriKho',msg:'Giá trị nhập kho phải là số nguyên ≥ 0'});
       });
     }
     return e;
@@ -168,6 +181,8 @@ var QStock=(function(){
       else if(p.ngay<g.ngay)e.push({dong:0,field:'ngay',msg:'Ngày phiếu đảo không trước ngày phiếu gốc'});
       else if(refs(g.soPhieu,'KHACH_TRA'))e.push({dong:0,field:'phieuGoc',msg:'Phiếu đã có khách trả hàng — đảo phiếu khách trả trước'});
       else if(refs(g.soPhieu,'TRA_NCC'))e.push({dong:0,field:'phieuGoc',msg:'Phiếu đã có phiếu trả NCC — đảo phiếu trả NCC trước'});
+      else if(refs(g.soPhieu,'NHAP_LAI_SX'))e.push({dong:0,field:'phieuGoc',msg:'Phiếu xuất đã có phiếu nhập lại — đảo phiếu nhập lại trước'});
+      else if(g.loai==='XUAT_SX'&&g.soLSX&&act.some(function(x){return x.loai==='NHAP_TP'&&x.soLSX===g.soLSX&&!rev[x.soPhieu];}))e.push({dong:0,field:'phieuGoc',msg:'Lệnh '+g.soLSX+' đã nhập thành phẩm — đảo phiếu nhập thành phẩm trước'});
     }
     // không chèn phiếu trước phiếu kiểm kê cùng mã × kho (làm mất kết quả đếm thực tế) — muốn ghi thì đảo phiếu kiểm kê trước
     (function(){
@@ -191,6 +206,29 @@ var QStock=(function(){
       if(!g4||['NHAP_MUA','TON_DAU'].indexOf(g4.loai)<0||rev[g4.soPhieu])e.push({dong:0,field:'phieuGoc',msg:'Trả NCC từ kho thường phải chọn phiếu nhập gốc còn hiệu lực'});
       else if(g4.kho!==p.kho)e.push({dong:0,field:'kho',msg:'Trả từ đúng kho đã nhập ('+g4.kho+')'});
       else{if(p.ngay<g4.ngay)e.push({dong:0,field:'ngay',msg:'Ngày trả không trước ngày nhập'});capCheck(g4,'TRA_NCC','Trả NCC');}
+    }
+    if(p.loai==='XUAT_SX'||p.loai==='NHAP_LAI_SX'||(p.loai==='NHAP_TP'&&p.soLSX)){   // phiếu sản xuất gắn lệnh
+      var Lc=(opts&&opts.lsx)||{},s=p.soLSX,c=Lc[s];
+      if(!s)e.push({dong:0,field:'soLSX',msg:'Phiếu sản xuất phải gắn lệnh sản xuất'});
+      else if(!c)e.push({dong:0,field:'soLSX',msg:'Không tìm thấy lệnh sản xuất '+s});
+      else{
+        var mine=act.filter(function(x){return x.soLSX===s&&x.loai!=='DAO'&&!rev[x.soPhieu];}),tps=mine.filter(function(x){return x.loai==='NHAP_TP';});
+        if(p.loai==='XUAT_SX'&&tps.length)e.push({dong:0,field:'soLSX',msg:'Lệnh '+s+' đã nhập thành phẩm — không xuất bổ sung linh kiện'});
+        if(p.loai==='NHAP_TP'){
+          var nq=0;tps.forEach(function(x){(x.lines||[]).forEach(function(y){nq+=Q(y.soLuong);});});
+          var k=0;(p.lines||[]).forEach(function(l){k+=Q(l.soLuong);});
+          if((p.lines||[]).length!==1)e.push({dong:0,field:'lines',msg:'Phiếu nhập thành phẩm chỉ một dòng'});
+          if(nq+k>Q(c.n))e.push({dong:1,field:'soLuong',msg:'Vượt số lượng của lệnh (còn '+R(Q(c.n)-nq)+')'});
+          var lx='';mine.forEach(function(x){if(x.loai==='XUAT_SX'&&x.ngay>lx)lx=x.ngay;});
+          if(p.ngay<lx)e.push({dong:0,field:'ngay',msg:'Ngày nhập thành phẩm không trước lần xuất linh kiện cuối ('+lx+')'});
+        }
+        if(p.loai==='NHAP_LAI_SX'){
+          var g5=by[p.phieuGoc];
+          if(!g5||g5.loai!=='XUAT_SX'||g5.soLSX!==s||rev[g5.soPhieu])e.push({dong:0,field:'phieuGoc',msg:'Nhập lại phải theo phiếu xuất sản xuất của cùng lệnh'});
+          else if(g5.kho!==p.kho)e.push({dong:0,field:'kho',msg:'Nhập lại đúng kho đã xuất ('+g5.kho+')'});
+          else{if(p.ngay<g5.ngay)e.push({dong:0,field:'ngay',msg:'Ngày nhập lại không trước ngày xuất'});capCheck(g5,'NHAP_LAI_SX','Nhập lại');}
+        }
+      }
     }
     if(p.loai==='TON_DAU')(p.lines||[]).forEach(function(l){
       if(act.some(function(x){return x.loai==='TON_DAU'&&!rev[x.soPhieu]&&x.kho===p.kho&&(x.lines||[]).some(function(y){return y.maHang===l.maHang;});}))
@@ -236,7 +274,7 @@ var QStock=(function(){
   }
 
   // ---------- đường nhanh: phiếu mới nằm sau mọi phiếu của các mã liên quan ----------
-  var FAST=['NHAP_MUA','NHAP_TP','NHAP_LAI_SX','NHAP_HANG_LOI','CHUYEN_KHO','KIEM_KE','XUAT_BAN','XUAT_CONG_TRINH','XUAT_BH','XUAT_SX','TRA_NCC'];
+  var FAST=['NHAP_MUA','NHAP_HANG_LOI','CHUYEN_KHO','KIEM_KE','XUAT_BAN','XUAT_CONG_TRINH','XUAT_BH','TRA_NCC'];   // phiếu sản xuất luôn qua đường đầy đủ (ràng buộc theo lệnh)
   function applyFast(ton,p,opts){
     opts=opts||{};if(FAST.indexOf(p.loai)<0)return null;
     if(p.loai==='TRA_NCC'&&!loiSet(opts)[p.kho])return null;   // cần phiếu nhập gốc → đường đầy đủ
@@ -298,6 +336,6 @@ var QStock=(function(){
     return Object.keys(rows).sort().map(function(m){var r=rows[m];['dauQ','nhapQ','xuatQ','cuoiQ'].forEach(function(k){r[k]=R(r[k]);});return r;});
   }
   function prefix(loai){return T[loai]?T[loai].pre:'';}
-  return {TYPES:T,nxt:nxt,replay:replay,check:check,applyFast:applyFast,convert:convert,staticCheck:staticCheck,prefix:prefix,money:money,isoDate:isoDate};
+  return {TYPES:T,effDate:function(p,all,opts){var by={};active(all).forEach(function(x){by[key(x)]=x;});return effDate(p,by,(opts&&opts.ngayKhoaSo)||'');},nxt:nxt,replay:replay,check:check,applyFast:applyFast,convert:convert,staticCheck:staticCheck,prefix:prefix,money:money,isoDate:isoDate};
 })();
 if(typeof module!=='undefined')module.exports=QStock;
