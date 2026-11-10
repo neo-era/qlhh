@@ -1,7 +1,7 @@
 /** QLHH — máy chủ Apps Script v0.2 (đợt ①: danh mục, giá, NCC, người dùng, góp ý · đợt ②: kho — xem backend/Kho.gs).
  *  Dán chung 1 file với lõi: core/auth.js, idem.js, schema.js, validate.js, perm.js, price.js, stock.js, serial.js (do build.sh ghép).
  *  Thiết kế: QLHH-thiet-ke.md. */
-var VER = '0.2.0';
+var VER = '0.3.0';
 var SESSION_TTL = 10 * 3600;
 
 // ======================= CÀI ĐẶT =======================

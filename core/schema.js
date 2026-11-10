@@ -23,7 +23,7 @@ var QSchema=(function(){
     LichSuSerial:{cols:['soPhieu','key','maHang','from','to','khoTu','khoDen','thoiGian'],text:['soPhieu','key','maHang','khoTu','khoDen']},
     TonKho:{cols:['maHang','kho','soLuong','giaTri','ngayCuoi','sttCuoi'],num:['soLuong','giaTri','sttCuoi'],text:['maHang','kho','ngayCuoi']},
     // sản xuất tủ (SX-1). Mẫu tủ: mỗi phiên bản 1 dòng, định mức + mục kiểm tra lưu JSON (bất biến sau khi ghi)
-    MauSanPham:{key:'id',cols:['id','maMau','phienBan','maHang','ten','kichThuoc','moTa','thangBH','bom','kcs','trangThai','nguoiTao','thoiGian'],num:['phienBan','thangBH'],text:['id','maMau','maHang','kichThuoc']},
+    MauSanPham:{key:'id',cols:['id','maMau','phienBan','maHang','ten','kichThuoc','moTa','vatLieu','ketCau','filePLC','ghiChuDM','thangBH','bom','kcs','trangThai','nguoiTao','thoiGian'],num:['phienBan','thangBH'],text:['id','maMau','maHang','kichThuoc']},
     LenhSX:{key:'soLSX',cols:['soLSX','ngay','maMau','phienBan','maHang','soLuong','maKH','maCongTrinh','canCuCheTao','kho','trangThai','ghiChu','nguoiTao','thoiGian','lyDoHuy'],num:['phienBan','soLuong'],text:['soLSX','ngay','maMau','maHang','maKH','maCongTrinh','kho']},
     ChiPhiLSX:{key:'id',cols:['id','soLSX','ngay','loai','soTien','soCTGoc','ngayCTGoc','ghiChu','nguoiTao','thoiGian'],num:['soTien'],text:['id','soLSX','ngay','soCTGoc','ngayCTGoc']},
     HoSoTu:{key:'serial',cols:['serial','key','soLSX','maHang','maMau','phienBan','soPhieuNhap','ngayNhap','bomThucTe','serialCon','kichThuoc','ghiChu','kcsDat','lanKiemCuoi','soPXX','trangThai'],num:['phienBan','lanKiemCuoi'],bool:['kcsDat'],text:['serial','key','soLSX','maHang','maMau','soPhieuNhap','ngayNhap','soPXX']},

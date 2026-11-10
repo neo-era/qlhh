@@ -78,7 +78,7 @@ function templateUpsert(u, req, logs) {
     else if (it.quanLySerial && !Number.isInteger(b.soLuong)) e[k] = 'Linh kiện có serial: số lượng nguyên'; });
   if (Object.keys(e).length) throw fail('VALIDATION', firstErr(e), e);
   var ver = readTable('MauSanPham').rows.reduce(function (m, t) { return t.maMau === v.maMau ? Math.max(m, Number(t.phienBan) || 0) : m; }, 0) + 1;
-  var row = { id: v.maMau + '|' + ver, maMau: v.maMau, phienBan: ver, maHang: v.maHang, ten: v.ten, kichThuoc: v.kichThuoc, moTa: v.moTa, thangBH: v.thangBH,
+  var row = { id: v.maMau + '|' + ver, maMau: v.maMau, phienBan: ver, maHang: v.maHang, ten: v.ten, kichThuoc: v.kichThuoc, moTa: v.moTa, vatLieu: v.vatLieu, ketCau: v.ketCau, filePLC: v.filePLC, ghiChuDM: v.ghiChuDM, thangBH: v.thangBH,
     bom: JSON.stringify(v.bom), kcs: JSON.stringify(v.kcs), trangThai: 'HOAT_DONG', nguoiTao: u.email, thoiGian: nowIso() };
   appendBlock('MauSanPham', [row]);
   logs.push({ action: 'template.upsert', doiTuong: 'MauSanPham', id: row.id, truoc: null, sau: { maHang: v.maHang, bom: v.bom.length, kcs: v.kcs.length } });
@@ -109,7 +109,7 @@ function lsxXuat(u, req, logs) {
   cleanupOrphans(logs);
   var l = getLSX(req.soLSX); lsxOpen(l);
   if (!Array.isArray(req.lines)) throw fail('VALIDATION', 'Chưa có dòng linh kiện', { lines: 'Bắt buộc' });
-  var ctx = sxPrep(u, req, { loai: 'XUAT_SX', ngay: String(req.ngay || today()), kho: l.kho, maKH: l.maKH, maCongTrinh: l.maCongTrinh, lyDo: 'Xuất linh kiện cho ' + l.soLSX, lines: req.lines, soLSX: l.soLSX });
+  var ctx = sxPrep(u, req, { loai: 'XUAT_SX', ngay: String(req.ngay || today()), kho: l.kho, maKH: l.maKH, maCongTrinh: l.maCongTrinh, lyDo: txt(req.lyDo, 300) || 'Xuất linh kiện cho ' + l.soLSX, nguoiGiaoNhan: txt(req.nguoiGiaoNhan, 100), lines: req.lines, soLSX: l.soLSX });
   noFuture(ctx.h);
   var r = commitVoucher(u, req, logs, ctx);
   lsxRefresh(l.soLSX);
@@ -283,7 +283,7 @@ function sxGet(u, req) {
   var tus = readTable('HoSoTu').rows.filter(function (c) { return c.soLSX === so; }).map(strip), cost = admin ? cabinetCosts(so) : {};
   if (admin) tus.forEach(function (c) { if (c.trangThai !== 'HUY') c.giaThanh = cost[c.serial]; });
   var ss = {}; tus.forEach(function (c) { ss[c.serial] = 1; });
-  var out = { lsx: strip(l), template: t ? { maMau: t.maMau, phienBan: t.phienBan, ten: t.ten, kichThuoc: t.kichThuoc, thangBH: t.thangBH, bom: t.bomL, kcs: t.kcsL } : null,
+  var out = { lsx: strip(l), template: t ? { maMau: t.maMau, phienBan: t.phienBan, maHang: t.maHang, ten: t.ten, kichThuoc: t.kichThuoc, moTa: t.moTa, vatLieu: t.vatLieu, ketCau: t.ketCau, filePLC: t.filePLC, ghiChuDM: t.ghiChuDM, thangBH: t.thangBH, bom: t.bomL, kcs: t.kcsL } : null,
     phieu: vs.map(function (h) { var x = strip(h); delete x.lines; if (!admin) delete x.tongTien; x.lines = QPerm.filterLines(u.vaiTro, h.lines); return x; }),
     hoSoTu: tus, kcs: readTable('KiemTraXX').rows.filter(function (k) { return ss[k.serial]; }).map(function (k) { var x = strip(k); x.ketQua = parseSerials(k.ketQua); return x; }) };
   if (admin) {

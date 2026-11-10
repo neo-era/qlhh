@@ -43,7 +43,7 @@ var QSX=(function(){
     return {ok:!e.length,dat:!e.length&&soDat===items.length,errors:e,soDat:soDat};}
 
   function validateTemplate(t){t=t||{};var e={},seen={};
-    var v={maMau:up(t.maMau),maHang:up(t.maHang),ten:txt(t.ten,200),kichThuoc:txt(t.kichThuoc,100),moTa:txt(t.moTa,1000),thangBH:Number(t.thangBH===''||t.thangBH==null?12:t.thangBH),
+    var v={maMau:up(t.maMau),maHang:up(t.maHang),ten:txt(t.ten,200),kichThuoc:txt(t.kichThuoc,100),moTa:txt(t.moTa,1000),vatLieu:txt(t.vatLieu,200),ketCau:txt(t.ketCau,400),filePLC:txt(t.filePLC,200),ghiChuDM:txt(t.ghiChuDM,500),thangBH:Number(t.thangBH===''||t.thangBH==null?12:t.thangBH),
       bom:(t.bom||[]).map(function(b){return {maHang:up(b&&b.maHang),soLuong:Number(b&&b.soLuong),ghiChu:txt(b&&b.ghiChu,200)};}),
       kcs:(t.kcs||[]).map(function(k,i){return {stt:i+1,noiDung:txt(k&&k.noiDung,300),yeuCau:txt(k&&k.yeuCau,300)};})};
     if(!/^[A-Z0-9._-]{1,30}$/.test(v.maMau))e.maMau='Mã mẫu 1–30 ký tự A-Z 0-9 . _ -';

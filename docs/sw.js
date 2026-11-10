@@ -1,7 +1,7 @@
 // QLHH service worker: network-first cho trang, cache-first cho tài nguyên tĩnh; KHÔNG cache API (script.google.com).
 // Tăng C mỗi lần phát hành.
-const C = 'qlhh-0.2.0';
-const SHELL = ['./', 'app.css', 'app.js', 'config.js', 'core/validate.js', 'core/perm.js', 'core/price.js', 'core/search.js', 'core/stock.js', 'core/vnwords.js', 'vendor/xlsx.full.min.js', 'manifest.webmanifest', 'icons/192.png', 'icons/512.png', 'icons/180.png'];
+const C = 'qlhh-0.3.0';
+const SHELL = ['./', 'app.css', 'app.js', 'config.js', 'core/validate.js', 'core/perm.js', 'core/price.js', 'core/search.js', 'core/stock.js', 'core/sx.js', 'core/vnwords.js', 'vendor/xlsx.full.min.js', 'vendor/qrcode.js', 'manifest.webmanifest', 'icons/192.png', 'icons/512.png', 'icons/180.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(C).then(c => Promise.allSettled(SHELL.map(u => c.add(u))))); self.skipWaiting(); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== C).map(k => caches.delete(k))))); self.clients.claim(); });
 self.addEventListener('fetch', e => {
