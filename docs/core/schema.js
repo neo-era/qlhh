@@ -15,13 +15,20 @@ var QSchema=(function(){
     QuyDoiDVT:{key:'id',cols:['id','maHang','dvtPhu','heSo'],num:['heSo'],text:['id','maHang']},
     KhachHang:{key:'maKH',cols:['maKH','ten','loaiKH','mst','diaChi','lienHe','dienThoai','email','cheDoBHThayThe','trangThai'],text:['maKH','mst','dienThoai']},
     CongTrinh:{key:'maCongTrinh',cols:['maCongTrinh','ten','maKH','diaChi','chuDauTu','ngayBatDau','ngayNghiemThu','trangThai'],text:['maCongTrinh','maKH','ngayBatDau','ngayNghiemThu']},
-    Phieu:{key:'soPhieu',cols:['soPhieu','stt','loai','ngay','kho','khoDen','maNCC','maKH','maCongTrinh','phieuGoc','daDao','trangThai','nguoiGiaoNhan','lyDo','soCTGoc','ngayCTGoc','tongTien','ghiChu','nguoiTao','thoiGian','requestId','hieuLuc'],
-      num:['stt','tongTien'],bool:['daDao'],text:['soPhieu','ngay','kho','khoDen','maNCC','maKH','maCongTrinh','phieuGoc','soCTGoc','ngayCTGoc','requestId','hieuLuc']},
+    Phieu:{key:'soPhieu',cols:['soPhieu','stt','loai','ngay','kho','khoDen','maNCC','maKH','maCongTrinh','phieuGoc','daDao','trangThai','nguoiGiaoNhan','lyDo','soCTGoc','ngayCTGoc','tongTien','ghiChu','nguoiTao','thoiGian','requestId','hieuLuc','soLSX'],
+      num:['stt','tongTien'],bool:['daDao'],text:['soPhieu','ngay','kho','khoDen','maNCC','maKH','maCongTrinh','phieuGoc','soCTGoc','ngayCTGoc','requestId','hieuLuc','soLSX']},
     ChiTietPhieu:{cols:['soPhieu','dong','maHang','dvt','soLuongCT','heSo','soLuong','donGia','thanhTien','giaTriKho','slSoSach','slThucTe','dongGoc','serials','chenhLechGV'],
       num:['dong','soLuongCT','heSo','soLuong','donGia','thanhTien','giaTriKho','slSoSach','slThucTe','dongGoc','chenhLechGV'],text:['soPhieu','maHang']},
-    Serial:{key:'key',cols:['key','hang','serial','maHang','trangThai','kho','capNhat'],text:['key','hang','serial','maHang','kho']},
+    Serial:{key:'key',cols:['key','hang','serial','maHang','trangThai','kho','capNhat','serialCha'],text:['key','hang','serial','maHang','kho','serialCha']},
     LichSuSerial:{cols:['soPhieu','key','maHang','from','to','khoTu','khoDen','thoiGian'],text:['soPhieu','key','maHang','khoTu','khoDen']},
-    TonKho:{cols:['maHang','kho','soLuong','giaTri','ngayCuoi','sttCuoi'],num:['soLuong','giaTri','sttCuoi'],text:['maHang','kho','ngayCuoi']}
+    TonKho:{cols:['maHang','kho','soLuong','giaTri','ngayCuoi','sttCuoi'],num:['soLuong','giaTri','sttCuoi'],text:['maHang','kho','ngayCuoi']},
+    // sản xuất tủ (SX-1). Mẫu tủ: mỗi phiên bản 1 dòng, định mức + mục kiểm tra lưu JSON (bất biến sau khi ghi)
+    MauSanPham:{key:'id',cols:['id','maMau','phienBan','maHang','ten','kichThuoc','moTa','thangBH','bom','kcs','trangThai','nguoiTao','thoiGian'],num:['phienBan','thangBH'],text:['id','maMau','maHang','kichThuoc']},
+    LenhSX:{key:'soLSX',cols:['soLSX','ngay','maMau','phienBan','maHang','soLuong','maKH','maCongTrinh','canCuCheTao','kho','trangThai','ghiChu','nguoiTao','thoiGian','lyDoHuy'],num:['phienBan','soLuong'],text:['soLSX','ngay','maMau','maHang','maKH','maCongTrinh','kho']},
+    ChiPhiLSX:{key:'id',cols:['id','soLSX','ngay','loai','soTien','soCTGoc','ngayCTGoc','ghiChu','nguoiTao','thoiGian'],num:['soTien'],text:['id','soLSX','ngay','soCTGoc','ngayCTGoc']},
+    HoSoTu:{key:'serial',cols:['serial','key','soLSX','maHang','maMau','phienBan','soPhieuNhap','ngayNhap','bomThucTe','serialCon','kichThuoc','ghiChu','kcsDat','lanKiemCuoi','soPXX','trangThai'],num:['phienBan','lanKiemCuoi'],bool:['kcsDat'],text:['serial','key','soLSX','maHang','maMau','soPhieuNhap','ngayNhap','soPXX']},
+    KiemTraXX:{key:'id',cols:['id','serial','lanKiem','ngay','nguoiKiem','ketQua','dat','soDat','tongMuc','thoiGian'],num:['lanKiem','soDat','tongMuc'],bool:['dat'],text:['id','serial','ngay']},
+    PhieuXuatXuong:{key:'soPXX',cols:['soPXX','nam','so','ngay','maKH','maCongTrinh','diaDiem','serials','canCuCheTao','soPhieuXuat','soHoaDon','trangThai','nguoiLap','thoiGian','lyDoHuy','ghiChu'],num:['nam','so'],text:['soPXX','ngay','maKH','maCongTrinh','soPhieuXuat','soHoaDon']}
   };
   function check(heads){
     var errs=[];

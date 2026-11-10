@@ -11,6 +11,11 @@ function setup() {
   Object.keys(QSchema.SHEETS).forEach(function (n) {
     var d = QSchema.SHEETS[n], s = ss.getSheetByName(n) || ss.insertSheet(n);
     if (s.getLastRow() === 0) s.appendRow(d.cols);
+    else {   // nâng cấp: sheet cũ thiếu cột cuối (vd Phieu.soLSX, Serial.serialCha) → nối thêm tiêu đề, dữ liệu cũ giữ nguyên
+      var h = s.getRange(1, 1, 1, Math.max(1, s.getLastColumn())).getValues()[0].map(function (x) { return String(x).trim(); });
+      while (h.length && !h[h.length - 1]) h.pop();
+      if (h.length < d.cols.length && d.cols.slice(0, h.length).every(function (c, i) { return h[i] === c; })) s.getRange(1, h.length + 1, 1, d.cols.length - h.length).setValues([d.cols.slice(h.length)]);
+    }
     s.setFrozenRows(1);
     d.cols.forEach(function (c, i) { if ((d.num || []).indexOf(c) < 0) { var L = String.fromCharCode(65 + i); s.getRange(L + ':' + L).setNumberFormat('@'); } });   // mọi cột chữ dạng văn bản: không tự đổi kiểu, không chạy công thức
   });
@@ -22,6 +27,8 @@ function setup() {
   if (!p.getProperty('CLIENT_ID')) p.setProperty('CLIENT_ID', 'DIEN_CLIENT_ID_VAO_DAY');
   if (!p.getProperty('dataVersion')) p.setProperty('dataVersion', '1');
   CACHE_T.forEach(function (n) { p.setProperty('ver:' + n, newVer()); });   // setup có thể đổi sheet → bỏ toàn bộ bộ đệm
+  var ch = ss.getSheetByName('CauHinh');
+  if (!ch.getDataRange().getValues().some(function (r) { return r[0] === 'maCongTy'; })) ch.appendRow(['maCongTy', 'LAVIPCO']);   // DAICHAU cho sheet Đại Châu (số xê-ri DC-…, PXX-DAICHAU)
   var kho = ss.getSheetByName('Kho');
   if (kho.getLastRow() < 2) {   // 2 kho mặc định: kho chính + kho hàng lỗi (nhận hàng bảo hành, không tính giá vốn)
     kho.appendRow(QSchema.toRow('Kho', { maKho: 'KHO', ten: 'Kho chính', diaChi: '', loai: 'THUONG', trangThai: 'HOAT_DONG' }));
@@ -79,7 +86,18 @@ var HANDLERS = {
   'voucher.get': voucherGet,
   'period.lock': function (u, r) { return write(u, r, periodLock); },
   'stock.rebuild': function (u, r) { return write(u, r, stockRebuild); },
-  'report.nxt': reportNxt
+  'report.nxt': reportNxt,
+  'template.upsert': function (u, r) { return write(u, r, templateUpsert); },
+  'lsx.create': function (u, r) { return write(u, r, lsxCreate); },
+  'lsx.xuatSX': function (u, r) { return write(u, r, lsxXuat); },
+  'lsx.chiPhi': function (u, r) { return write(u, r, lsxChiPhi); },
+  'lsx.nhapTP': function (u, r) { return write(u, r, lsxNhap); },
+  'lsx.huy': function (u, r) { return write(u, r, lsxHuy); },
+  'kcs.add': function (u, r) { return write(u, r, kcsAdd); },
+  'pxx.issue': function (u, r) { return write(u, r, pxxIssue); },
+  'pxx.cancel': function (u, r) { return write(u, r, pxxCancel); },
+  'sx.get': sxGet,
+  'serial.get': serialGet
 };
 
 function route(req) {
@@ -144,14 +162,15 @@ function findUser(email, fresh) {
 
 // ======================= ĐỌC =======================
 var TABLES = { items: 'HangHoa', groups: 'NhomHang', suppliers: 'NhaCungCap', prices: 'BangGia', users: 'NguoiDung', feedback: 'GopY', logs: 'NhatKy',
-  warehouses: 'Kho', units: 'QuyDoiDVT', customers: 'KhachHang', projects: 'CongTrinh', vouchers: 'Phieu', stock: 'TonKho', serials: 'Serial' };
+  warehouses: 'Kho', units: 'QuyDoiDVT', customers: 'KhachHang', projects: 'CongTrinh', vouchers: 'Phieu', stock: 'TonKho', serials: 'Serial',
+  templates: 'MauSanPham', lsx: 'LenhSX', cabinets: 'HoSoTu', pxx: 'PhieuXuatXuong' };
 /* Bộ nhớ tạm trong 1 lệnh (MEMO): mỗi sheet chỉ đọc 1 lần; ghi sheet nào thì xoá bản nhớ sheet đó (dirty). Trả bản sao nông.
    Bộ đệm GIỮA các lệnh (CacheService) cho bảng danh mục + TonKho, khoá theo PHIÊN BẢN của từng sheet (ScriptProperties 'ver:<sheet>'):
    - ghi sheet → cấp phiên bản mới (DIRTY), đẩy lên ScriptProperties TRƯỚC khi nhả khoá (kể cả khi lỗi) → không lệnh nào đọc phải bản cũ;
    - ghi xong cả bảng (TonKho, HangHoa) → đặt luôn bản mới vào bộ đệm (write-through) để lệnh sau khỏi đọc lại;
    - sheet bị sửa tay ngoài app: bộ đệm sống tối đa 10 phút; "Tính lại tồn" luôn đọc thẳng sheet (FRESH). */
 var MEMO = {}, PROF = [], DIRTY = {}, WT = {}, VERS = null, FRESH = false;
-var CACHE_T = ['HangHoa', 'NhomHang', 'NhaCungCap', 'BangGia', 'Kho', 'QuyDoiDVT', 'KhachHang', 'CongTrinh', 'TonKho', 'CauHinh'];
+var CACHE_T = ['HangHoa', 'NhomHang', 'NhaCungCap', 'BangGia', 'Kho', 'QuyDoiDVT', 'KhachHang', 'CongTrinh', 'TonKho', 'CauHinh', 'MauSanPham', 'LenhSX', 'ChiPhiLSX', 'HoSoTu'];
 function mark(l) { PROF.push([l, Date.now()]); }
 function newVer() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 function vers() { if (!VERS) VERS = props().getProperties(); return VERS; }
@@ -217,7 +236,9 @@ function syncPull(u, req) {
   });
   raw.vouchers = raw.vouchers.filter(function (p) { return p.trangThai === 'HOAN_TAT'; });
   raw.serials = raw.serials.filter(function (x) { return x.trangThai === 'TRONG_KHO' || x.trangThai === 'HANG_LOI'; });   // để chọn serial khi xuất
-  raw.config = { ngayKhoaSo: cfg('ngayKhoaSo') };
+  var last = {}; raw.templates.forEach(function (t) { if (!last[t.maMau] || t.phienBan > last[t.maMau].phienBan) last[t.maMau] = t; });
+  raw.templates = Object.keys(last).sort().map(function (k) { return last[k]; });   // chỉ phiên bản mẫu mới nhất
+  raw.config = { ngayKhoaSo: cfg('ngayKhoaSo'), maCongTy: congTy() };
   return { version: ver, data: QPerm.filterForRole(u.vaiTro, u.email, raw), warnings: u.vaiTro === 'QUAN_TRI' ? warnings : [], today: today(), me: { email: u.email, vaiTro: u.vaiTro, hoTen: u.hoTen } };
 }
 function schemaErrors(force) {

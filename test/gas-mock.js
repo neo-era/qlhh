@@ -2,7 +2,7 @@
 // Mô phỏng cả việc Sheets TỰ ĐỔI KIỂU khi ghi: chuỗi số → số, chuỗi ngày → Date (trừ cột định dạng '@').
 const fs = require('fs'), path = require('path'), crypto = require('crypto');
 const ROOT = path.join(__dirname, '..');
-const BACKEND_FILES = ['core/auth.js', 'core/idem.js', 'core/schema.js', 'core/validate.js', 'core/perm.js', 'core/price.js', 'core/stock.js', 'core/serial.js', 'backend/Code.gs', 'backend/Kho.gs'];
+const BACKEND_FILES = ['core/auth.js', 'core/idem.js', 'core/schema.js', 'core/validate.js', 'core/perm.js', 'core/price.js', 'core/stock.js', 'core/serial.js', 'core/sx.js', 'backend/Code.gs', 'backend/Kho.gs', 'backend/SanXuat.gs'];
 
 function env(tokeninfo, ownerEmail = 'MaiVuLam2020@gmail.com', shared) {
   // shared: dùng chung Sheet/Properties/Cache giữa 2 "tiến trình" (mỗi env có biến toàn cục riêng như 2 lần chạy Apps Script)

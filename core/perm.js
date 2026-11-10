@@ -1,10 +1,10 @@
 /* QLHH core/perm — quyền theo vai trò + lọc dữ liệu nhạy cảm (chạy ở MÁY CHỦ trước khi trả về). */
 var QPerm=(function(){
-  var READ=['auth.me','sync.pull','feedback.add','voucher.get'];
-  var EDIT=['item.upsert','item.stop','group.upsert','supplier.upsert','price.add','customer.upsert','project.upsert','unit.upsert','voucher.create'];
-  var ADMIN=['user.upsert','feedback.update','admin.schemaCheck','warehouse.upsert','voucher.reverse','period.lock','stock.rebuild','report.nxt'];
+  var READ=['auth.me','sync.pull','feedback.add','voucher.get','sx.get','serial.get'];
+  var EDIT=['item.upsert','item.stop','group.upsert','supplier.upsert','price.add','customer.upsert','project.upsert','unit.upsert','voucher.create','lsx.create','lsx.xuatSX','lsx.nhapTP','kcs.add','pxx.issue'];
+  var ADMIN=['user.upsert','feedback.update','admin.schemaCheck','warehouse.upsert','voucher.reverse','period.lock','stock.rebuild','report.nxt','template.upsert','lsx.chiPhi','lsx.huy','pxx.cancel'];
   var ACT={XEM:READ,NHAP_LIEU:READ.concat(EDIT),QUAN_TRI:READ.concat(EDIT,ADMIN)};
-  var TABS=['items','groups','suppliers','prices','warehouses','units','customers','projects','vouchers','stock','serials'];
+  var TABS=['items','groups','suppliers','prices','warehouses','units','customers','projects','vouchers','stock','serials','templates','lsx','cabinets','pxx'];
   function can(role,action){return !!ACT[role]&&ACT[role].indexOf(action)>=0;}
   function copy(a){return (a||[]).map(function(o){var c={};for(var k in o)if(k!=='_row')c[k]=o[k];return c;});}
   function filterForRole(role,email,d){
@@ -12,7 +12,7 @@ var QPerm=(function(){
     if(!ACT[role])return out;
     var admin=role==='QUAN_TRI';
     TABS.forEach(function(k){out[k]=copy(d[k]);});
-    out.config={ngayKhoaSo:(d.config&&d.config.ngayKhoaSo)||''};
+    out.config={ngayKhoaSo:(d.config&&d.config.ngayKhoaSo)||'',maCongTy:(d.config&&d.config.maCongTy)||''};
     if(!admin){
       out.items.forEach(function(i){delete i.giaVon;});
       out.prices=out.prices.filter(function(p){return p.loai!=='NHAP';});
