@@ -52,20 +52,20 @@ function lsxRefresh(so) {
 }
 /** Hồ sơ tủ của phiếu nhập TP bị đảo / ghi dở → HUY; gỡ serialCha của linh kiện. */
 function cabinetsVoid(soPhieu) {
-  var keys = {}, ch = [];
+  var pairs = [], ch = [];
   readTable('HoSoTu').rows.forEach(function (c) {
     if (c.soPhieuNhap !== soPhieu || c.trangThai === 'HUY') return;
-    parseSerials(c.serialCon).forEach(function (k) { keys[k] = 1; });
+    parseSerials(c.serialCon).forEach(function (k) { pairs.push([k, '', c.key]); });   // chỉ gỡ khi linh kiện còn đang trỏ đúng tủ này
     c.trangThai = 'HUY'; ch.push(c);
   });
   putMany('HoSoTu', ch);
-  setParents(Object.keys(keys).map(function (k) { return [k, '']; }));
+  setParents(pairs);
   return ch.length;
 }
-/** pairs = [[khoá serial con, khoá tủ cha]] — 1 lần đọc + 1 lần ghi Serial. */
+/** pairs = [[khoá serial con, khoá tủ cha mới, (tuỳ chọn) chỉ đổi khi cha hiện tại = giá trị này]] — 1 lần đọc + 1 lần ghi Serial. */
 function setParents(pairs) {
-  if (!pairs.length) return; var want = {}; pairs.forEach(function (p) { want[p[0]] = p[1]; });
-  putMany('Serial', readTable('Serial').rows.filter(function (r) { return r.key in want; }).map(function (r) { r.serialCha = want[r.key]; return r; }));
+  if (!pairs.length) return; var want = {}; pairs.forEach(function (p) { want[p[0]] = p; });
+  putMany('Serial', readTable('Serial').rows.filter(function (r) { var p = want[r.key]; return p && (p.length < 3 || r.serialCha === p[2]) && r.serialCha !== p[1]; }).map(function (r) { r.serialCha = want[r.key][1]; return r; }));
 }
 /** Kết chuyển huỷ lệnh (KC_HUY) tự cân: sau mỗi lần tính lại làm đổi giá linh kiện của lệnh đã huỷ → sửa số KC để dở dang về 0. */
 function syncKcHuy(lsxState) {

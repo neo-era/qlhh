@@ -267,6 +267,8 @@ test('KT-A4 mất bộ đệm "đang ghi" sau khi nhập TP chết trước đ�
   const tp = x.W('lsx.nhapTP', { soLSX: so, ngay: '2026-11-09', soLuong: 2 }, x.nv);
   assert.deepEqual(x.W('sx.get', { soLSX: so }).hoSoTu.filter(h => h.trangThai !== 'HUY').map(h => JSON.parse(h.serialCon)), [['SIEMENS|LG11010'], ['SIEMENS|LG11011']]);
   assert.equal(x.ton('TU-DKCS-2N').soLuong, 2); assert.equal(tp.serials.length, 2);
+  x.W('stock.rebuild', {});
+  assert.equal(x.W('serial.get', { serial: 'LG11010' }).cha.serial, tp.serials[0], 'Tính lại tồn lần nữa không gỡ serial con khỏi tủ thật');
 });
 
 test('KT-B5 KCS khi mẫu không có mục kiểm tra → từ chối (không thành ĐẠT với 0 mục)', () => {
@@ -298,4 +300,17 @@ test('KT-B2 huỷ dòng chi phí ghi sai → giá thành tính lại; báo cáo 
   const w = x.W('report.wip', { from: '2026-11-01', to: '2026-11-30' }).rows.find(r => r.soLSX === x.so);
   assert.deepEqual([w.dauKy, w.linhKien, w.cp.NC_TRUC_TIEP, w.nhapTP, w.cuoiKy], [0, 20240000, 0, 20240000, 0]);
   assert.equal(x.P('report.wip', { from: '2026-11-01', to: '2026-11-30' }, x.nv).code, 'FORBIDDEN');
+});
+
+test('KT-B vòng 2: nhập lại TRƯỚC khi Tính lại tồn → dọn tủ ma không gỡ LOGO! khỏi tủ thật', () => {
+  const x = plant(); x.buy('2026-11-01', 2); x.tpl();
+  const so = x.W('lsx.create', { lsx: { maMau: 'TU-2N', soLuong: 2, ngay: '2026-11-02', kho: 'KHO' } }, x.nv).soLSX;
+  x.issue(so, '2026-11-05', 2, ['LG11010', 'LG11011']);
+  const ph = x.a.sheets.Phieu, orig = ph.appendRow; ph.appendRow = function () { ph.appendRow = orig; throw new Error('chết trước đầu phiếu'); };
+  assert.equal(x.P('lsx.nhapTP', { soLSX: so, ngay: '2026-11-09', soLuong: 2 }, x.nv).ok, false);
+  clearCache(x.a);
+  const tp = x.W('lsx.nhapTP', { soLSX: so, ngay: '2026-11-09', soLuong: 2 }, x.nv);
+  x.W('stock.rebuild', {});
+  assert.equal(x.W('serial.get', { serial: 'LG11010' }).cha.serial, tp.serials[0]);
+  assert.equal(x.W('serial.get', { serial: 'LG11011' }).cha.serial, tp.serials[1]);
 });
