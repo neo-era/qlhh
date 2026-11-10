@@ -572,7 +572,7 @@
       let g = (S.data.vouchers || []).find(x => x.soPhieu === p.phieuGoc);
       if (!g) { const r = await call('voucher.get', { soPhieu: p.phieuGoc }, 2); g = r.ok ? r.data.phieu : null; }
       if (!g) return toast('Không đọc được phiếu gốc ' + p.phieuGoc);
-      base = { ...p, loai: g.loai, maNCC: g.maNCC, maKH: g.maKH, maCongTrinh: g.maCongTrinh, khoDen: g.khoDen }; sign = -1;
+      base = { ...p, loai: g.loai, maNCC: g.maNCC, maKH: g.maKH, maCongTrinh: g.maCongTrinh, khoDen: g.khoDen, soLSX: g.soLSX }; sign = -1;
     }
     const t = QStock.TYPES[base.loai] || {}, kk = base.loai === 'KIEM_KE', ck = base.loai === 'CHUYEN_KHO', nhapKho = t.dir > 0, priced = t.cost === 'PRICE';
     const title = (kk ? 'BIÊN BẢN KIỂM KÊ VẬT TƯ, HÀNG HÓA' : ck ? 'PHIẾU ĐIỀU CHUYỂN KHO (NỘI BỘ)' : nhapKho ? 'PHIẾU NHẬP KHO' : 'PHIẾU XUẤT KHO') + (sign < 0 ? ' (ĐẢO)' : '');
@@ -581,7 +581,8 @@
     const amt = l => (Number(priced ? l.thanhTien : l.giaTriKho) || 0) + (Number(l.chenhLechGV) || 0), tot = sign * L.reduce((a, l) => a + amt(l), 0);   // trả NCC: thành tiền = giá gốc (khớp công nợ)
     const adjTot = sign * L.reduce((a, l) => a + (Number(l.chenhLechGV) || 0), 0);
     const d0 = p.ngay.split('-'), ngay = `Ngày ${d0[2]} tháng ${d0[1]} năm ${d0[0]}`;
-    const partner = base.maNCC ? (d => d && { ten: d.ten, dc: d.diaChi, mst: d.mst })((S.data.suppliers || []).find(x => x.maNCC === base.maNCC))
+    const sxP = ['XUAT_SX', 'NHAP_TP', 'NHAP_LAI_SX'].includes(base.loai);   // phiếu sản xuất: người giao/nhận là bộ phận sản xuất, không in khách hàng
+    const partner = sxP ? null : base.maNCC ? (d => d && { ten: d.ten, dc: d.diaChi, mst: d.mst })((S.data.suppliers || []).find(x => x.maNCC === base.maNCC))
       : base.maKH ? (d => d && { ten: d.ten, dc: d.diaChi, mst: d.mst })((S.data.customers || []).find(x => x.maKH === base.maKH)) : null;
     const price = l => priced ? Number(l.donGia) : (amt(l) && Number(l.soLuong) ? amt(l) / Number(l.soLuong) : '');
     const p2 = n => n === '' ? '' : Number(n).toLocaleString('vi-VN', { maximumFractionDigits: 2 });
@@ -596,8 +597,8 @@
       ${sign < 0 ? `<p><b>Đảo chứng từ số ${esc(p.phieuGoc)} ngày ${esc(p.ngayCTGoc || '')}</b> — lý do: ${esc(p.lyDo || '')}</p>` : ''}
       ${kk ? `<p>- Thời điểm kiểm kê: ${ngay.toLowerCase()} · Kho: ${esc(khoName(base.kho))}<br>- Ban kiểm kê: ……………………………………………………………<br>- ${esc(p.lyDo || 'Đã kiểm kê các mặt hàng dưới đây')}</p>`
         : `<p>- Họ và tên người ${nhapKho ? 'giao' : 'nhận'}: ${esc(p.nguoiGiaoNhan || '……………………')}${partner ? `<br>- Đơn vị: ${esc(partner.ten)}${partner.mst ? ' · MST ' + esc(partner.mst) : ''}${partner.dc ? '<br>- Địa chỉ: ' + esc(partner.dc) : ''}` : ''}
-          <br>- Lý do ${nhapKho ? 'nhập' : 'xuất'} kho: ${esc(sign < 0 ? LOAI[base.loai] + ' (đảo)' : (p.lyDo || LOAI[base.loai]))}${base.maCongTrinh ? ' — công trình ' + esc(projName(base.maCongTrinh)) : ''}
-          <br>- Theo chứng từ số: ${esc((sign < 0 ? '' : p.soCTGoc) || '……')} ngày ${esc((sign < 0 ? '' : p.ngayCTGoc) || '……')}<br>- ${ck ? 'Từ kho: ' + esc(khoName(base.kho)) + ' → đến kho: ' + esc(khoName(base.khoDen)) : (nhapKho ? 'Nhập' : 'Xuất') + ' tại kho: ' + esc(khoName(base.kho))}</p>`}
+          <br>- Lý do ${nhapKho ? 'nhập' : 'xuất'} kho: ${esc(sign < 0 ? LOAI[base.loai] + ' (đảo)' : (p.lyDo || LOAI[base.loai]))}${base.maCongTrinh && !sxP ? ' — công trình ' + esc(projName(base.maCongTrinh)) : ''}
+          ${base.soLSX ? '<br>- Lệnh sản xuất: <b>' + esc(base.soLSX) + '</b> (bộ phận sản xuất)' : ''}<br>- Theo chứng từ số: ${esc((sign < 0 ? '' : p.soCTGoc) || '……')} ngày ${esc((sign < 0 ? '' : p.ngayCTGoc) || '……')}<br>- ${ck ? 'Từ kho: ' + esc(khoName(base.kho)) + ' → đến kho: ' + esc(khoName(base.khoDen)) : (nhapKho ? 'Nhập' : 'Xuất') + ' tại kho: ' + esc(khoName(base.kho))}</p>`}
       <table class="pv-t"><thead>${kk ? '<tr><th rowspan="2">STT</th><th rowspan="2">Tên vật tư, hàng hóa</th><th rowspan="2">Mã số</th><th rowspan="2">ĐVT</th><th rowspan="2">Đơn giá</th><th colspan="2">Số lượng</th><th colspan="2">Chênh lệch</th><th rowspan="2">Giá trị chênh lệch</th></tr><tr><th>Theo sổ sách</th><th>Theo kiểm kê</th><th>Thừa</th><th>Thiếu</th></tr>'
         : `<tr><th rowspan="2">STT</th><th rowspan="2">Tên, nhãn hiệu, quy cách vật tư, hàng hóa</th><th rowspan="2">Mã số</th><th rowspan="2">ĐVT</th><th colspan="2">Số lượng</th><th rowspan="2">Đơn giá</th><th rowspan="2">Thành tiền</th></tr><tr><th>Theo chứng từ</th><th>Thực ${nhapKho ? 'nhập' : 'xuất'}</th></tr>`}</thead>
         <tbody>${rows}<tr><td></td><td><b>Cộng</b></td><td></td><td></td><td></td><td></td><td></td>${kk ? '<td></td><td></td>' : ''}<td class="n"><b>${showMoney ? num(tot) : ''}</b></td></tr></tbody></table>
@@ -730,7 +731,7 @@
     m.innerHTML = header('Sản xuất tủ', canEdit() && !noTpl ? `<button class="btn pri" id="newL">${ic('plus')}<span>Lệnh sản xuất</span></button>` : '', false, canEdit() && !noTpl ? 'newLM' : '') + `
       <label class="msearch">${ic('search')}<span class="sr">Tìm lệnh</span><input id="qsm" type="search" placeholder="Số lệnh, mẫu, khách, công trình…" value="${esc(SX.q)}" autocomplete="off"></label>
       <div class="top" style="margin-top:-4px"><label class="search" style="flex:1 1 320px">${ic('search')}<span class="sr">Tìm lệnh</span><input id="qsd" type="search" placeholder="Số lệnh, mẫu, khách, công trình…" value="${esc(SX.q)}" autocomplete="off"></label></div>
-      <div class="sxbar"><button class="btn" type="button" id="serB">${ic('search')} Tra xê-ri tủ</button><button class="btn" type="button" id="tplB">${ic('layers')} Mẫu tủ (${(d.templates || []).length})</button></div>
+      <div class="sxbar"><button class="btn" type="button" id="serB">${ic('search')} Tra xê-ri tủ</button><button class="btn" type="button" id="tplB">${ic('layers')} Mẫu tủ (${(d.templates || []).length})</button>${isQT() ? `<button class="btn" type="button" id="wipB">${ic('chart')} Dở dang (TK 154)</button>` : ''}</div>
       <div class="chips" role="group" aria-label="Lọc lệnh">${F.map(([k, t]) => `<button class="chip" type="button" data-f="${k}" aria-pressed="${SX.f === k}">${t}</button>`).join('')}</div>
       <div class="card list">${list.length ? list.slice(0, 300).map(l => { const c = cabsOf(l.soLSX), ok = c.filter(x => x.kcsDat).length;
         return `<div class="it" data-lsx="${esc(l.soLSX)}" role="button" tabindex="0"><div><div class="mono">${esc(l.soLSX)} <span class="tag st-${esc(l.trangThai)}">${LSX_ST[l.trangThai] || esc(l.trangThai)}</span>${bad(l.soLSX) ? ` <span class="tag bad">${ic('warn')} Không đạt KCS</span>` : ''}</div>
@@ -740,7 +741,7 @@
     let t = null; $$('#qsm,#qsd').forEach(q => q.oninput = () => { SX.q = q.value; clearTimeout(t); t = setTimeout(() => { viewSX(m); const n = $('#' + q.id); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } }, 300); });
     $$('.chip[data-f]').forEach(b => b.onclick = () => { SX.f = b.dataset.f; viewSX(m); });
     $$('#newL,#newLM').forEach(b => b.onclick = lsxForm);
-    $('#tplB').onclick = tplList; $('#serB').onclick = serialSearch;
+    $('#tplB').onclick = tplList; $('#serB').onclick = serialSearch; const wb = $('#wipB'); if (wb) wb.onclick = wipReport;
     $$('[data-lsx]').forEach(r => r.onclick = r.onkeydown = e => { if (e.type === 'keydown' && e.key !== 'Enter') return; openLSX(r.dataset.lsx); });
   }
   function openLSX(so) { SX.sel = so; SX.stale = true; if (isMobile()) history.pushState({ lsx: 1 }, ''); if (route() !== 'sx') location.hash = '#/sx'; else renderView(); }
@@ -787,7 +788,7 @@
           : `<div class="empty">${hasX ? 'Chưa nhập tủ nào. Lắp xong bấm <b>Nhập thành phẩm</b> — hệ thống cấp số xê-ri cho từng tủ.' : 'Bước đầu: <b>Xuất linh kiện</b> theo định mức × số tủ (sửa được theo thực tế).'}</div>`}</section>
       </div><div>
         <section class="card"><h2 class="h2">Phiếu kho của lệnh</h2>${ph.length ? `<div class="list">${ph.map(p => `<div class="it" data-so="${esc(p.soPhieu)}" role="button" tabindex="0"><div><span class="mono">${esc(p.soPhieu)}</span> · ${esc(LOAI[p.loai] || p.loai)}<br><small class="mut">${esc(p.ngay)} · ${p.lines.length} dòng</small></div>${isQT() && p.tongTien !== undefined ? `<b style="white-space:nowrap">${money(p.tongTien)}</b>` : ''}</div>`).join('')}</div>` : '<div class="empty">Chưa có phiếu.</div>'}</section>
-        ${isQT() && g.chiPhi ? `<section class="card"><h2 class="h2">Chi phí khác</h2>${g.chiPhi.length ? `<div class="list">${g.chiPhi.map(c => `<div class="it"><div>${esc(CP_LOAI[c.loai] || c.loai)}<br><small class="mut">${esc(c.ngay)}${c.soCTGoc ? ' · ' + esc(c.soCTGoc) : ''}${c.ghiChu ? ' · ' + esc(c.ghiChu) : ''}</small></div><b>${money(c.soTien)}</b></div>`).join('')}</div>` : '<div class="empty">Chưa có (nhân công, gia công…).</div>'}</section>` : ''}
+        ${isQT() && g.chiPhi ? `<section class="card"><h2 class="h2">Chi phí khác</h2>${g.chiPhi.length ? `<div class="list">${g.chiPhi.map(c => { const huyRoi = g.chiPhi.some(y => y.soCTGoc === c.id && Number(y.soTien) < 0); return `<div class="it"><div>${esc(CP_LOAI[c.loai] || c.loai)} <small class="mut mono">${esc(c.id)}</small><br><small class="mut">${esc(c.ngay)}${c.soCTGoc ? ' · ' + esc(c.soCTGoc) : ''}${c.ghiChu ? ' · ' + esc(c.ghiChu) : ''}</small></div><div style="text-align:right"><b>${money(c.soTien)}</b>${!huy && !S.offline && Number(c.soTien) > 0 && c.loai !== 'KC_HUY' && !huyRoi ? `<br><button class="linkbtn" type="button" data-cph="${esc(c.id)}">Huỷ dòng</button>` : huyRoi ? '<br><small class="mut">đã huỷ</small>' : ''}</div></div>`; }).join('')}</div>` : '<div class="empty">Chưa có (nhân công, gia công…).</div>'}</section>` : ''}
         <section class="card"><h2 class="h2">Định mức 1 tủ</h2><div class="tbl"><table><thead><tr><th>Mã</th><th>Linh kiện</th><th class="n">SL</th></tr></thead><tbody>${t.bom.map(b => { const it = itemOf(b.maHang); return `<tr><td class="mono">${esc(b.maHang)}</td><td>${esc(it.ten)}${isSer(it) ? ' <span class="tag">serial</span>' : ''}</td><td class="n">${num(b.soLuong)} ${esc(it.dvt)}</td></tr>`; }).join('')}</tbody></table></div></section>
       </div></div>`;
     const back = () => history.state && history.state.lsx ? history.back() : (SX.sel = null, renderView());
@@ -798,6 +799,8 @@
       const plan = QSX.planIssue(t.bom, Number(l.soLuong)).map(b => ({ maHang: b.maHang, soLuongCT: Math.max(0, Math.round((b.soLuong - (iss[b.maHang] || 0)) * 1000) / 1000) })).filter(b => b.soLuongCT > 0);
       if (!plan.length) return toast('Đã xuất đủ định mức — muốn bổ sung thì thêm dòng trong phiếu');
       voucherForm('XUAT_SX', { sx: so, kho: l.kho, lyDo: 'Xuất linh kiện cho ' + so, lines: plan }); });
+    $$('[data-cph]').forEach(b => b.onclick = () => dialog('Huỷ chi phí ' + esc(b.dataset.cph), `<p>Ghi dòng âm cùng ngày, cùng loại; giá thành các tủ đã nhập được tính lại.</p>${fld('lyDo', 'Lý do', '', { req: 1, type: 'textarea' })}`,
+      async (v, dlg) => { if (!v.lyDo.trim()) { showErrors(dlg, { lyDo: 'Nhập lý do' }); return false; } return !!(await submitSX(dlg, 'lsx.chiPhiHuy', { id: b.dataset.cph, lyDo: v.lyDo }, () => 'Đã huỷ chi phí ' + b.dataset.cph)); }, null, 'Huỷ chi phí'));
     on('aN', () => nhapForm(g, rem)); on('aP', () => pxxForm(g, pxxReady)); on('aC', () => chiPhiForm(g)); on('aH', () => huyForm(g));
     $$('[data-kcs]').forEach(b => b.onclick = e => { e.stopPropagation(); kcsScreen(b.dataset.kcs, t, tus); });
     $$('[data-tu]').forEach(r => r.onclick = () => tuView(r.dataset.tu));
@@ -828,9 +831,11 @@
       }, 'Lập lệnh');
   }
   function nhapForm(g, rem) {
+    const iss = {}; g.phieu.forEach(p => p.lines.forEach(x => { if (p.loai === 'XUAT_SX') iss[x.maHang] = (iss[x.maHang] || 0) + Number(x.soLuong); if (p.loai === 'NHAP_LAI_SX') iss[x.maHang] = (iss[x.maHang] || 0) - Number(x.soLuong); }));
+    const thieu = QSX.planIssue((g.template || {}).bom || [], Number(g.lsx.soLuong)).filter(b => (iss[b.maHang] || 0) + 1e-9 < b.soLuong);
     dialog('Nhập thành phẩm — ' + esc(g.lsx.soLSX), `<p>Hệ thống cấp số xê-ri cho từng tủ (dạng <span class="mono">${esc(QSX.serialNo(S.data.config.maCongTy || S.co.id, g.lsx.maHang, S.today.slice(0, 4), 1))}</span>), lập phiếu nhập kho thành phẩm và hồ sơ tủ. Linh kiện có serial (LOGO!…) tự gắn vào từng tủ.</p>
       <div class="grid2"><div>${fld('soLuong', 'Số tủ nhập', String(rem), { req: 1, im: 'numeric' })}</div><div>${fld('ngay', 'Ngày nhập', S.today, { type: 'date', max: S.today })}</div></div>
-      <p class="mut" style="font-size:12.5px">Sau khi nhập thành phẩm, không xuất bổ sung linh kiện cho lệnh này nữa. Giá thành = giá trị linh kiện đã xuất + chi phí khác, chia theo số tủ.</p>`,
+      ${thieu.length ? `<div class="banner" role="alert">${ic('warn')} Linh kiện đã xuất chưa đủ định mức × ${num(g.lsx.soLuong)} tủ: ${thieu.map(b => esc(b.maHang) + ' (cần ' + num(b.soLuong) + ', đã xuất ' + num(iss[b.maHang] || 0) + ')').join(', ')}. Nhập thành phẩm rồi thì không xuất bổ sung được.</div>` : ''}<p class="mut" style="font-size:12.5px">Sau khi nhập thành phẩm, không xuất bổ sung linh kiện cho lệnh này nữa. Giá thành = giá trị linh kiện đã xuất + chi phí khác, chia theo số tủ.</p>`,
       async (v, dlg) => { const n = Number(v.soLuong); if (!Number.isInteger(n) || n < 1 || n > rem) { showErrors(dlg, { soLuong: 'Từ 1 đến ' + rem }); return false; }
         return !!(await submitSX(dlg, 'lsx.nhapTP', { soLSX: g.lsx.soLSX, ngay: v.ngay, soLuong: n }, x => `Đã nhập ${x.serials.length} tủ: ${x.serials.join(', ')}`)); }, null, 'Nhập kho');
   }
@@ -946,7 +951,7 @@
     const last = x => (x.kcs || []).slice(-1)[0] || { ketQua: [] };
     const kTab = (t.kcs || []).map((k, i) => { const okAll = tus.every(x => (last(x).ketQua[i] || {}).ketQua === 'DAT');
       return `<tr><td class="c">${i + 1}</td><td>${esc(k.noiDung)}</td><td>${esc(k.yeuCau)}</td><td class="c">${okAll ? '☑' : '☐'}</td><td class="c">${okAll ? '☐' : '☑'}</td></tr>`; }).join('');
-    const kiem = [...new Set(tus.map(x => last(x).nguoiKiem).filter(Boolean))].join(', '), ngayKiem = [...new Set(tus.map(x => last(x).ngay).filter(Boolean))].join(', ');
+    const kiem = [...new Set(tus.map(x => last(x).nguoiKiemTen || last(x).nguoiKiem).filter(Boolean))].join(', '), ngayKiem = [...new Set(tus.map(x => last(x).ngay).filter(Boolean))].join(', ');
     const words = QWords.read ? QWords.read(n) : String(n);
     const host = document.createElement('div'); host.id = 'printArea';
     host.innerHTML = `<div class="pv pxx">${p.trangThai === 'HUY' ? '<div class="pxx-void">ĐÃ HUỶ</div>' : ''}
@@ -960,7 +965,7 @@
       <h2>II. THÔNG TIN SẢN PHẨM</h2><table class="pv-k"><tbody>
         <tr><td>Tên sản phẩm</td><td>${esc(t.moTa || t.ten)}</td></tr><tr><td>Số lượng</td><td>${pad2(n)} (${esc(words)}) tủ</td></tr>
         ${t.kichThuoc ? `<tr><td>Kích thước vỏ tủ</td><td>${esc(t.kichThuoc)} mm (Cao × Rộng × Sâu)</td></tr>` : ''}${t.vatLieu ? `<tr><td>Vật liệu, màu sắc</td><td>${esc(t.vatLieu)}</td></tr>` : ''}
-        ${t.ketCau ? `<tr><td>Kết cấu</td><td>${esc(t.ketCau)}</td></tr>` : ''}${t.filePLC ? `<tr><td>Chương trình PLC (firmware)</td><td>${esc(t.filePLC)}</td></tr>` : ''}
+        ${t.ketCau ? `<tr><td>Kết cấu</td><td>${esc(t.ketCau)}</td></tr>` : ''}${t.filePLC ? `<tr><td>Chương trình PLC (firmware)</td><td>${esc(t.filePLC)}</td></tr>` : ''}${t.thongSoDien ? `<tr><td>Thông số điện</td><td>${esc(t.thongSoDien)}</td></tr>` : ''}
         <tr><td>Số xê-ri tủ</td><td><div class="pxx-qr">${sers.map((s, i) => `<div>${qrs[i]}<b>${esc(s)}</b></div>`).join('')}</div></td></tr></tbody></table>
       <h2>III. DANH MỤC THIẾT BỊ LẮP TRONG TỦ</h2><table class="pv-t"><thead><tr><th>STT</th><th>Tên thiết bị – Quy cách</th><th>Hãng / xuất xứ</th><th>ĐVT</th><th>SL</th></tr></thead><tbody>
         ${(t.bom || []).map((b, i) => { const it = itemOf(b.maHang), s = conBy[b.maHang];
@@ -968,7 +973,7 @@
       ${t.ghiChuDM ? `<p><i>Ghi chú: ${esc(t.ghiChuDM)}</i></p>` : ''}
       <h2>IV. KẾT QUẢ KIỂM TRA XUẤT XƯỞNG</h2><table class="pv-t"><thead><tr><th>STT</th><th>Nội dung kiểm tra</th><th>Yêu cầu</th><th>Đạt</th><th>Không đạt</th></tr></thead><tbody>${kTab}</tbody></table>
       <p>Người kiểm tra: ${esc(kiem)} · ngày kiểm: ${esc(ngayKiem)}${n > 1 ? ` · kết quả đạt áp dụng cho cả ${n} tủ` : ''}</p>
-      <h2>V. KẾT LUẬN</h2><p class="pxx-kl">Tủ điều khiển nêu trên đã được kiểm tra theo các nội dung tại mục IV, đủ điều kiện xuất xưởng, giao cho khách hàng để lắp đặt tại công trình. Thời gian bảo hành ${esc(t.thangBH || 12)} tháng kể từ ngày bàn giao, theo điều kiện sử dụng và vận hành đúng hướng dẫn. Bảo hành không áp dụng cho hư hỏng do thiên tai, sét đánh, quá áp lưới điện, tác động cơ học hoặc tự ý sửa chữa, thay đổi đấu nối.${p.ghiChu ? ' ' + esc(p.ghiChu) : ''}<br>Liên hệ bảo hành: ${esc(co.tenDay || co.ten)}${co.dienThoai ? ' – ĐT ' + esc(co.dienThoai) : ''}.</p>
+      <h2>V. KẾT LUẬN</h2><p class="pxx-kl">Tủ điều khiển nêu trên đã được kiểm tra theo các nội dung tại mục IV, đủ điều kiện xuất xưởng, giao cho khách hàng để lắp đặt tại công trình. Thời gian bảo hành ${esc(t.thangBH || 12)} tháng kể từ ngày bàn giao, theo điều kiện sử dụng và vận hành đúng hướng dẫn. Bảo hành không áp dụng cho hư hỏng do thiên tai, sét đánh, quá áp lưới điện, tác động cơ học hoặc tự ý sửa chữa, thay đổi đấu nối.${p.ghiChu ? ' ' + esc(p.ghiChu) : ''}<br>Liên hệ bảo hành: ${esc(co.tenDay || co.ten)}${co.dienThoai ? ' – ĐT ' + esc(co.dienThoai) : ''}.<br>Kèm theo: Sơ đồ mạch và hình ảnh tủ thực tế tại xưởng (Phụ lục).</p>
       <div class="pv-sign pxx-sign"><div><b>ĐẠI DIỆN BÊN NHẬN</b><br><i>(Ký, ghi rõ họ tên, ngày)</i></div><div><b>NGƯỜI KIỂM TRA</b><br><i>(Ký, ghi rõ họ tên)</i></div><div><b>ĐƠN VỊ SẢN XUẤT</b><br><b>GIÁM ĐỐC</b><br><i>(Ký, đóng dấu)</i><br><br><br><br><b>${esc(co.giamDoc || '')}</b></div></div>
       <p class="pv-foot">In từ QLHH v${VER} · quét QR để tra hồ sơ tủ (cần đăng nhập)</p></div>`;
     document.body.appendChild(host); document.body.classList.add('printing');
@@ -1000,7 +1005,7 @@
         ${x.pxx ? `<dt>Phiếu xuất xưởng</dt><dd><span class="mono">${esc(x.pxx.soPXX)}</span> · ${esc(x.pxx.ngay)}${x.pxx.maKH ? ' · ' + esc(custName(x.pxx.maKH)) : ''}</dd>` : ''}
         ${x.lsx && x.lsx.maKH ? `<dt>Khách theo lệnh</dt><dd>${esc(custName(x.lsx.maKH))}${x.lsx.maCongTrinh ? ' · ' + esc(projName(x.lsx.maCongTrinh)) : ''}</dd>` : ''}
         <dt>Bảo hành</dt><dd>${esc(x.item.thangBH || 12)} tháng từ ngày bàn giao — <i>chưa có ngày bàn giao</i></dd>
-        ${x.giaThanh !== undefined ? `<dt>Giá thành</dt><dd>${money(x.giaThanh)}</dd>` : ''}</dl>
+        ${x.giaThanh !== undefined ? `<dt>Giá thành</dt><dd>${money(x.giaThanh)} <small class="mut">(khi bán, giá vốn theo bình quân của mã thành phẩm)</small></dd>` : ''}</dl>
       <h3 class="h3">Linh kiện có serial trong tủ</h3>${(x.con || []).length ? `<ul class="plain">${x.con.map(c => `<li><span class="mono">${esc(c.serial)}</span> — ${esc(itemOf(c.maHang).ten)}</li>`).join('')}</ul>` : '<p class="mut">Không có.</p>'}
       <h3 class="h3">Kiểm tra xuất xưởng (${(x.kcs || []).length} lần)</h3>${(x.kcs || []).length ? x.kcs.slice().reverse().map(k => `<details ${k === x.kcs[x.kcs.length - 1] ? 'open' : ''}><summary>Lần ${k.lanKiem} · ${esc(k.ngay)} · ${k.dat ? '<b class="ok-ink">Đạt</b>' : '<b class="bad-ink">Không đạt</b>'} · ${esc(k.nguoiKiem)}</summary><ol class="kcsum">${k.ketQua.map(q => `<li>${esc(q.noiDung)} — ${q.ketQua === 'DAT' ? '✓' : `<b class="bad-ink">✗ ${esc(q.ghiChu)}</b>`}</li>`).join('')}</ol></details>`).join('') : '<p class="mut">Chưa kiểm.</p>'}
       <div class="acts" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">${live ? `<button class="btn pri" type="button" id="tK">${ic('check')} Kiểm tra xuất xưởng</button>` : ''}${x.pxx ? `<button class="btn" type="button" id="tP">In PXX</button>${isQT() && !S.offline && x.pxx.trangThai === 'PHAT_HANH' ? '<button class="btn danger" type="button" id="tPH">Huỷ PXX</button>' : ''}` : ''}<button class="btn" type="button" id="tTem">In tem QR</button></div>`, null, d => {
@@ -1020,6 +1025,22 @@
     window.addEventListener('afterprint', done); setTimeout(() => { window.print(); setTimeout(done, 1500); }, 50);
   }
 
+  // ----- báo cáo dở dang (QT) -----
+  function wipReport() {
+    const m0 = S.today.slice(0, 8) + '01';
+    dialog('Báo cáo dở dang sản xuất (TK 154)', `<div class="grid2"><div>${fld('from', 'Từ ngày', m0, { type: 'date' })}</div><div>${fld('to', 'Đến ngày', S.today, { type: 'date' })}</div></div><div id="wipR"></div>`,
+      async (v, dlg) => {
+        const r = await call('report.wip', { from: v.from, to: v.to }, 3); if (!r.ok) { dlgMsg(dlg, r.error || r.code); return false; }
+        const rows = r.data.rows, sumCp = x => Object.values(x.cp).reduce((a, b) => a + b, 0), tot = k => rows.reduce((a, x) => a + (k === 'cp' ? sumCp(x) : x[k]), 0);
+        $('#wipR', dlg).innerHTML = rows.length ? `<div class="tbl"><table><thead><tr><th>Lệnh</th><th class="n">Đầu kỳ</th><th class="n">Linh kiện</th><th class="n">NC trực tiếp</th><th class="n">SX chung</th><th class="n">Gia công ngoài</th><th class="n">Nhập TP</th><th class="n">KC huỷ</th><th class="n">Cuối kỳ</th></tr></thead><tbody>
+          ${rows.map(x => `<tr><td class="mono">${esc(x.soLSX)}<br><small class="mut">${esc(x.maMau || '')} × ${num(x.soLuong)} · ${LSX_ST[x.trangThai] || ''}</small></td>${[x.dauKy, x.linhKien, x.cp.NC_TRUC_TIEP || 0, x.cp.SX_CHUNG || 0, x.cp.GIA_CONG_NGOAI || 0, x.nhapTP, x.kcHuy, x.cuoiKy].map(n => `<td class="n">${num(n)}</td>`).join('')}</tr>`).join('')}
+          <tr><td><b>Cộng</b></td>${['dauKy', 'linhKien'].map(k => `<td class="n"><b>${num(tot(k))}</b></td>`).join('')}<td class="n" colspan="3"><b>${num(tot('cp'))}</b></td>${['nhapTP', 'kcHuy', 'cuoiKy'].map(k => `<td class="n"><b>${num(tot(k))}</b></td>`).join('')}</tr></tbody></table></div>
+          <p class="mut" style="font-size:12.5px">Cuối kỳ = Đầu kỳ + Linh kiện + Chi phí − Nhập TP + KC huỷ (âm: kết chuyển sang chi phí 632/811).</p><button class="btn" type="button" id="wipX">${ic('dl')} Xuất Excel</button>` : '<div class="empty">Không có lệnh phát sinh trong kỳ.</div>';
+        const xb = $('#wipX', dlg); if (xb) xb.onclick = () => exportRows(`DoDang_${v.from}_${v.to}`, rows.map(x => ({ 'Lệnh SX': x.soLSX, 'Mẫu': x.maMau, 'Số tủ': x.soLuong, 'Đầu kỳ': x.dauKy, 'Linh kiện': x.linhKien, 'NC trực tiếp': x.cp.NC_TRUC_TIEP || 0, 'SX chung': x.cp.SX_CHUNG || 0, 'Gia công ngoài': x.cp.GIA_CONG_NGOAI || 0, 'Nhập TP': x.nhapTP, 'KC huỷ': x.kcHuy, 'Cuối kỳ': x.cuoiKy })));
+        return false;
+      }, dlg => dlg.classList.add('wide'), 'Xem báo cáo');
+  }
+
   // ----- mẫu tủ -----
   function tplList() {
     const tp = S.data.templates || [];
@@ -1037,7 +1058,7 @@
       <div class="grid2"><div>${fld('maMau', 'Mã mẫu', t0 ? t0.maMau : '', { req: 1, ro: !!t0 })}</div><div>${fld('maHang', 'Mã hàng thành phẩm (quản lý serial)', t0 ? t0.maHang : '', { opts: [['', '— Chọn —'], ...tp.map(i => [i.maHang, i.ten + ' (' + i.maHang + ')'])] })}</div>
         <div>${fld('ten', 'Tên mẫu', t0 ? t0.ten : '', { req: 1 })}</div><div>${fld('thangBH', 'Bảo hành (tháng)', t0 ? t0.thangBH : '12', { im: 'numeric' })}</div>
         <div>${fld('kichThuoc', 'Kích thước C×R×S (mm)', t0 ? t0.kichThuoc : '')}</div><div>${fld('vatLieu', 'Vật liệu, màu sắc', t0 ? t0.vatLieu : '')}</div>
-        <div>${fld('filePLC', 'Chương trình PLC (tên file)', t0 ? t0.filePLC : '')}</div></div>
+        <div>${fld('filePLC', 'Chương trình PLC (tên file)', t0 ? t0.filePLC : '')}</div><div>${fld('thongSoDien', 'Thông số điện (dòng định mức, IP, cách điện…)', t0 ? t0.thongSoDien : '')}</div></div>
       ${fld('moTa', 'Tên sản phẩm in trên PXX', t0 ? t0.moTa : '', { type: 'textarea' })}${fld('ketCau', 'Kết cấu', t0 ? t0.ketCau : '', { type: 'textarea' })}
       <h3 class="h3">Định mức linh kiện cho 1 tủ</h3><datalist id="dlTI">${items.map(i => `<option value="${esc(i.maHang)}">${esc(i.ten)}</option>`).join('')}</datalist><div id="tBom"></div><button class="btn" type="button" id="tBomAdd">${ic('plus')} Thêm linh kiện</button>
       ${fld('ghiChuDM', 'Ghi chú danh mục (in dưới mục III)', t0 ? t0.ghiChuDM : '')}

@@ -96,6 +96,8 @@ var HANDLERS = {
   'kcs.add': function (u, r) { return write(u, r, kcsAdd); },
   'pxx.issue': function (u, r) { return write(u, r, pxxIssue); },
   'pxx.cancel': function (u, r) { return write(u, r, pxxCancel); },
+  'lsx.chiPhiHuy': function (u, r) { return write(u, r, lsxChiPhiHuy); },
+  'report.wip': reportWip,
   'sx.get': sxGet,
   'serial.get': serialGet
 };

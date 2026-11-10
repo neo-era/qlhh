@@ -120,3 +120,41 @@ test('mẫu tủ: kiểm định mức + mục kiểm tra; không chứa chính 
   const e = X.validateTemplate({ maMau: 'M', maHang: 'TU', ten: 'x', thangBH: 200, bom: [{ maHang: 'TU', soLuong: 1 }, { maHang: 'A', soLuong: 0 }, { maHang: 'B', soLuong: 1 }, { maHang: 'B', soLuong: 1 }], kcs: [] });
   assert.equal(e.ok, false); assert.ok(e.errors.thangBH && e.errors.kcs && e.errors['bom.1'] && e.errors['bom.2'] && e.errors['bom.4']);
 });
+
+// ---------- vòng chuyên gia kế toán 1 (A1, B3, B5, C1, B1) ----------
+test('A1 đảo phiếu nhập TP ở kỳ đã khoá: dở dang nhận lại đúng giá gốc 11.620.000; chênh lệch BQ → điều chỉnh giá vốn', () => {
+  const opts = { lsx: { D1: { n: 1, chiPhi: [{ ngay: '2026-10-05', soTien: 1500000 }] }, D2: { n: 1, chiPhi: [{ ngay: '2026-11-01', soTien: 9880000 }] } }, ngayKhoaSo: '2026-10-31' };
+  const t1 = nhapTP('2026-10-06', 'D1', 1), vs = [nhapBom('2026-10-01', 2), xuatSX('2026-10-05', 'D1', 1), t1, xuatSX('2026-11-01', 'D2', 1), nhapTP('2026-11-02', 'D2', 1), P('XUAT_BAN', '2026-11-03', 'K', [{ maHang: 'TU', soLuong: 1 }])];
+  const r0 = K.replay(vs, opts); assert.equal(v(r0, vs[2]), 11620000); assert.equal(v(r0, vs[4]), 20000000);
+  const c = K.check(vs, P('DAO', '2026-11-04', 'K', [], { phieuGoc: t1.soPhieu }), opts);
+  assert.equal(c.ok, true, JSON.stringify(c));
+  assert.equal(X.balance(c.result.lsx.D1, opts.lsx.D1, '2026-11-30'), 11620000, 'dở dang D1 = giá gốc');
+  const dao = Object.keys(c.result.lines).find(k => k.startsWith('DAO-'));
+  assert.equal(c.result.lines[dao] + c.result.adj[dao], 11620000, 'giá trị rời kho + chênh lệch GV = giá gốc');
+  assert.equal(c.result.adj[dao], 11620000 - 15810000);
+});
+test('B3 nhập TP khi lệnh chưa xuất linh kiện → từ chối; B5 nhập lại sau khi đã nhập đủ TP → từ chối', () => {
+  const opts = { lsx: { B: { n: 1, chiPhi: [] } } };
+  assert.equal(K.check([nhapBom('2026-11-01', 1)], nhapTP('2026-11-02', 'B', 1), opts).code, 'VALIDATION');
+  const xs = xuatSX('2026-11-02', 'B', 1), vs = [nhapBom('2026-11-01', 1), xs, nhapTP('2026-11-03', 'B', 1)];
+  assert.equal(K.check(vs, P('NHAP_LAI_SX', '2026-11-04', 'K', [{ maHang: 'VO', soLuong: 1, dongGoc: 1 }], { soLSX: 'B', phieuGoc: xs.soPhieu }), opts).code, 'VALIDATION');
+});
+test('C1 nhập từng tủ 3 đợt: 10.000.000 → 3.333.333 / 3.333.333 / 3.333.334 (tủ cuối của lệnh nhận lẻ)', () => {
+  const opts = { lsx: { C: { n: 3, chiPhi: [{ ngay: '2026-11-01', soTien: 10000000 }] } } };
+  const vs = [P('XUAT_SX', '2026-11-01', 'K', [], { soLSX: 'C' }), nhapTP('2026-11-02', 'C', 1), nhapTP('2026-11-03', 'C', 1), nhapTP('2026-11-04', 'C', 1)];
+  const r = K.replay(vs, opts);
+  assert.deepEqual([v(r, vs[1]), v(r, vs[2]), v(r, vs[3])], [3333333, 3333333, 3333334]);
+});
+test('B1 báo cáo dở dang theo kỳ: đầu kỳ + linh kiện + chi phí theo khoản mục − nhập TP − kết chuyển = cuối kỳ', () => {
+  const opts = { lsx: { L4: { n: 3, chiPhi: [{ ngay: '2026-10-05', soTien: 3000000, loai: 'NC_TRUC_TIEP' }, { ngay: '2026-11-02', soTien: 1500000, loai: 'SX_CHUNG' }] } } };
+  const vs = [nhapBom('2026-10-01', 3), xuatSX('2026-10-05', 'L4', 3), nhapTP('2026-10-20', 'L4', 2), nhapTP('2026-11-03', 'L4', 1)];
+  const oct = X.wipReport(vs, opts, '2026-10-01', '2026-10-31').find(r => r.soLSX === 'L4');
+  assert.deepEqual([oct.dauKy, oct.linhKien, oct.cp.NC_TRUC_TIEP, oct.nhapTP, oct.cuoiKy], [0, 30360000, 3000000, 22240000, 11120000]);
+  const nov = X.wipReport(vs, opts, '2026-11-01', '2026-11-30').find(r => r.soLSX === 'L4');
+  assert.deepEqual([nov.dauKy, nov.linhKien, nov.cp.SX_CHUNG, nov.nhapTP, nov.kcHuy, nov.cuoiKy], [11120000, 0, 1500000, 12620000, 0, 0]);
+});
+test('tách 1 dòng gốc thành 2 dòng trả trong cùng phiếu không vượt được số gốc (khách trả, nhập lại SX)', () => {
+  const nh = P('NHAP_MUA', '2026-11-01', 'K', [{ maHang: 'VO', soLuong: 2, donGia: 1 }]), px = P('XUAT_BAN', '2026-11-02', 'K', [{ maHang: 'VO', soLuong: 1 }]);
+  assert.equal(K.check([nh, px], P('KHACH_TRA', '2026-11-03', 'K', [{ maHang: 'VO', soLuong: 1, dongGoc: 1 }, { maHang: 'VO', soLuong: 1, dongGoc: 1 }], { phieuGoc: px.soPhieu }), {}).code, 'VALIDATION');
+  assert.equal(K.check([nh, px], P('KHACH_TRA', '2026-11-03', 'K', [{ maHang: 'VO', soLuong: 0.5, dongGoc: 1 }, { maHang: 'VO', soLuong: 0.5, dongGoc: 1 }], { phieuGoc: px.soPhieu }), {}).ok, true);
+});

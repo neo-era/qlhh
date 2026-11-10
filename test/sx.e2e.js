@@ -125,6 +125,13 @@ async function kcsAll(p, bad) {   // bad = {chỉ số mục: ghi chú}
   await p.emulateMedia({ media: 'print' }); await p.pdf({ path: SHOTS + '/sx-PXX.pdf', format: 'A4', printBackground: true });
   await p.screenshot({ path: SHOTS + '/sx-PXX.png', fullPage: true }); await p.emulateMedia({ media: 'screen' });
   await p.evaluate(() => { document.getElementById('printArea').remove(); document.body.classList.remove('printing'); });
+  ok(html.includes('Kèm theo: Sơ đồ mạch'), 'kết luận có dòng Kèm theo phụ lục');
+  // báo cáo dở dang (QT)
+  await p.goto(BASE + '#/sx'); await settle(p); await p.evaluate(() => { window.QLHH_DEBUG && 0; });
+  if (await p.$('#lBack2')) { await p.click('#lBack2'); await settle(p); }
+  await p.click('#wipB'); await fill(p, { from: '2026-11-01' }); await p.click('#dlgOk'); await p.waitForSelector('#wipR table');
+  const wr = await p.textContent('#wipR'); ok(wr.includes('LSX-2026-00002') && wr.includes('20.240.000') && wr.includes('23.240.000'), 'báo cáo dở dang: linh kiện 20.240.000, nhập TP 23.240.000');
+  await p.click('[data-x]'); await closed(p);
   // tra xê-ri → hồ sơ tủ: 2 lần kiểm, PXX
   await p.goto(BASE + '#/t/LAVIPCO/LV-TUDKCS2N-2026-0003'); await p.waitForSelector('.tuhead', { timeout: 8000 });
   const tv = await p.textContent('#dlg');

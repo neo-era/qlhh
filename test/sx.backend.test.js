@@ -212,3 +212,90 @@ test('gửi lại cùng requestId (mất mạng) → không nhập TP / không c
   assert.equal(x.a.sheets.Phieu.d.filter(r => r[2] === 'NHAP_TP').length, 1);
   assert.equal(x.a.sheets.HoSoTu.d.length, 2);
 });
+
+// ---------- hồi quy theo 2 chuyên gia vòng 1 ----------
+function dieAfterHead(a) {   // chết NGAY SAU khi ghi đầu phiếu (lần đọc Phieu kế tiếp ném lỗi)
+  const ph = a.sheets.Phieu, orig = ph.appendRow, og = ph.getDataRange;
+  ph.appendRow = function (r) { orig.call(this, r); ph.appendRow = orig; ph.getDataRange = function () { ph.getDataRange = og; throw new Error('chết sau đầu phiếu'); }; };
+}
+const clearCache = a => { for (const k of Object.keys(a.cache.d || a.cache)) if (/done|req:|pending/.test(k)) delete (a.cache.d || a.cache)[k]; };
+const cnt = (a, loai) => a.sheets.Phieu.d.filter(r => r[2] === loai).length;
+
+test('KT-A1 chết sau đầu phiếu rồi gửi lại cùng requestId (bộ đệm mất) → không ghi phiếu thứ 2 (nhập TP, xuất linh kiện)', () => {
+  const x = plant(); x.buy('2026-11-01', 4); x.tpl();
+  const so = x.W('lsx.create', { lsx: { maMau: 'TU-2N', soLuong: 4, ngay: '2026-11-02', kho: 'KHO' } }, x.nv).soLSX;
+  const bx = { action: 'lsx.xuatSX', session: x.nv, requestId: rid(), soLSX: so, ngay: '2026-11-05', lines: BOM.map(([m, q]) => ({ maHang: m, soLuongCT: q * 4, serials: m === 'LOGO' ? ['LG11010', 'LG11011', 'LG11012', 'LG11013'] : undefined })) };
+  dieAfterHead(x.a); assert.equal(x.a.post(bx).ok, false); clearCache(x.a);
+  const r2 = x.a.post(bx); assert.equal(r2.ok, true, JSON.stringify(r2)); assert.equal(cnt(x.a, 'XUAT_SX'), 1); assert.equal(x.ton('VO').soLuong, 0);
+  const bn = { action: 'lsx.nhapTP', session: x.nv, requestId: rid(), soLSX: so, ngay: '2026-11-09', soLuong: 2 };
+  dieAfterHead(x.a); assert.equal(x.a.post(bn).ok, false); clearCache(x.a);
+  const r3 = x.a.post(bn); assert.equal(r3.ok, true, JSON.stringify(r3)); assert.equal(r3.data.serials.length, 2);
+  assert.equal(cnt(x.a, 'NHAP_TP'), 1); assert.equal(x.ton('TU-DKCS-2N').soLuong, 2); assert.equal(x.a.sheets.HoSoTu.d.length - 1, 2);
+});
+
+test('KT-A2 phát hành PXX chết khi gắn tủ, gửi lại → chỉ 1 PXX còn hiệu lực; dòng PXX ghi cuối', () => {
+  const x = built(), [t1] = x.tp.serials;
+  x.W('kcs.add', { serial: t1, ngay: '2026-11-09', ketQua: x.pass() }, x.nv);
+  const hs = x.a.sheets.HoSoTu, og = hs.getRange; hs.getRange = function () { hs.getRange = og; throw new Error('chết khi ghi HoSoTu'); };
+  const body = { action: 'pxx.issue', session: x.nv, requestId: rid(), pxx: { ngay: '2026-11-09', serials: [t1] } };
+  assert.equal(x.a.post(body).ok, false); assert.equal(x.a.sheets.PhieuXuatXuong.d.length, 1, 'chưa có dòng PXX');
+  const r = x.a.post(body); assert.equal(r.ok, true); assert.equal(r.data.soPXX, '0001/2026/PXX-LAVIPCO');
+  assert.equal(x.a.sheets.PhieuXuatXuong.d.length, 2);
+});
+
+test('KT-A3 trả lại trùng dòng gốc trong 1 lệnh huỷ → từ chối, không tồn ảo', () => {
+  const x = plant(); x.buy('2026-11-01', 1); x.tpl();
+  const so = x.W('lsx.create', { lsx: { maMau: 'TU-2N', soLuong: 1, ngay: '2026-11-02', kho: 'KHO' } }, x.nv).soLSX;
+  const xs = x.issue(so, '2026-11-05', 1, ['LG11010']).data.soPhieu;
+  assert.equal(x.P('lsx.huy', { soLSX: so, ngay: '2026-11-06', lyDo: 'x', traLai: [{ phieuGoc: xs, dong: 1, soLuong: 1 }, { phieuGoc: xs, dong: 1, soLuong: 1 }] }).code, 'VALIDATION');
+  assert.equal(x.ton('VO').soLuong, 0);
+  assert.equal(x.P('lsx.huy', { soLSX: so, ngay: '2026-11-06', lyDo: 'x', traLai: [{ phieuGoc: xs, dong: 1, soLuong: 1 }, { phieuGoc: xs, dong: 4, soLuong: 1, serials: ['LG11099'] }] }).ok, false, 'serial sai → không ghi phiếu nào');
+  assert.equal(cnt(x.a, 'NHAP_LAI_SX'), 0, 'kiểm toàn bộ kế hoạch trước khi ghi');
+});
+
+test('KT-A4 mất bộ đệm "đang ghi" sau khi nhập TP chết trước đầu phiếu → Tính lại tồn dọn tủ ma; tủ ma không KCS/PXX/bán được', () => {
+  const x = plant(); x.buy('2026-11-01', 2); x.tpl();
+  const so = x.W('lsx.create', { lsx: { maMau: 'TU-2N', soLuong: 2, ngay: '2026-11-02', kho: 'KHO' } }, x.nv).soLSX;
+  x.issue(so, '2026-11-05', 2, ['LG11010', 'LG11011']);
+  const ph = x.a.sheets.Phieu, orig = ph.appendRow; ph.appendRow = function () { ph.appendRow = orig; throw new Error('chết trước đầu phiếu'); };
+  assert.equal(x.P('lsx.nhapTP', { soLSX: so, ngay: '2026-11-09', soLuong: 2 }, x.nv).ok, false);
+  clearCache(x.a);
+  const ghost = x.a.sheets.HoSoTu.d[1][0];
+  assert.equal(x.P('kcs.add', { serial: ghost, ngay: '2026-11-09', ketQua: x.pass() }, x.nv).code, 'VALIDATION', 'tủ ma không KCS được');
+  x.W('stock.rebuild', {});
+  assert.ok(x.a.sheets.HoSoTu.d.slice(1).every(r => r[15] === 'HUY'), 'hồ sơ tủ ma → HUY');
+  const tp = x.W('lsx.nhapTP', { soLSX: so, ngay: '2026-11-09', soLuong: 2 }, x.nv);
+  assert.deepEqual(x.W('sx.get', { soLSX: so }).hoSoTu.filter(h => h.trangThai !== 'HUY').map(h => JSON.parse(h.serialCon)), [['SIEMENS|LG11010'], ['SIEMENS|LG11011']]);
+  assert.equal(x.ton('TU-DKCS-2N').soLuong, 2); assert.equal(tp.serials.length, 2);
+});
+
+test('KT-B5 KCS khi mẫu không có mục kiểm tra → từ chối (không thành ĐẠT với 0 mục)', () => {
+  const x = built(), t = x.tp.serials[0];
+  x.a.sheets.MauSanPham.d.slice(1).forEach(r => { r[QSchemaCols('MauSanPham').indexOf('kcs')] = '[]'; });
+  for (const k of Object.keys(x.a.raw)) if (k.startsWith('ver:')) x.a.raw[k] = 'x' + Math.random();
+  assert.equal(x.P('kcs.add', { serial: t, ngay: '2026-11-09', ketQua: [] }, x.nv).code, 'VALIDATION');
+});
+function QSchemaCols(n) { return require('../core/schema.js').SHEETS[n].cols; }
+
+test('KT-A2 kế toán: lệnh đã huỷ — nhập lùi ngày phụ kiện làm đổi giá xuất → kết chuyển tự cân, dở dang vẫn 0', () => {
+  const x = plant(); x.buy('2026-11-01', 1); x.tpl();
+  const so = x.W('lsx.create', { lsx: { maMau: 'TU-2N', soLuong: 1, ngay: '2026-11-02', kho: 'KHO' } }, x.nv).soLSX;
+  const xs = x.issue(so, '2026-11-05', 1, ['LG11010']).data.soPhieu;
+  const traLai = BOM.map(([m, q], i) => ({ phieuGoc: xs, dong: i + 1, soLuong: m === 'PK' ? 0 : q, serials: m === 'LOGO' ? ['LG11010'] : undefined }));
+  assert.equal(x.W('lsx.huy', { soLSX: so, ngay: '2026-11-06', lyDo: 'Đổi thiết kế', traLai }).ketChuyen, 350000);
+  x.W('voucher.create', { voucher: { loai: 'NHAP_MUA', ngay: '2026-11-03', kho: 'KHO', maNCC: 'NCC1', lines: [{ maHang: 'PK', soLuongCT: 2, gia: 500000 }] } });
+  const g = x.W('sx.get', { soLSX: so });
+  assert.equal(g.doDang, 0); assert.deepEqual(g.chiPhi.map(c => [c.loai, c.soTien]), [['KC_HUY', -450000]]);
+});
+
+test('KT-B2 huỷ dòng chi phí ghi sai → giá thành tính lại; báo cáo dở dang theo kỳ (QT)', () => {
+  const x = built();
+  const cp = x.W('sx.get', { soLSX: x.so }).chiPhi[0].id;
+  assert.equal(x.P('lsx.chiPhiHuy', { id: cp, lyDo: 'nhập sai' }, x.nv).code, 'FORBIDDEN');
+  assert.equal(x.W('lsx.chiPhiHuy', { id: cp, lyDo: 'Ghi nhầm lệnh' }).tinhLai, 1);
+  assert.equal(x.ton('TU-DKCS-2N').giaTri, 20240000);
+  assert.equal(x.P('lsx.chiPhiHuy', { id: cp, lyDo: 'lần 2' }).code, 'VALIDATION');
+  const w = x.W('report.wip', { from: '2026-11-01', to: '2026-11-30' }).rows.find(r => r.soLSX === x.so);
+  assert.deepEqual([w.dauKy, w.linhKien, w.cp.NC_TRUC_TIEP, w.nhapTP, w.cuoiKy], [0, 20240000, 0, 20240000, 0]);
+  assert.equal(x.P('report.wip', { from: '2026-11-01', to: '2026-11-30' }, x.nv).code, 'FORBIDDEN');
+});

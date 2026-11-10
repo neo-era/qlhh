@@ -160,6 +160,15 @@ function cleanupOrphans(logs, full) {
     clearPending(so);
     logs.push({ action: 'voucher.orphan', doiTuong: 'Phieu', id: so, truoc: { trangThai: h ? h.trangThai : 'CHUA_GHI_DAU_PHIEU' }, sau: { trangThai: 'LOI_GHI' } });
   });
+  if (full) {   // bộ đệm "đang ghi" mất: dòng phiếu / lịch sử serial / hồ sơ tủ không có đầu phiếu = phiếu ghi dở → trả serial, huỷ hồ sơ tủ
+    var hd = {}; readTable('Phieu').rows.forEach(function (p) { hd[p.soPhieu] = 1; });
+    var orf = uniq(readTable('ChiTietPhieu').rows.map(function (l) { return l.soPhieu; }).concat(readTable('LichSuSerial').rows.map(function (l) { return l.soPhieu; }), readTable('HoSoTu').rows.filter(function (c) { return c.trangThai !== 'HUY'; }).map(function (c) { return c.soPhieuNhap; })).filter(function (so) { return so && !hd[so]; }));
+    orf.forEach(function (so) {
+      var hist = readTable('LichSuSerial').rows.filter(function (h) { return h.soPhieu === so; }), sk = mapBy(readTable('Serial').rows, 'key');
+      var rv = hist.some(function (h) { var c = sk[h.key]; return c && c.trangThai === h.to; }); if (rv) revertSerials(so);   // chỉ trả serial còn đúng trạng thái phiếu dở đã đặt
+      if (cabinetsVoid(so) || rv) logs.push({ action: 'voucher.orphan', doiTuong: 'Phieu', id: so, truoc: { trangThai: 'KHONG_DAU_PHIEU' }, sau: { trangThai: 'DA_DON' } });
+    });
+  }
   if (full) readTail('Phieu', 300).rows.filter(function (p) { return p.trangThai === 'NHAP_DO'; }).forEach(function (p) {   // phiếu dở dang kiểu cũ / bộ đệm mất
     setVoucherState(p.soPhieu, 'LOI_GHI'); revertSerials(p.soPhieu);
     logs.push({ action: 'voucher.orphan', doiTuong: 'Phieu', id: p.soPhieu, truoc: { trangThai: 'NHAP_DO' }, sau: { trangThai: 'LOI_GHI' } });
@@ -173,7 +182,7 @@ function rebuildFor(mas) {
     if (o.ngayKhoaSo && p.ngay <= o.ngayKhoaSo) locked.push({ soPhieu: p.soPhieu, dong: l.dong, cu: l.giaTriKho, moi: nv });   // kỳ đã khoá: chỉ báo, không ghi
     else changes.push({ soPhieu: p.soPhieu, dong: l.dong, maHang: l.maHang, new: nv, adj: na });
   }); });
-  var n = applyChanges(changes, all.rowOf, mas);
+  var n = applyChanges(changes, all.rowOf, mas); syncKcHuy(r.lsx);
   writeTon(r.ton, mas); updateCost(r.ton, mas);
   refreshTotals(all.vouchers.filter(function (p) { return !(o.ngayKhoaSo && p.ngay <= o.ngayKhoaSo); }).map(function (p) { return p.soPhieu; }));   // sửa cả tổng tiền bị sửa tay (trừ kỳ đã khoá)
   return { changes: n, errors: r.errors, lechKyKhoa: locked };
@@ -262,8 +271,10 @@ function commitVoucher(u, req, logs, ctx, opt) {
   o.ngayKhoaSo = cfg('ngayKhoaSo'); o.lsx = lsxOpts();   // đọc lại trong khoá
   var mas = uniq(lines.map(function (l) { return l.maHang; }));
   if (BAN_RA.indexOf(h.loai) >= 0 && lines.some(function (l) { return l.serials.length; })) {   // chỉ bán/giao tủ đã đạt KCS
-    var hs = mapBy(readTable('HoSoTu').rows.filter(function (x) { return x.trangThai !== 'HUY'; }), 'serial');
-    lines.forEach(function (l) { l.serials.forEach(function (z) { var c = hs[QSerial.norm(z)]; if (c && !c.kcsDat) throw fail('VALIDATION', 'Tủ ' + c.serial + ' chưa đạt kiểm tra xuất xưởng (KCS)', { dong: l.dong, serials: 'Kiểm tra xuất xưởng trước' }); }); });
+    var hs = mapBy(readTable('HoSoTu').rows.filter(function (x) { return x.trangThai !== 'HUY'; }), 'serial'), ch = cabHeads();
+    lines.forEach(function (l) { l.serials.forEach(function (z) { var c = hs[QSerial.norm(z)];
+      if (c && !ch[c.soPhieuNhap]) throw fail('VALIDATION', 'Tủ ' + c.serial + ' thuộc phiếu nhập chưa hoàn tất — Quản trị chạy "Tính lại tồn"', { dong: l.dong });
+      if (c && !c.kcsDat) throw fail('VALIDATION', 'Tủ ' + c.serial + ' chưa đạt kiểm tra xuất xưởng (KCS)', { dong: l.dong, serials: 'Kiểm tra xuất xưởng trước' }); }); });
   }
   var ton = readTon(), sttTry = Number(props().getProperty('seq:stt') || 0) + 1;
   if (h.loai === 'KIEM_KE') lines.forEach(function (l) { l.slSoSach = (ton[l.maHang] && ton[l.maHang].kho[h.kho]) || 0; });
@@ -288,6 +299,7 @@ function commitVoucher(u, req, logs, ctx, opt) {
   appendBlock('ChiTietPhieu', lines.map(function (l) { var c = {}; for (var k in l) c[k] = l[k]; c.serials = l.serials.length ? JSON.stringify(l.serials.map(QSerial.norm)) : ''; return c; }));
   applySerials(sr.changes, so);
   var changed = all ? applyChanges(r.changes, all.rowOf, mas) : 0;
+  if (all) syncKcHuy(r.result.lsx);
   Object.keys(r.result.ton).forEach(function (m) { var t = r.result.ton[m]; if (t.last && t.last.stt === sttTry) t.last.stt = stt; });
   writeTon(r.result.ton, mas); updateCost(r.result.ton, mas);
   if (opt.beforeHead) opt.beforeHead(so, r);
@@ -326,7 +338,7 @@ function voucherReverse(u, req, logs) {
     trangThai: 'HOAN_TAT', nguoiGiaoNhan: '', lyDo: lyDo, soCTGoc: gso, ngayCTGoc: g.ngay, tongTien: tong, ghiChu: '', nguoiTao: u.email, thoiGian: nowIso(), requestId: String(req.requestId), hieuLuc: r.hieuLuc };
   appendBlock('ChiTietPhieu', lines);
   applySerials(sr.changes, so);
-  var changed = applyChanges(r.changes, all.rowOf, mas);
+  var changed = applyChanges(r.changes, all.rowOf, mas); syncKcHuy(r.result.lsx);
   writeTon(r.result.ton, mas); updateCost(r.result.ton, mas);
   setVoucherState(gso, 'HOAN_TAT', { daDao: true });
   appendBlock('Phieu', [dhead]);   // đầu phiếu đảo ghi cuối

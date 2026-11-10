@@ -18,9 +18,24 @@ var QSX=(function(){
     return st.xv+cp-st.nv-st.tv;}
   /* Dở dang mọi lệnh tại cuối ngày `ngay` (theo ngày hiệu lực của phiếu, kể cả phiếu đảo tính tại ngày gốc). */
   function wip(vouchers,opts,ngay){
-    var vs=(vouchers||[]).filter(function(p){return K.effDate(p,vouchers,opts)<=ngay;}),r=K.replay(vs,opts),out={};
+    var e=K.effDates(vouchers,opts),vs=(vouchers||[]).filter(function(p){return e[p.soPhieu]&&e[p.soPhieu]<=ngay;}),r=K.replay(vs,opts),out={};
     Object.keys((opts&&opts.lsx)||{}).forEach(function(s){out[s]=balance(r.lsx[s],opts.lsx[s],ngay);});return out;}
 
+  /* Báo cáo dở dang (TK 154) theo kỳ cho từng lệnh: đầu kỳ + linh kiện (xuất − nhập lại) + chi phí theo khoản mục + kết chuyển huỷ − nhập TP = cuối kỳ. */
+  function wipReport(vouchers,opts,from,to){
+    var L=(opts&&opts.lsx)||{},prev=new Date(Date.parse(from+'T00:00:00Z')-864e5).toISOString().slice(0,10);
+    var dau=wip(vouchers,opts,prev),cuoi=wip(vouchers,opts,to),full=K.replay(vouchers,opts),eff=K.effDates(vouchers,opts),by={},rows={};
+    (vouchers||[]).forEach(function(p){by[p.soPhieu]=p;});
+    Object.keys(L).forEach(function(s){rows[s]={soLSX:s,dauKy:dau[s]||0,linhKien:0,cp:{},kcHuy:0,nhapTP:0,cuoiKy:cuoi[s]||0};
+      (L[s].chiPhi||[]).forEach(function(c){if(c.ngay<from||c.ngay>to)return;var t=Math.round(Number(c.soTien)||0);if(c.loai==='KC_HUY')rows[s].kcHuy+=t;else rows[s].cp[c.loai||'KHAC']=(rows[s].cp[c.loai||'KHAC']||0)+t;});});
+    (vouchers||[]).forEach(function(p){
+      if(p.trangThai!=='HOAN_TAT')return;var d=eff[p.soPhieu];if(!d||d<from||d>to)return;
+      var g=p.loai==='DAO'?by[p.phieuGoc]:p,sign=p.loai==='DAO'?-1:1;if(!g||!g.soLSX||!rows[g.soLSX])return;var r=rows[g.soLSX];
+      (g.lines||[]).forEach(function(l){var v=p.loai==='DAO'?(full.lines[g.soPhieu+'#'+l.dong]||0):(full.lines[p.soPhieu+'#'+l.dong]||0);
+        if(g.loai==='XUAT_SX')r.linhKien+=sign*v;else if(g.loai==='NHAP_LAI_SX')r.linhKien-=sign*v;else if(g.loai==='NHAP_TP')r.nhapTP+=sign*v;});
+    });
+    return Object.keys(rows).sort().map(function(s){return rows[s];}).filter(function(r){return r.dauKy||r.cuoiKy||r.linhKien||r.nhapTP||r.kcHuy||Object.keys(r.cp).length;});
+  }
   function planIssue(bom,n){return (bom||[]).map(function(b){return {maHang:b.maHang,soLuong:Math.round(Q(b.soLuong)*n)/1000};});}
 
   /* Phân serial linh kiện (theo thứ tự đã xuất) cho từng tủ: mỗi tủ lấy đúng số lượng định mức của từng mã có serial. */
@@ -43,7 +58,7 @@ var QSX=(function(){
     return {ok:!e.length,dat:!e.length&&soDat===items.length,errors:e,soDat:soDat};}
 
   function validateTemplate(t){t=t||{};var e={},seen={};
-    var v={maMau:up(t.maMau),maHang:up(t.maHang),ten:txt(t.ten,200),kichThuoc:txt(t.kichThuoc,100),moTa:txt(t.moTa,1000),vatLieu:txt(t.vatLieu,200),ketCau:txt(t.ketCau,400),filePLC:txt(t.filePLC,200),ghiChuDM:txt(t.ghiChuDM,500),thangBH:Number(t.thangBH===''||t.thangBH==null?12:t.thangBH),
+    var v={maMau:up(t.maMau),maHang:up(t.maHang),ten:txt(t.ten,200),kichThuoc:txt(t.kichThuoc,100),moTa:txt(t.moTa,1000),vatLieu:txt(t.vatLieu,200),ketCau:txt(t.ketCau,400),filePLC:txt(t.filePLC,200),thongSoDien:txt(t.thongSoDien,400),ghiChuDM:txt(t.ghiChuDM,500),thangBH:Number(t.thangBH===''||t.thangBH==null?12:t.thangBH),
       bom:(t.bom||[]).map(function(b){return {maHang:up(b&&b.maHang),soLuong:Number(b&&b.soLuong),ghiChu:txt(b&&b.ghiChu,200)};}),
       kcs:(t.kcs||[]).map(function(k,i){return {stt:i+1,noiDung:txt(k&&k.noiDung,300),yeuCau:txt(k&&k.yeuCau,300)};})};
     if(!/^[A-Z0-9._-]{1,30}$/.test(v.maMau))e.maMau='Mã mẫu 1–30 ký tự A-Z 0-9 . _ -';
@@ -62,6 +77,6 @@ var QSX=(function(){
     v.kcs.forEach(function(k){if(!k.noiDung)e['kcs.'+k.stt]='Nhập nội dung kiểm tra';});
     return Object.keys(e).length?{ok:false,errors:e}:{ok:true,value:v};}
 
-  return {split:split,balance:balance,wip:wip,planIssue:planIssue,assignChildren:assignChildren,serialNo:serialNo,pxxNo:pxxNo,kcs:kcs,validateTemplate:validateTemplate};
+  return {split:split,balance:balance,wip:wip,wipReport:wipReport,planIssue:planIssue,assignChildren:assignChildren,serialNo:serialNo,pxxNo:pxxNo,kcs:kcs,validateTemplate:validateTemplate};
 })();
 if(typeof module!=='undefined')module.exports=QSX;

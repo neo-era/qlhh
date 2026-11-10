@@ -101,7 +101,7 @@ var QStock=(function(){
           if(g.soLSX){var x=LS(g.soLSX);
             if(g.loai==='XUAT_SX')x.xv-=v;
             else if(g.loai==='NHAP_LAI_SX')x.tv-=v;
-            else if(g.loai==='NHAP_TP'&&Lc[g.soLSX]){x.nq-=Q(l.soLuong);x.nv-=v;delete adj[p.soPhieu+'#'+l.dong];}}   // trả đúng phần đã rời kho về dở dang
+            else if(g.loai==='NHAP_TP'&&Lc[g.soLSX]){x.nq-=Q(l.soLuong);x.nv-=gv;}}   // dở dang nhận lại đúng giá gốc; lệch BQ (đảo ở kỳ đã khoá) nằm ở adj → chênh lệch giá vốn
           lines[p.soPhieu+'#'+l.dong]=v;S(l.maHang).last={ngay:p.ngay,stt:Number(p.stt)||0};vguard(l.maHang,rp);
         });
         return;
@@ -111,7 +111,7 @@ var QStock=(function(){
         if(t.dir>0){
           if(t.cost==='PRICE')v=l.thanhTien!==undefined&&l.thanhTien!==''?money(l.thanhTien):money(Number(l.soLuong)*Number(l.donGia));
           else if(p.loai==='NHAP_TP'&&p.soLSX&&Lc[p.soLSX]){var c=Lc[p.soLSX],x=LS(p.soLSX),k=Q(l.soLuong),rem=Q(c.n)-x.nq,bal=x.xv+cpTo(p.soLSX,p.ngay)-x.nv-x.tv;
-            v=k>=rem?bal:money(bal*k/rem);x.nq+=k;x.nv+=v;}
+            v=k>=rem?bal:Math.floor(bal*k/rem);x.nq+=k;x.nv+=v;}   // làm tròn xuống: tủ cuối của lệnh nhận phần lẻ
           else if(t.cost==='GIVEN')v=money(l.giaTriKho);
           else if(t.cost==='ZERO')v=0;
           else if(t.cost==='GOC'){var g=by[p.phieuGoc],gl=gocLine(g,l);
@@ -170,6 +170,7 @@ var QStock=(function(){
       if(gl==='MULTI'){e.push({dong:l.dong,field:'dongGoc',msg:'Phiếu gốc có nhiều dòng mã '+l.maHang+' — chọn dòng gốc'});return;}
       if(!gl){e.push({dong:l.dong,field:'maHang',msg:'Mã '+l.maHang+' không có trong phiếu gốc'});return;}
       var da=0;act.forEach(function(x){if(x.loai===loai&&x.phieuGoc===g.soPhieu&&!rev[x.soPhieu])(x.lines||[]).forEach(function(y){var yl=gocLine(g,y);if(yl&&yl!=='MULTI'&&yl.dong===gl.dong)da+=Q(y.soLuong);});});
+      (p.lines||[]).forEach(function(y){if(y===l)return;var yl=gocLine(g,y);if(yl&&yl!=='MULTI'&&yl.dong===gl.dong)da+=Q(y.soLuong);});   // các dòng khác của chính phiếu này cùng trỏ 1 dòng gốc
       if(da+Q(l.soLuong)>Q(gl.soLuong))e.push({dong:l.dong,field:'soLuong',msg:word+' vượt số của phiếu gốc (còn '+R(Q(gl.soLuong)-da)+')'});
     });}
     if(by[key(p)])e.push({dong:0,field:'soPhieu',msg:'Số phiếu đã tồn tại'});
@@ -220,9 +221,12 @@ var QStock=(function(){
           if((p.lines||[]).length!==1)e.push({dong:0,field:'lines',msg:'Phiếu nhập thành phẩm chỉ một dòng'});
           if(nq+k>Q(c.n))e.push({dong:1,field:'soLuong',msg:'Vượt số lượng của lệnh (còn '+R(Q(c.n)-nq)+')'});
           var lx='';mine.forEach(function(x){if(x.loai==='XUAT_SX'&&x.ngay>lx)lx=x.ngay;});
-          if(p.ngay<lx)e.push({dong:0,field:'ngay',msg:'Ngày nhập thành phẩm không trước lần xuất linh kiện cuối ('+lx+')'});
+          if(!lx)e.push({dong:0,field:'soLSX',msg:'Lệnh '+s+' chưa xuất linh kiện — xuất linh kiện trước khi nhập thành phẩm'});
+          else if(p.ngay<lx)e.push({dong:0,field:'ngay',msg:'Ngày nhập thành phẩm không trước lần xuất linh kiện cuối ('+lx+')'});
         }
         if(p.loai==='NHAP_LAI_SX'){
+          var nq2=0;tps.forEach(function(x){(x.lines||[]).forEach(function(y){nq2+=Q(y.soLuong);});});
+          if(nq2>=Q(c.n))e.push({dong:0,field:'soLSX',msg:'Lệnh '+s+' đã nhập đủ thành phẩm — không nhập lại linh kiện'});
           var g5=by[p.phieuGoc];
           if(!g5||g5.loai!=='XUAT_SX'||g5.soLSX!==s||rev[g5.soPhieu])e.push({dong:0,field:'phieuGoc',msg:'Nhập lại phải theo phiếu xuất sản xuất của cùng lệnh'});
           else if(g5.kho!==p.kho)e.push({dong:0,field:'kho',msg:'Nhập lại đúng kho đã xuất ('+g5.kho+')'});
@@ -336,6 +340,6 @@ var QStock=(function(){
     return Object.keys(rows).sort().map(function(m){var r=rows[m];['dauQ','nhapQ','xuatQ','cuoiQ'].forEach(function(k){r[k]=R(r[k]);});return r;});
   }
   function prefix(loai){return T[loai]?T[loai].pre:'';}
-  return {TYPES:T,effDate:function(p,all,opts){var by={};active(all).forEach(function(x){by[key(x)]=x;});return effDate(p,by,(opts&&opts.ngayKhoaSo)||'');},nxt:nxt,replay:replay,check:check,applyFast:applyFast,convert:convert,staticCheck:staticCheck,prefix:prefix,money:money,isoDate:isoDate};
+  return {TYPES:T,effDates:function(all,opts){var by={},m={},lock=(opts&&opts.ngayKhoaSo)||'';active(all).forEach(function(x){by[key(x)]=x;});active(all).forEach(function(x){m[x.soPhieu]=effDate(x,by,lock);});return m;},effDate:function(p,all,opts){var by={};active(all).forEach(function(x){by[key(x)]=x;});return effDate(p,by,(opts&&opts.ngayKhoaSo)||'');},nxt:nxt,replay:replay,check:check,applyFast:applyFast,convert:convert,staticCheck:staticCheck,prefix:prefix,money:money,isoDate:isoDate};
 })();
 if(typeof module!=='undefined')module.exports=QStock;

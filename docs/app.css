@@ -249,7 +249,7 @@ dialog.kcsd .body{display:flex;flex-direction:column}
   .trow.k{grid-template-columns:20px minmax(0,1fr) auto}.trow.k [data-f=yeuCau]{grid-column:2/3}
   .kcq{font-size:20px}
 }
-@media (orientation:landscape) and (max-height:520px){.steps li span{display:none}.kcbtns .kcb{min-height:56px}}
+@media (orientation:landscape) and (max-height:520px){.steps{margin-bottom:8px}.steps li:not(.cur){display:none}.steps li.cur{flex-direction:row;font-size:13px}.steps li.cur::after{content:' · bước hiện tại';color:var(--mut);font-weight:400}.kcbtns .kcb{min-height:56px}}
 @media print{
   .pxx h1{font-size:17pt;margin:10px 0 2px}.pxx h2{font-size:12.5pt;margin:12px 0 4px}
   .pv-k{width:100%;border-collapse:collapse}.pv-k td{padding:2px 6px;vertical-align:top}.pv-k td:first-child{width:30%;font-weight:600}
