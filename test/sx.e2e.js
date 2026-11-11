@@ -27,9 +27,10 @@ W('lsx.xuatSX', { soLSX: so2, ngay: '2026-11-03', lines: BOM.map(([m, , q]) => (
 const tuM = W('lsx.nhapTP', { soLSX: so2, ngay: '2026-11-04', soLuong: 1 }).serials[0];
 
 async function page(b, vp, email = 'maivulam2020@gmail.com', scheme = 'light') {
-  const ctx = await b.newContext({ viewport: vp, colorScheme: scheme, serviceWorkers: 'block', hasTouch: vp.width < 900 });
+  const ctx = await b.newContext({ viewport: vp, colorScheme: scheme, serviceWorkers: 'block', hasTouch: vp.width < 900, permissions: ['geolocation'], geolocation: { latitude: 11.310123, longitude: 106.098345, accuracy: 8 } });
   const p = await ctx.newPage();
   p.on('pageerror', e => { console.log('JS lỗi: ' + e.message); fails.push('JS lỗi: ' + e.message); });
+  p.on('console', m => { if (m.type() === 'error') console.log('console: ' + m.text()); });
   await p.addInitScript(() => { window.print = () => { window.__printed = (window.__printed || 0) + 1; window.__printHTML = (document.getElementById('printArea') || {}).innerHTML; }; });
   await p.route('https://script.google.com/**', async rt => rt.fulfill({ contentType: 'application/json', body: api.doPost({ postData: { contents: rt.request().postData() } }).t }));
   await p.route('https://accounts.google.com/**', async rt => { const u = new URL(rt.request().url()); api.st.email = email; api.st.nonce = u.searchParams.get('nonce'); await rt.fulfill({ status: 302, headers: { location: BASE + '#id_token=tok-' + Math.random() + '&state=LAVIPCO' } }); });
@@ -140,6 +141,34 @@ async function kcsAll(p, bad) {   // bad = {chỉ số mục: ghi chú}
   await p.click('[data-x]'); await closed(p);
   await p.goto(BASE + '#/t/DAICHAU/DC-X'); await settle(p); ok((await main(p)).includes('đổi công ty'), 'QR công ty khác → báo đổi công ty');
   // bán tủ đã đạt KCS từ phiếu kho
+  // ----- lắp đặt & bảo hành (BH-1) -----
+  W('voucher.create', { voucher: { loai: 'XUAT_BAN', ngay: '2026-11-09', kho: 'KHO', maKH: 'TN', maCongTrinh: 'PDG', lines: [{ maHang: 'TU-DKCS-2N', soLuongCT: 1, serials: ['LV-TUDKCS2N-2026-0003'] }] } });
+  W('voucher.create', { voucher: { loai: 'NHAP_MUA', ngay: '2026-11-10', kho: 'KHO', maNCC: 'NCC1', lines: [{ maHang: 'LOGO', soLuongCT: 1, gia: 4200000, serials: ['VPC4H29999'] }] } });
+  await p.goto(BASE + '#/sx'); await p.reload(); await p.waitForFunction(() => window.QLHH_DEBUG && window.QLHH_DEBUG.data);
+  await p.goto(BASE + '#/bh'); await settle(p);
+  ok((await main(p)).includes('LV-TUDKCS2N-2026-0003') && (await main(p)).includes('Chưa bàn giao'), 'Lắp đặt & BH: tủ đã bán hiện "Chưa bàn giao"');
+  await p.click('[data-tu="LV-TUDKCS2N-2026-0003"]'); await p.waitForSelector('#tL');
+  await p.click('#tL'); await p.waitForSelector('#gps');
+  await fill(p, { tenTaiCT: 'Tủ H20 Phan Đình Giót', soBBBG: 'BBBG-01/2026' }); await p.click('#gps'); await p.waitForFunction(() => document.querySelector('#f_viDo').value !== '');
+  ok((await p.inputValue('#f_viDo')) === '11.310123', 'lấy vị trí GPS điền vĩ độ/kinh độ');
+  await p.click('#dlgOk'); await p.waitForSelector('.tuhead'); await settle(p);
+  ok(/bảo hành đến hết/.test(await toast(p)), 'ghi bàn giao → báo hạn bảo hành');
+  const tv2 = await p.textContent('#dlg'); ok(tv2.includes('Còn bảo hành') && tv2.includes('Tủ H20 Phan Đình Giót') && tv2.includes('Xem bản đồ'), 'hồ sơ tủ: còn BH, vị trí, link bản đồ');
+  await p.click('#tB'); await fill(p, { nguoiBao: 'Anh Tâm 0909 000 111', moTaLoi: 'Tủ không tự bật đèn buổi tối' }); await p.click('#dlgOk'); await p.waitForSelector('#pR');
+  ok((await p.textContent('#dlg')).includes('Trong bảo hành'), 'phiếu BH tính Trong bảo hành');
+  await p.click('#pR'); await p.waitForSelector('#rl input[data-f=maHang]');
+  await p.fill('[data-r="0"][data-f="maHang"]', 'LOGO'); await p.dispatchEvent('[data-r="0"][data-f="maHang"]', 'change'); await p.waitForSelector('[data-rm]');
+  await p.click('[data-rm][value="VPC4H29999"]'); await p.click('[data-rc][value="VPC4H20513"]');
+  await p.click('#dlgOk'); await p.waitForSelector('#pU', { timeout: 10000 }); await settle(p);
+  ok(/VPC4H29999/.test(await p.textContent('#dlg')) && /thu hồi/.test(await p.textContent('#dlg')), 'thay LOGO!: phiếu ghi serial mới + thu hồi');
+  await p.click('#pU'); await fill(p, { trangThai: 'HOAN_THANH', nguyenNhan: 'LOI_THIET_BI', ketQua: 'Thay LOGO! mới, chạy thử đạt' }); await p.click('#dlgOk'); await p.waitForSelector('#pPr'); await settle(p);
+  ok((await p.textContent('#dlg')).includes('Hoàn thành'), 'đóng phiếu Hoàn thành');
+  await p.click('#pPr'); await p.waitForTimeout(300); const ph = await p.evaluate(() => window.__printHTML || '');
+  ok(/PHIẾU BẢO HÀNH/.test(ph) && /VPC4H29999/.test(ph) && /VPC4H20513/.test(ph), 'in phiếu bảo hành có linh kiện thay');
+  await p.click('[data-x]'); await closed(p);
+  await p.goto(BASE + '#/bh'); await settle(p); await p.click('[data-tab=pbh]'); await settle(p);
+  ok((await main(p)).includes('BH-2026-00001') && (await main(p)).includes('Hoàn thành'), 'danh sách phiếu bảo hành');
+  await p.screenshot({ path: SHOTS + '/bh-desktop.png', fullPage: true });
   await p.close();
 
   // ----- điện thoại: nhập liệu làm KCS -----
@@ -165,6 +194,9 @@ async function kcsAll(p, bad) {   // bad = {chỉ số mục: ghi chú}
   for (let i = 2; i < 6; i++) { await nv.click('.kcb.ok'); await nv.waitForTimeout(330); }
   await nv.click('#kcSum'); await nv.click('#kcOk'); await nv.waitForSelector('#kcClose'); ok(/Tủ đạt/.test(await nv.textContent('#kc')), 'mobile: chốt KCS đạt');
   await nv.click('#kcClose'); await closed(nv);
+  await nv.goto(BASE + '#/bh'); await settle(nv); ok(await noOverflow(nv), 'mobile: Lắp đặt & BH không tràn'); await nv.screenshot({ path: SHOTS + '/bh-mobile.png', fullPage: true });
+  await nv.goto(BASE + '#/sx'); await settle(nv);
+  if (!(await nv.$('[data-tu]'))) { await nv.click(`[data-lsx="${so2}"]`); await nv.waitForSelector('[data-tu]'); await settle(nv); }
   // xoay ngang
   await nv.setViewportSize({ width: 844, height: 390 }); await nv.click('[data-tu]'); await nv.waitForSelector('.tuhead');
   ok(await noOverflow(nv), 'ngang 844×390: hồ sơ tủ không tràn');

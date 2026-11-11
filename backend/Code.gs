@@ -1,7 +1,7 @@
 /** QLHH — máy chủ Apps Script v0.2 (đợt ①: danh mục, giá, NCC, người dùng, góp ý · đợt ②: kho — xem backend/Kho.gs).
  *  Dán chung 1 file với lõi: core/auth.js, idem.js, schema.js, validate.js, perm.js, price.js, stock.js, serial.js (do build.sh ghép).
  *  Thiết kế: QLHH-thiet-ke.md. */
-var VER = '0.3.0';
+var VER = '0.4.0';
 var SESSION_TTL = 10 * 3600;
 
 // ======================= CÀI ĐẶT =======================
@@ -241,7 +241,8 @@ function syncPull(u, req) {
     var t = k === 'logs' ? readTail('NhatKy', 300) : k === 'vouchers' ? readTail('Phieu', 500) : readTable(TABLES[k]); raw[k] = t.rows; warnings = warnings.concat(t.warnings);
   });
   raw.vouchers = raw.vouchers.filter(function (p) { return p.trangThai === 'HOAN_TAT'; });
-  raw.serials = raw.serials.filter(function (x) { return x.trangThai === 'TRONG_KHO' || x.trangThai === 'HANG_LOI'; });   // để chọn serial khi xuất
+  var tuK = {}; (raw.cabinets || []).forEach(function (c) { if (c.trangThai !== 'HUY') tuK[c.key] = 1; });
+  raw.serials = raw.serials.filter(function (x) { return x.trangThai === 'TRONG_KHO' || x.trangThai === 'HANG_LOI' || (x.trangThai === 'DA_BAN' && tuK[x.key]); });   // để chọn serial khi xuất + tủ đã giao (theo dõi bảo hành)
   var last = {}; raw.templates.forEach(function (t) { if (!last[t.maMau] || t.phienBan > last[t.maMau].phienBan) last[t.maMau] = t; });
   raw.templates = Object.keys(last).sort().map(function (k) { return last[k]; });   // chỉ phiên bản mẫu mới nhất
   raw.config = { ngayKhoaSo: cfg('ngayKhoaSo'), maCongTy: congTy() };

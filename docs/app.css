@@ -261,3 +261,6 @@ dialog.kcsd .body{display:flex;flex-direction:column}
 }
 .layout.sxl .card{padding:12px 14px}.layout.sxl .card>.list,.layout.sxl .card>.tbl{margin:0 -14px -12px}
 .layout.sxl .card>.empty{padding:16px 4px}
+.tag.warn{color:var(--warn);border-color:currentColor;font-weight:600}
+.list .it>div:first-child{min-width:0;overflow-wrap:anywhere}
+@media (max-width:899px){.sxbar .btn{flex:1 1 auto;min-width:0;padding-left:10px;padding-right:10px;font-size:13.5px}.list .it .tag{white-space:normal}}
