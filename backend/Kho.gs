@@ -285,7 +285,7 @@ function commitVoucher(u, req, logs, ctx, opt) {
   var sr = { changes: [] };
   if (lines.some(function (l) { return items[l.maHang].quanLySerial; })) {
     var vctx = {}; if (h.phieuGoc) { var g0 = loadVoucher(h.phieuGoc); if (g0) vctx[g0.soPhieu] = g0; }
-    sr = QSerial.apply(QSerial.index(readTable('Serial').rows), cand, { items: items, khoLoi: o.khoLoi, vouchers: vctx });
+    sr = QSerial.apply(QSerial.index(readTable('Serial').rows), cand, { items: items, khoLoi: o.khoLoi, vouchers: vctx, choLapDat: !!ctx.choLapDat });
     if (!sr.ok) throw fail(sr.code, engineMsg(sr), sr.errors);
   }
   // cấp số trong khoá: thứ tự toàn cục + số theo loại/năm
@@ -305,6 +305,7 @@ function commitVoucher(u, req, logs, ctx, opt) {
   if (opt.beforeHead) opt.beforeHead(so, r);
   appendBlock('Phieu', [head]);   // ĐẦU PHIẾU GHI CUỐI, 1 LẦN: có đầu phiếu = phiếu đủ (thiếu đầu phiếu thì dòng phiếu bị bỏ qua và được dọn)
   clearPending(so);
+  if (sr.changes.length && typeof cabExitSync === 'function') cabExitSync(sr.changes.map(function (c) { return c.key; }));
   logs.push({ action: 'voucher.create', doiTuong: 'Phieu', id: so, truoc: null, sau: { loai: h.loai, ngay: h.ngay, kho: h.kho, soLSX: h.soLSX || undefined, soDong: lines.length, tinhLai: changed } });
   return { soPhieu: so, stt: stt, tinhLai: changed, lines: lines, head: head };
 }
@@ -318,6 +319,8 @@ function voucherReverse(u, req, logs) {
   if (!QValidate.isoDate(ngay)) throw fail('VALIDATION', 'Ngày phiếu đảo không hợp lệ', { ngay: 'YYYY-MM-DD' });
   noFuture({ ngay: ngay });
   var g = loadVoucher(gso); if (!g || g.trangThai !== 'HOAN_TAT') throw fail('VALIDATION', 'Không có phiếu ' + gso, { phieuGoc: 'Phiếu không tồn tại' });
+  if ((g.loai === 'XUAT_BH' || g.loai === 'NHAP_HANG_LOI') && /^BH-/.test(String(g.soCTGoc || '')) && readTable('PhieuBaoHanh').rows.some(function (t) { return (t.soPhieuXuat + ',' + t.soPhieuLoi).indexOf(gso) >= 0; }))
+    throw fail('VALIDATION', 'Phiếu ' + gso + ' là lần thay linh kiện của phiếu bảo hành ' + g.soCTGoc + ' — không đảo riêng (linh kiện đang gắn với hồ sơ tủ)', null);
   if (g.soLSX) {
     var lx = readTable('LenhSX').rows.filter(function (x) { return x.soLSX === g.soLSX; })[0];
     if (lx && lx.trangThai === 'HUY') throw fail('VALIDATION', 'Lệnh ' + g.soLSX + ' đã huỷ — không đảo phiếu của lệnh', null);
@@ -345,6 +348,7 @@ function voucherReverse(u, req, logs) {
   clearPending(so); markDone(req.requestId, u.email, so, stt);
   if (g.loai === 'NHAP_TP') cabinetsVoid(gso);
   if (g.soLSX) lsxRefresh(g.soLSX);
+  if (sr.changes.length && typeof cabExitSync === 'function') cabExitSync(sr.changes.map(function (c) { return c.key; }));
   logs.push({ action: 'voucher.reverse', doiTuong: 'Phieu', id: so, truoc: { phieuGoc: gso }, sau: { ngay: ngay, lyDo: lyDo, tinhLai: changed } });
   return { soPhieu: so, tinhLai: changed };
 }

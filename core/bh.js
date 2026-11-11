@@ -12,7 +12,8 @@ var QBH=(function(){
   function addMonths(d,n){var y=+d.slice(0,4),m=+d.slice(5,7)-1+n,dd=+d.slice(8,10);y+=Math.floor(m/12);m=((m%12)+12)%12;
     var last=new Date(Date.UTC(y,m+1,0)).getUTCDate();return day(Date.UTC(y,m,Math.min(dd,last)));}
   /* Ngày cuối còn bảo hành (bao gồm) = ngày bàn giao + N tháng − 1 ngày. N = 0 → không bảo hành. */
-  function hanBH(ngay,thang){thang=Number(thang);if(!iso(ngay)||!(thang>0))return '';return day(ms(addMonths(ngay,thang))-864e5);}
+  /* Ngày tương ứng của tháng hết hạn − 1 ngày; tháng đó không có ngày tương ứng (31/3 + 1 tháng) → hết hạn ngày cuối tháng (BLDS 2015 Đ.148). */
+  function hanBH(ngay,thang){thang=Number(thang);if(!iso(ngay)||!(thang>0))return '';var e=addMonths(ngay,thang);return +e.slice(8,10)<+ngay.slice(8,10)?e:day(ms(e)-864e5);}
   function diff(a,b){return Math.round((ms(b)-ms(a))/864e5);}
   /* x = {ngayBanGiao, hanBH} hoặc {ngayXuat} (chưa bàn giao) */
   function status(x,today){x=x||{};
@@ -29,7 +30,7 @@ var QBH=(function(){
     var la=num(x.viDo),lo=num(x.kinhDo);
     if(!isNaN(la)||!isNaN(lo)){
       if(isNaN(la)||isNaN(lo)){e[isNaN(la)?'viDo':'kinhDo']='Nhập đủ vĩ độ và kinh độ';}
-      else{if(!(la>=8&&la<=24))e.viDo='Vĩ độ ngoài Việt Nam (8–24)';if(!(lo>=102&&lo<=110))e.kinhDo='Kinh độ ngoài Việt Nam (102–110)';
+      else{if(!(la>=8&&la<=24))e.viDo='Vĩ độ ngoài Việt Nam (8–24)';if(!(lo>=102&&lo<=117.5))e.kinhDo='Kinh độ ngoài Việt Nam (102–117,5)';
         v.viDo=Math.round(la*1e6)/1e6;v.kinhDo=Math.round(lo*1e6)/1e6;}
     }
     if(x.thangBH!==''&&x.thangBH!=null){var t=Number(x.thangBH);if(!(Number.isInteger(t)&&t>=0&&t<=120))e.thangBH='Bảo hành 0–120 tháng';else v.thangBH=t;}
@@ -49,9 +50,12 @@ var QBH=(function(){
     if(!canMove(cur,v.trangThai))e.trangThai='Không chuyển từ '+cur+' sang '+v.trangThai;
     if(v.nguyenNhan&&NGUYEN_NHAN.indexOf(v.nguyenNhan)<0)e.nguyenNhan='Chọn nguyên nhân trong danh mục';
     if(v.trangThai==='HOAN_THANH'&&!v.ketQua)e.ketQua='Ghi kết quả xử lý';
+    if(v.trangThai==='HOAN_THANH'&&!v.nguyenNhan)e.nguyenNhan='Chọn nguyên nhân hỏng';
     if(v.trangThai==='TU_CHOI'&&!v.ketQua)e.ketQua='Ghi lý do từ chối bảo hành';
     return Object.keys(e).length?{ok:false,errors:e}:{ok:true,value:v};}
-  return {addMonths:addMonths,hanBH:hanBH,status:status,validateInstall:validateInstall,current:current,canMove:canMove,validateTicket:validateTicket,validateUpdate:validateUpdate,
+  /* Kết luận bảo hành: được thay miễn phí khi còn hạn tại ngày tiếp nhận và nguyên nhân không thuộc loại trừ. */
+  function mienPhi(tinhTrangBH,nguyenNhan){return tinhTrangBH==='TRONG_BH'&&NGOAI_BH.indexOf(nguyenNhan)<0;}
+  return {mienPhi:mienPhi,addMonths:addMonths,hanBH:hanBH,status:status,validateInstall:validateInstall,current:current,canMove:canMove,validateTicket:validateTicket,validateUpdate:validateUpdate,
     NGUYEN_NHAN:NGUYEN_NHAN,NGOAI_BH:NGOAI_BH,iso:iso};
 })();
 if(typeof module!=='undefined')module.exports=QBH;

@@ -89,3 +89,65 @@ test('khách trả tủ rồi bán lại → chu kỳ bảo hành mới (bàn gi
   assert.equal(r.data.hanBH, '2027-11-10');
   assert.equal(x.W('serial.get', { serial: x.t1 }).lapDat.length, 1);
 });
+
+// ---------- hồi quy theo chuyên gia BH vòng 1 ----------
+function withLogo(x) {
+  lap(x, x.t1);
+  x.W('voucher.create', { voucher: { loai: 'NHAP_MUA', ngay: '2026-11-10', kho: 'KHO', maNCC: 'NCC1', lines: [{ maHang: 'LOGO', soLuongCT: 2, gia: 4200000, serials: ['LGNEW1', 'LGNEW2'] }] } });
+  return x.W('bh.create', { serial: x.t1, phieu: { ngay: '2026-11-11', moTaLoi: 'PLC treo' } }, x.nv).soPBH;
+}
+const rep1 = (so, extra = {}) => ({ soPBH: so, ngay: '2026-11-11', kho: 'KHO', lines: [{ maHang: 'LOGO', soLuong: 1, serialMoi: ['LGNEW1'], serialCu: ['LG11010'] }], ...extra });
+
+test('BH-A1 thay linh kiện chết trước phiếu thu hồi → gửi lại cùng requestId LÀM TIẾP: đủ 2 phiếu, tủ có LOGO! mới, phiếu BH ghi lần thay', () => {
+  const x = sold(), so = withLogo(x);
+  const ph = x.a.sheets.Phieu, orig = ph.appendRow; let n = 0;
+  ph.appendRow = function (r) { if (r[2] === 'NHAP_HANG_LOI') { ph.appendRow = orig; throw new Error('chết trước đầu phiếu HL'); } return orig.call(this, r); };
+  const body = { action: 'bh.replace', session: x.nv, requestId: rid(), ...rep1(so) };
+  assert.equal(x.a.post(body).ok, false);
+  for (const k of Object.keys(x.a.cache)) if (/done/.test(k)) delete x.a.cache[k];
+  const r = x.a.post(body); assert.equal(r.ok, true, JSON.stringify(r)); assert.ok(r.data.soPhieuLoi, 'đã lập phiếu thu hồi');
+  assert.equal(x.a.sheets.Phieu.d.filter(z => z[2] === 'XUAT_BH').length, 1);
+  assert.deepEqual(x.W('serial.get', { serial: x.t1 }).con.map(c => c.serial), ['LGNEW1']);
+  const nw = x.W('serial.get', { serial: 'LGNEW1' }).serial; assert.deepEqual([nw.trangThai, nw.serialCha.split('|')[1]], ['DA_LAP', x.t1]);
+  assert.equal(JSON.parse(x.pull().data.pbh[0].thayThe).length, 1);
+  assert.deepEqual(x.a.post(body).data.soPhieuXuat, r.data.soPhieuXuat, 'gửi lần 3 → trả kết quả cũ');
+});
+
+test('BH-A2/A3/B3 không đảo riêng phiếu thay linh kiện; không nhận hàng lỗi / khách trả linh kiện đang lắp trong tủ ngoài luồng bảo hành', () => {
+  const x = sold(), so = withLogo(x), r = x.W('bh.replace', rep1(so), x.nv);
+  assert.match(x.P('voucher.reverse', { phieuGoc: r.soPhieuXuat, ngay: '2026-11-11', lyDo: 'x' }).error, /lần thay linh kiện/);
+  assert.match(x.P('voucher.reverse', { phieuGoc: r.soPhieuLoi, ngay: '2026-11-11', lyDo: 'x' }).error, /lần thay linh kiện/);
+  assert.match(x.P('voucher.create', { voucher: { loai: 'NHAP_HANG_LOI', ngay: '2026-11-11', kho: 'KHO-LOI', lines: [{ maHang: 'LOGO', soLuongCT: 1, serials: ['LG11011'] }] } }, x.nv).error, /đang lắp trong tủ/);
+  assert.match(x.P('voucher.create', { voucher: { loai: 'KHACH_TRA', ngay: '2026-11-11', kho: 'KHO', maKH: 'TN', phieuGoc: r.soPhieuXuat, lines: [{ maHang: 'LOGO', soLuongCT: 1, dongGoc: 1, serials: ['LGNEW1'] }] } }, x.nv).error, /đang lắp trong tủ|DA_LAP/);
+});
+
+test('BH-B1 ngoài bảo hành (sét đánh / hết hạn): không thay miễn phí; Quản trị duyệt thiện chí có lý do; đã thay thì không từ chối; hoàn thành phải có nguyên nhân', () => {
+  const x = sold(), so = withLogo(x);
+  x.W('bh.update', { soPBH: so, trangThai: 'DANG_XU_LY', nguyenNhan: 'SET_DANH' }, x.nv);
+  assert.match(x.P('bh.replace', rep1(so), x.nv).error, /Ngoài bảo hành/);
+  assert.match(x.P('bh.replace', rep1(so, { thienChi: 'khách lớn' }), x.nv).error, /Ngoài bảo hành/, 'nhập liệu không duyệt thiện chí');
+  const r = x.W('bh.replace', rep1(so, { thienChi: 'Khách hàng chiến lược — GĐ duyệt' }));
+  assert.equal(x.P('bh.update', { soPBH: so, trangThai: 'TU_CHOI', ketQua: 'sét' }, x.nv).code, 'VALIDATION');
+  assert.equal(x.P('bh.update', { soPBH: so, trangThai: 'HOAN_THANH', ketQua: 'Đã thay' }, x.nv).ok, true, 'nguyên nhân đã có từ trước');
+  const p = x.pull().data.pbh.find(z => z.soPBH === so); assert.match(p.thienChi, /chiến lược/);
+  const rb = x.W('report.bh', { from: '2026-11-01', to: '2026-11-30' });
+  assert.equal(rb.rows.length, 1); assert.equal(rb.tong, 4200000); assert.equal(rb.rows[0].soPBH, so); assert.equal(rb.tuConBH, 1);
+  assert.equal(x.P('report.bh', { from: '2026-11-01', to: '2026-11-30' }, x.nv).code, 'FORBIDDEN');
+});
+
+test('BH-B4/B5 thay LOGO! phải chọn LOGO! cũ thu hồi; phiếu BH không trước ngày xuất giao', () => {
+  const x = sold(), so = withLogo(x);
+  assert.match(x.P('bh.replace', { soPBH: so, ngay: '2026-11-11', kho: 'KHO', lines: [{ maHang: 'LOGO', soLuong: 1, serialMoi: ['LGNEW1'] }] }, x.nv).error, /chọn serial cũ/);
+  assert.equal(x.P('bh.create', { serial: x.t1, phieu: { ngay: '2026-01-01', moTaLoi: 'x' } }, x.nv).code, 'VALIDATION');
+});
+
+test('BH-B9 khách trả rồi bán lại cùng ngày → vẫn bàn giao lại được (chu kỳ theo số phiếu xuất); B6 Quản trị huỷ dòng bàn giao ghi nhầm', () => {
+  const x = sold(); lap(x, x.t1, { ngay: '2026-11-09' });
+  x.W('voucher.create', { voucher: { loai: 'KHACH_TRA', ngay: '2026-11-09', kho: 'KHO', maKH: 'TN', phieuGoc: x.px, lines: [{ maHang: 'TU-DKCS-2N', soLuongCT: 1, dongGoc: 1, serials: [x.t1] }] } });
+  x.W('voucher.create', { voucher: { loai: 'XUAT_BAN', ngay: '2026-11-09', kho: 'KHO', maKH: 'TN', maCongTrinh: 'PDG', lines: [{ maHang: 'TU-DKCS-2N', soLuongCT: 1, serials: [x.t1] }] } });
+  const r = lap(x, x.t1, { ngay: '2026-11-09', thangBH: 6 }); assert.equal(r.ok, true, JSON.stringify(r)); assert.equal(r.data.hanBH, '2027-05-08');
+  assert.equal(x.pull().data.cabinets.find(c => c.serial === x.t1).ngayXuat, '2026-11-09');
+  assert.equal(x.P('install.void', { id: r.data.id, lyDo: 'nhầm' }, x.nv).code, 'FORBIDDEN');
+  x.W('install.void', { id: r.data.id, lyDo: 'Ghi nhầm số tháng' });
+  assert.equal(lap(x, x.t1, { ngay: '2026-11-10' }).data.hanBH, '2027-11-09');
+});

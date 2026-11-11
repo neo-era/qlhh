@@ -205,6 +205,8 @@ async function kcsAll(p, bad) {   // bad = {chỉ số mục: ghi chú}
   // ----- giao diện tối -----
   const dk = await page(b, { width: 390, height: 844 }, 'maivulam2020@gmail.com', 'dark');
   await dk.goto(BASE + '#/sx'); await settle(dk); await dk.screenshot({ path: SHOTS + '/sx-list-dark.png' });
+  await dk.goto(BASE + '#/bh'); await settle(dk); ok(await noOverflow(dk), 'tối: Lắp đặt & BH không tràn'); await dk.screenshot({ path: SHOTS + '/bh-dark.png' });
+  await dk.setViewportSize({ width: 844, height: 390 }); await settle(dk); ok(await noOverflow(dk), 'ngang: Lắp đặt & BH không tràn'); await dk.screenshot({ path: SHOTS + '/bh-ngang.png' });
   await dk.close();
 
   await b.close(); srv.close();

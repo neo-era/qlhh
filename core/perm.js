@@ -2,7 +2,7 @@
 var QPerm=(function(){
   var READ=['auth.me','sync.pull','feedback.add','voucher.get','sx.get','serial.get'];
   var EDIT=['item.upsert','item.stop','group.upsert','supplier.upsert','price.add','customer.upsert','project.upsert','unit.upsert','voucher.create','lsx.create','lsx.xuatSX','lsx.nhapTP','kcs.add','pxx.issue','install.add','bh.create','bh.update','bh.replace'];
-  var ADMIN=['user.upsert','feedback.update','admin.schemaCheck','warehouse.upsert','voucher.reverse','period.lock','stock.rebuild','report.nxt','template.upsert','lsx.chiPhi','lsx.chiPhiHuy','lsx.huy','pxx.cancel','report.wip'];
+  var ADMIN=['user.upsert','feedback.update','admin.schemaCheck','warehouse.upsert','voucher.reverse','period.lock','stock.rebuild','report.nxt','template.upsert','lsx.chiPhi','lsx.chiPhiHuy','lsx.huy','pxx.cancel','report.wip','install.void','report.bh'];
   var ACT={XEM:READ,NHAP_LIEU:READ.concat(EDIT),QUAN_TRI:READ.concat(EDIT,ADMIN)};
   var TABS=['items','groups','suppliers','prices','warehouses','units','customers','projects','vouchers','stock','serials','templates','lsx','cabinets','pxx','lapDat','pbh'];
   function can(role,action){return !!ACT[role]&&ACT[role].indexOf(action)>=0;}

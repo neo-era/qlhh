@@ -102,6 +102,8 @@ var HANDLERS = {
   'bh.create': function (u, r) { return write(u, r, bhCreate); },
   'bh.update': function (u, r) { return write(u, r, bhUpdate); },
   'bh.replace': function (u, r) { return write(u, r, bhReplace); },
+  'install.void': function (u, r) { return write(u, r, installVoid); },
+  'report.bh': reportBH,
   'sx.get': sxGet,
   'serial.get': serialGet
 };

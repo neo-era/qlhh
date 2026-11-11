@@ -5,7 +5,7 @@ var QSerial=(function(){
     XUAT_BAN:[['TRONG_KHO'],'DA_BAN',''],XUAT_CONG_TRINH:[['TRONG_KHO'],'DA_BAN',''],XUAT_BH:[['TRONG_KHO'],'DA_BAN',''],
     XUAT_SX:[['TRONG_KHO'],'DA_LAP',''],TRA_NCC:[['TRONG_KHO','HANG_LOI'],'DA_TRA_NCC',''],
     CHUYEN_KHO:[['TRONG_KHO','HANG_LOI'],null,'DEN'],KHACH_TRA:[['DA_BAN'],'TRONG_KHO','KHO'],
-    NHAP_HANG_LOI:[['DA_BAN','DA_THAY','DA_LAP'],'HANG_LOI','KHO'],NHAP_LAI_SX:[['DA_LAP'],'TRONG_KHO','KHO']
+    NHAP_HANG_LOI:[['DA_BAN','DA_THAY'],'HANG_LOI','KHO'],NHAP_LAI_SX:[['DA_LAP'],'TRONG_KHO','KHO']
   };
   var NEW=['TON_DAU','NHAP_MUA','NHAP_TP'];
   function norm(s){return String(s===undefined||s===null?'':s).trim().toUpperCase();}
@@ -37,11 +37,14 @@ var QSerial=(function(){
           changes.push(Object.assign(base,{to:'MAT',kho:''}));continue;
         }
         var mv=MOVE[p.loai];if(!mv)return fail('VALIDATION',l.dong,'Loại phiếu không dùng serial');
+        if(p.loai==='NHAP_HANG_LOI'&&ctx.choLapDat)mv=[mv[0].concat('DA_LAP'),mv[1],mv[2]];   // chỉ luồng thay linh kiện bảo hành được thu hồi linh kiện đang lắp trong tủ
         if(p.loai==='KHACH_TRA'){
           var g=(ctx.vouchers||{})[p.phieuGoc],ok=g&&(g.lines||[]).some(function(x){return x.maHang===l.maHang&&(x.serials||[]).map(norm).indexOf(s)>=0;});
           if(!ok)return fail('VALIDATION',l.dong,'Serial '+s+' không thuộc phiếu xuất gốc');
         }
         var inStock=mv[0].indexOf('TRONG_KHO')>=0||mv[0].indexOf('HANG_LOI')>=0;
+        if(cur&&cur.trangThai==='DA_LAP'&&mv[0].indexOf('DA_LAP')<0)return fail('VALIDATION',l.dong,'Serial '+s+' đang lắp trong tủ'+(cur.serialCha?' '+cur.serialCha.split('|')[1]:'')+' — thay linh kiện qua phiếu bảo hành');
+        if(cur&&cur.serialCha&&p.loai==='KHACH_TRA')return fail('VALIDATION',l.dong,'Serial '+s+' đang lắp trong tủ '+cur.serialCha.split('|')[1]+' — không nhận trả riêng');
         if(!cur||mv[0].indexOf(cur.trangThai)<0||(inStock&&cur.kho!==p.kho))
           return fail(inStock?'SERIAL_NOT_IN_STOCK':'VALIDATION',l.dong,'Serial '+s+(cur?' đang ở trạng thái '+cur.trangThai+(cur.kho?' tại kho '+cur.kho:''):' chưa có trong hệ thống'));
         changes.push(Object.assign(base,{to:mv[1]||cur.trangThai,kho:mv[2]==='KHO'?p.kho:mv[2]==='DEN'?p.khoDen:''}));
