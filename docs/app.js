@@ -1148,6 +1148,7 @@
     const d = S.data, sk = {}; (d.serials || []).forEach(z => sk[z.key] = z);
     const tpl = {}; (d.templates || []).forEach(t => tpl[t.maMau] = t);
     const hist = {}; (d.lapDat || []).forEach(l => (hist[l.key] = hist[l.key] || []).push(l));
+    Object.keys(hist).forEach(k => { const nx = hist[k].reduce((m, l) => (l.ngayXuat || '') > m ? l.ngayXuat : m, ''); hist[k] = hist[k].filter(l => !l.ngayXuat || l.ngayXuat === nx); });   // chu kỳ giao gần nhất
     const tus = (d.cabinets || []).filter(c => c.trangThai !== 'HUY' && sk[c.key] && sk[c.key].trangThai === 'DA_BAN').map(c => {
       const thang = tpl[c.maMau] && tpl[c.maMau].thangBH !== '' ? Number(tpl[c.maMau].thangBH) : Number(itemOf(c.maHang).thangBH || 12), cur = QBH.current(hist[c.key] || [], thang);
       return { c, cur, st: QBH.status(cur || {}, S.today) }; });

@@ -79,3 +79,13 @@ test('BH7 tra cứu tình trạng: tủ đã xuất chưa bàn giao quá 30 ngà
   const s = x.W('serial.get', { serial: x.t1 }, x.xem);
   assert.equal(s.baoHanh.tinhTrang.ma, 'CHUA_BAN_GIAO'); assert.equal(s.baoHanh.ngayXuat, '2026-11-09');
 });
+
+test('khách trả tủ rồi bán lại → chu kỳ bảo hành mới (bàn giao lại được, hạn tính từ lần bàn giao mới)', () => {
+  const x = sold(); lap(x, x.t1);
+  x.W('voucher.create', { voucher: { loai: 'KHACH_TRA', ngay: '2026-11-10', kho: 'KHO', maKH: 'TN', phieuGoc: x.px, lines: [{ maHang: 'TU-DKCS-2N', soLuongCT: 1, dongGoc: 1, serials: [x.t1] }] } });
+  assert.equal(x.W('serial.get', { serial: x.t1 }).baoHanh.ngayBanGiao, undefined, 'tủ về kho → hết chu kỳ cũ');
+  x.W('voucher.create', { voucher: { loai: 'XUAT_BAN', ngay: '2026-11-11', kho: 'KHO', maKH: 'TN', maCongTrinh: 'PDG', lines: [{ maHang: 'TU-DKCS-2N', soLuongCT: 1, serials: [x.t1] }] } });
+  const r = lap(x, x.t1, { ngay: '2026-11-11' }); assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.data.hanBH, '2027-11-10');
+  assert.equal(x.W('serial.get', { serial: x.t1 }).lapDat.length, 1);
+});

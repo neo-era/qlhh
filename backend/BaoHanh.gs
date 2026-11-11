@@ -20,9 +20,11 @@ function bhThang(sr, hs, it) {
   if (hs) { var t = template(hs.maMau, hs.phienBan); if (t && t.thangBH !== '' && t.thangBH !== undefined) return Number(t.thangBH); }
   return it && it.thangBH !== '' && it.thangBH !== undefined && it.thangBH !== null ? Number(it.thangBH) : 12;
 }
-function bhHist(key) { return readTable('LapDat').rows.filter(function (r) { return r.key === key; }).map(strip); }
+/** Lịch sử lắp đặt của LẦN GIAO HIỆN TẠI (cùng ngày xuất kho): khách trả rồi bán lại thì bắt đầu chu kỳ bảo hành mới. */
+function bhHist(key, nx) { return readTable('LapDat').rows.filter(function (r) { return r.key === key && (nx === undefined || !r.ngayXuat || r.ngayXuat === nx); }).map(strip); }
 function bhInfo(key, sr, hs, it) {
-  var hist = bhHist(key), cur = QBH.current(hist, bhThang(sr, hs, it)), nx = bhNgayXuat(key);
+  var nx = bhNgayXuat(key), live = sr && sr.trangThai === 'DA_BAN', hist = live ? bhHist(key, nx) : [], cur = QBH.current(hist, bhThang(sr, hs, it));
+  if (!live) nx = '';
   var o = cur ? { ngayBanGiao: cur.ngayBanGiao, hanBH: cur.hanBH, thangBH: cur.thangBH, viTri: cur.viTri } : { thangBH: bhThang(sr, hs, it) };
   o.ngayXuat = nx; o.tinhTrang = QBH.status(cur ? cur : { ngayXuat: nx }, today()); o.lapDat = hist;
   return o;
@@ -45,7 +47,7 @@ function installAdd(u, req, logs) {
   if (b.sr.key !== r.sr.key) throw fail('VALIDATION', 'Xê-ri ' + r.q + ' là linh kiện trong tủ ' + b.serialTu + ' — ghi lắp đặt cho tủ', { serial: 'Chọn xê-ri tủ' });
   if (r.sr.trangThai !== 'DA_BAN') throw fail('VALIDATION', 'Xê-ri ' + r.q + ' chưa xuất khỏi kho (đang ' + r.sr.trangThai + (r.sr.kho ? ' tại ' + r.sr.kho : '') + ') — lập phiếu xuất bán / công trình trước', { serial: 'Chưa xuất kho' });
   var nx = bhNgayXuat(r.sr.key), v = need(QBH.validateInstall(req.lapDat, { ngayXuat: nx, today: today() }));
-  var hist = bhHist(r.sr.key), bg = hist.filter(function (x) { return x.loai === 'BAN_GIAO'; })[0];
+  var hist = bhHist(r.sr.key, nx), bg = hist.filter(function (x) { return x.loai === 'BAN_GIAO'; })[0];
   if (v.loai === 'BAN_GIAO' && bg) throw fail('VALIDATION', 'Tủ đã bàn giao ngày ' + bg.ngay + ' — chuyển vị trí thì chọn "Di dời"', { loai: 'Chọn Di dời' });
   if (v.loai === 'DI_DOI' && !bg) throw fail('VALIDATION', 'Chưa có lần bàn giao — chọn "Bàn giao" trước', { loai: 'Chọn Bàn giao' });
   var last = hist.reduce(function (m, x) { return x.ngay > m ? x.ngay : m; }, '');
@@ -54,8 +56,8 @@ function installAdd(u, req, logs) {
   if (v.maCongTrinh && !readTable('CongTrinh').rows.some(function (x) { return x.maCongTrinh === v.maCongTrinh; })) throw fail('VALIDATION', 'Công trình ' + v.maCongTrinh + ' chưa có', { maCongTrinh: 'Chọn công trình có sẵn' });
   var id = 'LD' + pad(nextId('LAPDAT'), 6);
   appendBlock('LapDat', [{ id: id, serial: r.sr.serial, key: r.sr.key, maHang: r.sr.maHang, loai: v.loai, ngay: v.ngay, maKH: v.maKH, maCongTrinh: v.maCongTrinh, diaChi: v.diaChi, tenTaiCT: v.tenTaiCT,
-    viDo: v.viDo, kinhDo: v.kinhDo, thangBH: v.loai === 'BAN_GIAO' && v.thangBH !== '' ? String(v.thangBH) : '', soBBBG: v.soBBBG, ghiChu: v.ghiChu, nguoiGhi: u.email, thoiGian: nowIso(), requestId: String(req.requestId) }]);
-  var cur = QBH.current(bhHist(r.sr.key), bhThang(r.sr, r.hs, r.it));
+    viDo: v.viDo, kinhDo: v.kinhDo, thangBH: v.loai === 'BAN_GIAO' && v.thangBH !== '' ? String(v.thangBH) : '', soBBBG: v.soBBBG, ghiChu: v.ghiChu, nguoiGhi: u.email, thoiGian: nowIso(), requestId: String(req.requestId), ngayXuat: nx }]);
+  var cur = QBH.current(bhHist(r.sr.key, nx), bhThang(r.sr, r.hs, r.it));
   logs.push({ action: 'install.add', doiTuong: 'LapDat', id: id, truoc: null, sau: { serial: r.sr.serial, loai: v.loai, ngay: v.ngay, diaChi: v.diaChi, hanBH: cur.hanBH } });
   return sxMark(u, req, { id: id, ngayBanGiao: cur.ngayBanGiao, hanBH: cur.hanBH });
 }
@@ -65,7 +67,7 @@ function bhCreate(u, req, logs) {
   var pv = prevRow('PhieuBaoHanh', req)[0]; if (pv) return sxMark(u, req, { soPBH: pv.soPBH, serialTu: pv.serialTu, tinhTrangBH: pv.tinhTrangBH, hanBH: pv.hanBH, lapLai: true });
   var r = bhResolve(req.serial), b = bhBase(r);
   if (b.sr.trangThai !== 'DA_BAN') throw fail('VALIDATION', (b.serialTu ? 'Tủ ' + b.serialTu : 'Xê-ri ' + r.q) + ' chưa giao cho khách (đang ' + b.sr.trangThai + ') — không lập phiếu bảo hành', { serial: 'Chưa xuất kho' });
-  var v = need(QBH.validateTicket(req.phieu, { today: today() })), cur = QBH.current(bhHist(b.key), bhThang(b.sr, b.hs, b.it));
+  var v = need(QBH.validateTicket(req.phieu, { today: today() })), cur = QBH.current(bhHist(b.key, bhNgayXuat(b.key)), bhThang(b.sr, b.hs, b.it));
   var tt = !cur ? 'CHUA_BAN_GIAO' : !cur.hanBH ? 'KHONG_BH' : v.ngay <= cur.hanBH ? 'TRONG_BH' : 'HET_BH';
   var yr = v.ngay.slice(0, 4), so = 'BH-' + yr + '-' + pad(nextId('PBH:' + yr), 5);
   appendBlock('PhieuBaoHanh', [{ soPBH: so, serial: r.q, key: r.sr.key, maHang: r.sr.maHang, serialTu: b.serialTu, ngay: v.ngay, nguoiBao: v.nguoiBao, moTaLoi: v.moTaLoi, tinhTrangBH: tt, hanBH: cur ? cur.hanBH : '',
@@ -117,7 +119,7 @@ function bhReplace(u, req, logs) {
     outL.push({ maHang: it.maHang, soLuongCT: q, serials: it.quanLySerial ? sm : undefined });
     ghi.push({ maHang: it.maHang, soLuong: q, serialMoi: sm, serialCu: sc, ngay: ngay });
   });
-  var ld = QBH.current(bhHist(cab.key), 12), vt = ld ? ld.viTri : {}, lsx = readTable('LenhSX').rows.filter(function (x) { return x.soLSX === cab.soLSX; })[0] || {};
+  var ld = QBH.current(bhHist(cab.key, bhNgayXuat(cab.key)), 12), vt = ld ? ld.viTri : {}, lsx = readTable('LenhSX').rows.filter(function (x) { return x.soLSX === cab.soLSX; })[0] || {};
   var ctxX = voucherPrep(u, { requestId: req.requestId, voucher: { loai: 'XUAT_BH', ngay: ngay, kho: kho.maKho, maKH: vt.maKH || lsx.maKH || '', maCongTrinh: vt.maCongTrinh || lsx.maCongTrinh || '',
     lyDo: 'Bảo hành ' + t.soPBH + ' — tủ ' + cab.serial, soCTGoc: t.soPBH, ngayCTGoc: t.ngay, lines: outL } }, true);
   var ctxL = null;
