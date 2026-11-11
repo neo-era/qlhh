@@ -319,7 +319,7 @@ function voucherReverse(u, req, logs) {
   if (!QValidate.isoDate(ngay)) throw fail('VALIDATION', 'Ngày phiếu đảo không hợp lệ', { ngay: 'YYYY-MM-DD' });
   noFuture({ ngay: ngay });
   var g = loadVoucher(gso); if (!g || g.trangThai !== 'HOAN_TAT') throw fail('VALIDATION', 'Không có phiếu ' + gso, { phieuGoc: 'Phiếu không tồn tại' });
-  if ((g.loai === 'XUAT_BH' || g.loai === 'NHAP_HANG_LOI') && /^BH-/.test(String(g.soCTGoc || '')) && readTable('PhieuBaoHanh').rows.some(function (t) { return (t.soPhieuXuat + ',' + t.soPhieuLoi).indexOf(gso) >= 0; }))
+  if ((g.loai === 'XUAT_BH' || g.loai === 'NHAP_HANG_LOI') && /^BH-\d{4}-\d+$/.test(String(g.soCTGoc || '')) && readTable('PhieuBaoHanh').rows.some(function (t) { return t.soPBH === g.soCTGoc; }))
     throw fail('VALIDATION', 'Phiếu ' + gso + ' là lần thay linh kiện của phiếu bảo hành ' + g.soCTGoc + ' — không đảo riêng (linh kiện đang gắn với hồ sơ tủ)', null);
   if (g.soLSX) {
     var lx = readTable('LenhSX').rows.filter(function (x) { return x.soLSX === g.soLSX; })[0];
@@ -375,6 +375,7 @@ function stockRebuild(u, req, logs) {
   if (w.length) throw fail('VALIDATION', 'Sheet phiếu có ' + w.length + ' ô sai kiểu, sửa trước khi tính lại (vd ' + w[0] + ')', null);
   cleanupOrphans(logs, true);
   var mas = uniq(readTable('HangHoa').rows.map(function (i) { return i.maHang; }).concat(readTable('ChiTietPhieu').rows.map(function (l) { return l.maHang; })));
+  if (typeof cabExitSync === 'function') cabExitSync(readTable('HoSoTu').rows.map(function (c) { return c.key; }));   // lần xuất hiện hành của mọi tủ
   var r = rebuildFor(mas);
   logs.push({ action: 'stock.rebuild', doiTuong: 'TonKho', id: '*', truoc: null, sau: { ma: mas.length, tinhLai: r.changes, loi: r.errors.length } });
   return { ma: mas.length, tinhLai: r.changes, loiTonAm: r.errors.slice(0, 50), lechKyKhoa: r.lechKyKhoa.slice(0, 50) };

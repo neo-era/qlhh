@@ -128,6 +128,7 @@ function bhReplace(u, req, logs) {
   var d = sxDone(u, req); if (d) return d;
   cleanupOrphans(logs);
   var t = bhTicket(req.soPBH), px = prevHeads(req, 'XUAT_BH')[0], pl = prevHeads(req, 'NHAP_HANG_LOI')[0];
+  if ((px && px.daDao) || (pl && pl.daDao)) throw fail('VALIDATION', 'Phiếu của lần thay trước (' + (px && px.daDao ? px.soPhieu : pl.soPhieu) + ') đã bị đảo — lập lần thay mới', null);
   if (px && String(t.soPhieuXuat).indexOf(px.soPhieu) >= 0) return sxMark(u, req, { soPhieuXuat: px.soPhieu, soPhieuLoi: pl ? pl.soPhieu : '', lapLai: true });
   if (!px && ['TIEP_NHAN', 'DANG_XU_LY'].indexOf(t.trangThai) < 0) throw fail('VALIDATION', 'Phiếu ' + t.soPBH + ' đã đóng', null);
   if (!t.serialTu) throw fail('VALIDATION', 'Phiếu không gắn với tủ — chỉ thay linh kiện trong tủ có hồ sơ', null);

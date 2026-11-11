@@ -151,3 +151,14 @@ test('BH-B9 khách trả rồi bán lại cùng ngày → vẫn bàn giao lại 
   x.W('install.void', { id: r.data.id, lyDo: 'Ghi nhầm số tháng' });
   assert.equal(lap(x, x.t1, { ngay: '2026-11-10' }).data.hanBH, '2027-11-09');
 });
+
+test('BH-W1 lần thay chết sau phiếu xuất BH, phiếu xuất đó không đảo riêng được; nếu đã đảo thì gửi lại báo lỗi chứ không làm tiếp', () => {
+  const x = sold(), so = withLogo(x);
+  const tk = x.a.sheets.PhieuBaoHanh, og = tk.getRange; let hit = 0;
+  const ph = x.a.sheets.Phieu, orig = ph.appendRow;
+  ph.appendRow = function (r) { const z = orig.call(this, r); if (r[2] === 'NHAP_HANG_LOI') { ph.appendRow = orig; throw new Error('chết sau phiếu HL'); } return z; };
+  const body = { action: 'bh.replace', session: x.nv, requestId: rid(), ...rep1(so) };
+  assert.equal(x.a.post(body).ok, false);
+  const xb = x.a.sheets.Phieu.d.find(r => r[2] === 'XUAT_BH')[0];
+  assert.match(x.P('voucher.reverse', { phieuGoc: xb, ngay: '2026-11-11', lyDo: 'x' }).error, /lần thay linh kiện/);
+});
