@@ -28,6 +28,9 @@ var QSchema=(function(){
     ChiPhiLSX:{key:'id',cols:['id','soLSX','ngay','loai','soTien','soCTGoc','ngayCTGoc','ghiChu','nguoiTao','thoiGian','requestId'],num:['soTien'],text:['id','soLSX','ngay','soCTGoc','ngayCTGoc','requestId']},
     HoSoTu:{key:'serial',cols:['serial','key','soLSX','maHang','maMau','phienBan','soPhieuNhap','ngayNhap','bomThucTe','serialCon','kichThuoc','ghiChu','kcsDat','lanKiemCuoi','soPXX','trangThai'],num:['phienBan','lanKiemCuoi'],bool:['kcsDat'],text:['serial','key','soLSX','maHang','maMau','soPhieuNhap','ngayNhap','soPXX']},
     KiemTraXX:{key:'id',cols:['id','serial','lanKiem','ngay','nguoiKiem','ketQua','dat','soDat','tongMuc','thoiGian','requestId'],num:['lanKiem','soDat','tongMuc'],bool:['dat'],text:['id','serial','ngay','requestId']},
+    // lắp đặt & bảo hành (BH-1): mỗi lần bàn giao / di dời 1 dòng; phiếu bảo hành theo xê-ri
+    LapDat:{key:'id',cols:['id','serial','key','maHang','loai','ngay','maKH','maCongTrinh','diaChi','tenTaiCT','viDo','kinhDo','thangBH','soBBBG','ghiChu','nguoiGhi','thoiGian','requestId'],num:['viDo','kinhDo'],text:['id','serial','key','maHang','ngay','maKH','maCongTrinh','thangBH','soBBBG','requestId']},
+    PhieuBaoHanh:{key:'soPBH',cols:['soPBH','serial','key','maHang','serialTu','ngay','nguoiBao','moTaLoi','tinhTrangBH','hanBH','trangThai','nguyenNhan','ketQua','ngayDong','thayThe','soPhieuXuat','soPhieuLoi','nguoiTiepNhan','nguoiXuLy','thoiGian','ghiChu','requestId'],text:['soPBH','serial','key','maHang','serialTu','ngay','hanBH','ngayDong','soPhieuXuat','soPhieuLoi','requestId']},
     PhieuXuatXuong:{key:'soPXX',cols:['soPXX','nam','so','ngay','maKH','maCongTrinh','diaDiem','serials','canCuCheTao','soPhieuXuat','soHoaDon','trangThai','nguoiLap','thoiGian','lyDoHuy','ghiChu','requestId'],num:['nam','so'],text:['soPXX','ngay','maKH','maCongTrinh','soPhieuXuat','soHoaDon','requestId']}
   };
   function check(heads){

@@ -5,7 +5,7 @@ var QSerial=(function(){
     XUAT_BAN:[['TRONG_KHO'],'DA_BAN',''],XUAT_CONG_TRINH:[['TRONG_KHO'],'DA_BAN',''],XUAT_BH:[['TRONG_KHO'],'DA_BAN',''],
     XUAT_SX:[['TRONG_KHO'],'DA_LAP',''],TRA_NCC:[['TRONG_KHO','HANG_LOI'],'DA_TRA_NCC',''],
     CHUYEN_KHO:[['TRONG_KHO','HANG_LOI'],null,'DEN'],KHACH_TRA:[['DA_BAN'],'TRONG_KHO','KHO'],
-    NHAP_HANG_LOI:[['DA_BAN','DA_THAY'],'HANG_LOI','KHO'],NHAP_LAI_SX:[['DA_LAP'],'TRONG_KHO','KHO']
+    NHAP_HANG_LOI:[['DA_BAN','DA_THAY','DA_LAP'],'HANG_LOI','KHO'],NHAP_LAI_SX:[['DA_LAP'],'TRONG_KHO','KHO']
   };
   var NEW=['TON_DAU','NHAP_MUA','NHAP_TP'];
   function norm(s){return String(s===undefined||s===null?'':s).trim().toUpperCase();}

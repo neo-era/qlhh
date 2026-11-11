@@ -98,6 +98,10 @@ var HANDLERS = {
   'pxx.cancel': function (u, r) { return write(u, r, pxxCancel); },
   'lsx.chiPhiHuy': function (u, r) { return write(u, r, lsxChiPhiHuy); },
   'report.wip': reportWip,
+  'install.add': function (u, r) { return write(u, r, installAdd); },
+  'bh.create': function (u, r) { return write(u, r, bhCreate); },
+  'bh.update': function (u, r) { return write(u, r, bhUpdate); },
+  'bh.replace': function (u, r) { return write(u, r, bhReplace); },
   'sx.get': sxGet,
   'serial.get': serialGet
 };
@@ -165,14 +169,14 @@ function findUser(email, fresh) {
 // ======================= ĐỌC =======================
 var TABLES = { items: 'HangHoa', groups: 'NhomHang', suppliers: 'NhaCungCap', prices: 'BangGia', users: 'NguoiDung', feedback: 'GopY', logs: 'NhatKy',
   warehouses: 'Kho', units: 'QuyDoiDVT', customers: 'KhachHang', projects: 'CongTrinh', vouchers: 'Phieu', stock: 'TonKho', serials: 'Serial',
-  templates: 'MauSanPham', lsx: 'LenhSX', cabinets: 'HoSoTu', pxx: 'PhieuXuatXuong' };
+  templates: 'MauSanPham', lsx: 'LenhSX', cabinets: 'HoSoTu', pxx: 'PhieuXuatXuong', lapDat: 'LapDat', pbh: 'PhieuBaoHanh' };
 /* Bộ nhớ tạm trong 1 lệnh (MEMO): mỗi sheet chỉ đọc 1 lần; ghi sheet nào thì xoá bản nhớ sheet đó (dirty). Trả bản sao nông.
    Bộ đệm GIỮA các lệnh (CacheService) cho bảng danh mục + TonKho, khoá theo PHIÊN BẢN của từng sheet (ScriptProperties 'ver:<sheet>'):
    - ghi sheet → cấp phiên bản mới (DIRTY), đẩy lên ScriptProperties TRƯỚC khi nhả khoá (kể cả khi lỗi) → không lệnh nào đọc phải bản cũ;
    - ghi xong cả bảng (TonKho, HangHoa) → đặt luôn bản mới vào bộ đệm (write-through) để lệnh sau khỏi đọc lại;
    - sheet bị sửa tay ngoài app: bộ đệm sống tối đa 10 phút; "Tính lại tồn" luôn đọc thẳng sheet (FRESH). */
 var MEMO = {}, PROF = [], DIRTY = {}, WT = {}, VERS = null, FRESH = false;
-var CACHE_T = ['HangHoa', 'NhomHang', 'NhaCungCap', 'BangGia', 'Kho', 'QuyDoiDVT', 'KhachHang', 'CongTrinh', 'TonKho', 'CauHinh', 'MauSanPham', 'LenhSX', 'ChiPhiLSX', 'HoSoTu'];
+var CACHE_T = ['HangHoa', 'NhomHang', 'NhaCungCap', 'BangGia', 'Kho', 'QuyDoiDVT', 'KhachHang', 'CongTrinh', 'TonKho', 'CauHinh', 'MauSanPham', 'LenhSX', 'ChiPhiLSX', 'HoSoTu', 'LapDat', 'PhieuBaoHanh'];
 function mark(l) { PROF.push([l, Date.now()]); }
 function newVer() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 function vers() { if (!VERS) VERS = props().getProperties(); return VERS; }

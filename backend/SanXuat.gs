@@ -384,6 +384,7 @@ function serialGet(u, req) {
     var l = readTable('LenhSX').rows.filter(function (x) { return x.soLSX === hs.soLSX; })[0]; out.lsx = l ? strip(l) : null;
     if (u.vaiTro === 'QUAN_TRI' && hs.trangThai !== 'HUY') out.giaThanh = cabinetCosts(hs.soLSX)[q];
   }
+  if (typeof bhAugment === 'function') bhAugment(out, sr, hs && hs.trangThai !== 'HUY' ? hs : null);
   return out;
 }
 /** Báo cáo dở dang (TK 154) theo kỳ, mọi lệnh (QT). */
