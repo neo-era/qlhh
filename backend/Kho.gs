@@ -30,6 +30,7 @@ function readTon() {
 /** Ghi lại TonKho cho các mã `mas` (dòng '*' = tổng giá vốn toàn công ty, mỗi kho 1 dòng số lượng). Ghi 1 khối setValues. */
 function writeTon(ton, mas) {
   var s = sheet('TonKho'), cols = QSchema.SHEETS.TonKho.cols, cur = readTable('TonKho').rows, idx = {}, rows = cur.map(function (r) { idx[r.maHang + '|' + r.kho] = r; return r; });
+  guardTable('TonKho');
   mas.forEach(function (m) {
     var t = ton[m] || { pool: { q: 0, v: 0 }, kho: {}, last: null };
     var set = function (k, o) { var x = idx[m + '|' + k]; if (!x) { x = { maHang: m, kho: k }; idx[m + '|' + k] = x; rows.push(x); } for (var f in o) x[f] = o[f]; };
@@ -37,9 +38,12 @@ function writeTon(ton, mas) {
     Object.keys(idx).forEach(function (key) { if (key.indexOf(m + '|') === 0 && key !== m + '|*' && !(key.slice(m.length + 1) in t.kho)) idx[key].soLuong = 0; });
     Object.keys(t.kho).forEach(function (k) { set(k, { soLuong: t.kho[k], giaTri: '' }); });
   });
-  if (rows.length) s.getRange(2, 1, rows.length, cols.length).setValues(rows.map(function (r) { return QSchema.toRow('TonKho', r); }));
+  // ghi đúng vị trí từng dòng (dòng trống xen giữa giữ trống), dòng mới nối sau dòng cuối
+  var top = Math.max(1, s.getLastRow()), byRow = {}; rows.forEach(function (r) { if (!r._row) r._row = ++top; byRow[r._row] = r; });
+  if (rows.length) { var vals = []; for (var i = 2; i <= top; i++) vals.push(byRow[i] ? QSchema.toRow('TonKho', byRow[i]) : cols.map(function () { return ''; })); s.getRange(2, 1, vals.length, cols.length).setValues(vals); }
   dirty('TonKho'); mark('write TonKho');
-  writeThrough('TonKho', rows.map(function (r, i) { var o = {}; cols.forEach(function (c) { o[c] = r[c] === undefined ? '' : r[c]; }); o._row = i + 2; return o; }));
+  writeThrough('TonKho', rows.map(function (r) { var o = {}; cols.forEach(function (c) { o[c] = r[c] === undefined ? '' : r[c]; }); o._row = r._row; return o; }));
+  VERIFIED.TonKho = true;
 }
 /** Đọc phiếu HOÀN TẤT có dòng thuộc `mas` (chỉ giữ các dòng của `mas` → tính lại riêng các mã đó). mas=null → tất cả. */
 function loadVouchers(mas, lsxs) {   // lsxs: lệnh SX của phiếu sắp ghi (chưa có trên sheet) → mở bao đóng từ đó
@@ -116,26 +120,28 @@ function refreshTotals(sos) {
 }
 function updateCost(ton, mas) {
   var tb = readTable('HangHoa'), items = tb.rows, s = sheet('HangHoa'), cols = QSchema.SHEETS.HangHoa.cols, ch = false;
+  if (items.some(function (it) { var t = mas.indexOf(it.maHang) >= 0 && ton[it.maHang]; return t && t.pool.q > 0 && Math.round(t.pool.v / t.pool.q) !== it.giaVon; })) guardTable('HangHoa');
   items.forEach(function (it) {
     if (mas.indexOf(it.maHang) < 0) return; var t = ton[it.maHang]; if (!t) return;
     var g = t.pool.q > 0 ? Math.round(t.pool.v / t.pool.q) : it.giaVon;
     if (g !== it.giaVon) { var x = strip(it); x.giaVon = g; s.getRange(it._row, 1, 1, cols.length).setValues([QSchema.toRow('HangHoa', x)]); it.giaVon = g; ch = true; }
   });
-  if (ch) { dirty('HangHoa'); if (!tb.warnings.length) writeThrough('HangHoa', items); }
+  if (ch) { dirty('HangHoa'); if (!tb.warnings.length) { writeThrough('HangHoa', items); VERIFIED.HangHoa = true; } }
 }
 function setVoucherState(so, st, extra, known) {   // known = {row, obj}: phiếu vừa ghi, khỏi tìm lại
   var h = known ? Object.assign({ _row: known.row }, known.obj) : findByKey('Phieu', so); if (!h) return; var x = strip(h); x.trangThai = st; for (var k in (extra || {})) x[k] = extra[k];
   delete x.lines; putRow('Phieu', x, h._row);
 }
-/* Phiếu đang ghi dở: đánh dấu trong cache để lệnh sau biết có phiếu mồ côi mà KHÔNG phải quét sheet Phieu mỗi lần. */
-/* info = {loai, phieuGoc, mas}: đủ để dọn phiếu mồ côi khi đầu phiếu CHƯA kịp ghi (đầu phiếu ghi cuối cùng, 1 lần, trạng thái HOAN_TAT). */
-function markPending(so, info) { var c = CacheService.getScriptCache(), l = JSON.parse(c.get('pendingList') || '[]'); l.push(so); c.put('pendingList', JSON.stringify(l.slice(-50)), 21600); c.put('pending:' + so, JSON.stringify(info || {}), 21600); }
-function clearPending(so) { CacheService.getScriptCache().remove('pending:' + so); }
-function pendingList() {   // 1 lần getAll thay cho 1 lần get mỗi phiếu
-  var c = CacheService.getScriptCache(), l = JSON.parse(c.get('pendingList') || '[]'); if (!l.length) return [];
-  var m = c.getAll(l.map(function (so) { return 'pending:' + so; })), live = l.filter(function (so) { return m['pending:' + so]; });
-  if (live.length !== l.length) c.put('pendingList', JSON.stringify(live), 21600); return live;
+/* Phiếu đang ghi dở: đánh dấu BỀN trong ScriptProperties ('pend:<số phiếu>') để lệnh sau biết có phiếu mồ côi mà KHÔNG phải quét sheet Phieu mỗi lần.
+   (Không dùng CacheService: bộ đệm có thể bị đẩy ra bất cứ lúc nào.) Mỗi lệnh ghi đã đọc toàn bộ ScriptProperties 1 lần (vers()) → tra không tốn thêm.
+   info = {loai, phieuGoc, mas}: đủ để dọn phiếu mồ côi khi đầu phiếu CHƯA kịp ghi (đầu phiếu ghi cuối cùng, 1 lần, trạng thái HOAN_TAT). */
+function markPending(so, info) {
+  var v = JSON.stringify(info || {}); if (v.length > 8000) v = JSON.stringify({ loai: info.loai, phieuGoc: info.phieuGoc });   // giới hạn 9 KB/giá trị; mã hàng đọc lại từ dòng phiếu
+  props().setProperty('pend:' + so, v); vers()['pend:' + so] = v;
 }
+function clearPending(so) { props().deleteProperty('pend:' + so); if (VERS) delete VERS['pend:' + so]; }
+function pendingList() { return Object.keys(vers()).filter(function (k) { return k.indexOf('pend:') === 0; }).map(function (k) { return k.slice(5); }); }
+function pendingInfo(so) { try { return JSON.parse(vers()['pend:' + so] || '{}'); } catch (e) { return {}; } }
 
 /** Đầu lệnh ghi: phiếu NHAP_DO còn lại chắc chắn mồ côi (đang giữ khoá) → đánh dấu LOI_GHI, trả serial, tính lại tồn các mã của nó. */
 function revertSerials(so) {
@@ -145,10 +151,10 @@ function revertSerials(so) {
   dirty('Serial');
 }
 function cleanupOrphans(logs, full) {
-  var pend = pendingList(), c = CacheService.getScriptCache();
-  if (!pend.length && !full) { mark('orphans none'); return; }   // cache mất (hiếm) → stock.rebuild quét đầy đủ
+  var pend = pendingList();
+  if (!pend.length && !full) { mark('orphans none'); return; }
   pend.forEach(function (so) {
-    var info = {}; try { info = JSON.parse(c.get('pending:' + so) || '{}'); } catch (e) { }
+    var info = pendingInfo(so);
     var h = findByKey('Phieu', so);
     if (h && h.trangThai === 'HOAN_TAT') { clearPending(so); return; }   // chết sau khi ghi đầu phiếu: phiếu đã đủ
     if (h) setVoucherState(so, 'LOI_GHI');
@@ -196,6 +202,19 @@ function doneByRequest(id, email) {   // ghi ở cache NGAY khi phiếu HOÀN T�
   var v = CacheService.getScriptCache().get('done:' + email + ':' + id); if (!v) return null;
   var r = JSON.parse(v); r.lapLai = true; r.tinhLai = 0; return r;
 }
+/** Đầu phiếu đã ghi với requestId này (lệnh trước chết SAU khi ghi đầu phiếu, kết quả chưa kịp lưu). Phiếu ghi gần đây → 300 dòng cuối là đủ. */
+function headByReq(req, email, dao) {
+  var id = String(req.requestId);
+  return readTail('Phieu', 300).rows.filter(function (h) { return h.requestId === id && String(h.nguoiTao).toLowerCase() === String(email).toLowerCase() && h.trangThai === 'HOAN_TAT' && (dao ? h.loai === 'DAO' : h.loai !== 'DAO'); })[0] || null;
+}
+/** Gửi lại sau khi phiếu đã ghi đủ: làm lại các bước SAU đầu phiếu (đều làm lại được an toàn) rồi trả kết quả cũ. */
+function voucherReplay(h, logs, act) {
+  var ks = uniq(readTable('LichSuSerial').rows.filter(function (x) { return x.soPhieu === h.soPhieu; }).map(function (x) { return x.key; }));
+  if (act === 'voucher.reverse') { var g = findByKey('Phieu', h.phieuGoc); if (g && g.loai === 'NHAP_TP') cabinetsVoid(g.soPhieu); if (g && g.soLSX) lsxRefresh(g.soLSX); }
+  if (ks.length && typeof cabExitSync === 'function') cabExitSync(ks);
+  logs.push({ action: act, doiTuong: 'Phieu', id: h.soPhieu, truoc: null, sau: { lapLai: true } });
+  return { soPhieu: h.soPhieu, stt: h.stt, tinhLai: 0, lapLai: true };
+}
 function markDone(id, email, so, stt) { CacheService.getScriptCache().put('done:' + email + ':' + id, JSON.stringify({ soPhieu: so, stt: stt }), 21600); }
 function noFuture(h) {
   var t = today();
@@ -209,6 +228,9 @@ function voucherPrep(u, req, sx) {
   if (!QStock.TYPES[h.loai] || h.loai === 'DAO') throw fail('VALIDATION', 'Loại phiếu không hợp lệ', { loai: 'Chọn loại phiếu' });
   if (!sx && SX_ONLY.indexOf(h.loai) >= 0) throw fail('VALIDATION', 'Phiếu sản xuất được lập từ Lệnh sản xuất', { loai: 'Không lập trực tiếp' });
   if (h.loai === 'TON_DAU' && u.vaiTro !== 'QUAN_TRI') throw fail('FORBIDDEN', 'Chỉ Quản trị lập phiếu tồn đầu kỳ');
+  if (!sx && h.loai === 'XUAT_BH') throw fail('VALIDATION', 'Phiếu xuất bảo hành được lập từ Phiếu bảo hành (nút "Thay linh kiện") — linh kiện bán cho khách thì lập Phiếu xuất bán', { loai: 'Lập từ phiếu bảo hành' });
+  if (!sx && h.loai === 'NHAP_HANG_LOI' && /^BH-\d{4}-\d+$/i.test(String(h.soCTGoc || '').trim())) throw fail('VALIDATION', 'Linh kiện thu hồi khi bảo hành được nhận về kho lỗi qua Phiếu bảo hành (nút "Thay linh kiện")', { soCTGoc: 'Không ghi số phiếu bảo hành' });
+  if (h.loai === 'TRA_NCC' && !h.maNCC) throw fail('VALIDATION', 'Chọn nhà cung cấp nhận hàng trả', { maNCC: 'Bắt buộc' });
   noFuture(h);
   if (GOC_OK.indexOf(h.loai) < 0) h.phieuGoc = '';
   var o = stockOpts(), kho = mapBy(o.kho, 'maKho');
@@ -258,6 +280,7 @@ function voucherCreate(u, req, logs, ctx) {
   ctx = ctx || voucherPrep(u, req);
   if (ctx.done) return ctx.done;
   var dup = doneByRequest(req.requestId, u.email); if (dup) return dup;
+  var ph = headByReq(req, u.email, false); if (ph) { var rp = voucherReplay(ph, logs, 'voucher.create'); markDone(req.requestId, u.email, rp.soPhieu, rp.stt); return rp; }   // nguồn chắc chắn: cột requestId trên sheet
   cleanupOrphans(logs);
   var r = commitVoucher(u, req, logs, ctx);
   markDone(req.requestId, u.email, r.soPhieu, r.stt);
@@ -275,6 +298,11 @@ function commitVoucher(u, req, logs, ctx, opt) {
     lines.forEach(function (l) { l.serials.forEach(function (z) { var c = hs[QSerial.norm(z)];
       if (c && !ch[c.soPhieuNhap]) throw fail('VALIDATION', 'Tủ ' + c.serial + ' thuộc phiếu nhập chưa hoàn tất — Quản trị chạy "Tính lại tồn"', { dong: l.dong });
       if (c && !c.kcsDat) throw fail('VALIDATION', 'Tủ ' + c.serial + ' chưa đạt kiểm tra xuất xưởng (KCS)', { dong: l.dong, serials: 'Kiểm tra xuất xưởng trước' }); }); });
+  }
+  if (h.loai === 'NHAP_HANG_LOI' && !ctx.choLapDat && lines.some(function (l) { return l.serials.length; })) {   // tủ đã bán chỉ về qua Khách trả / bảo hành
+    var hs2 = mapBy(readTable('HoSoTu').rows.filter(function (x) { return x.trangThai !== 'HUY'; }), 'key');
+    lines.forEach(function (l) { var it = items[l.maHang]; l.serials.forEach(function (z) { var c = hs2[QSerial.keyOf(it, z)];
+      if (c) throw fail('VALIDATION', 'Tủ ' + c.serial + ' đã bán — khách trả cả tủ thì lập phiếu Khách trả; hỏng linh kiện thì lập Phiếu bảo hành', { dong: l.dong, serials: 'Không nhận tủ vào kho lỗi' }); }); });
   }
   var ton = readTon(), sttTry = Number(props().getProperty('seq:stt') || 0) + 1;
   if (h.loai === 'KIEM_KE') lines.forEach(function (l) { l.slSoSach = (ton[l.maHang] && ton[l.maHang].kho[h.kho]) || 0; });
@@ -312,8 +340,9 @@ function commitVoucher(u, req, logs, ctx, opt) {
 function mk(k, v) { var o = {}; o[k] = v; return o; }
 
 function voucherReverse(u, req, logs) {
-  cleanupOrphans(logs);
   var dup = doneByRequest(req.requestId, u.email); if (dup) return dup;
+  var ph = headByReq(req, u.email, true); if (ph) { var rp = voucherReplay(ph, logs, 'voucher.reverse'); markDone(req.requestId, u.email, rp.soPhieu, rp.stt); return { soPhieu: rp.soPhieu, tinhLai: 0, lapLai: true }; }
+  cleanupOrphans(logs);
   var gso = String(req.phieuGoc || '').trim(), ngay = String(req.ngay || today()), lyDo = String(req.lyDo || '').trim().slice(0, 300);
   if (!lyDo) throw fail('VALIDATION', 'Nhập lý do đảo phiếu', { lyDo: 'Bắt buộc' });
   if (!QValidate.isoDate(ngay)) throw fail('VALIDATION', 'Ngày phiếu đảo không hợp lệ', { ngay: 'YYYY-MM-DD' });
@@ -324,7 +353,7 @@ function voucherReverse(u, req, logs) {
   if (g.soLSX) {
     var lx = readTable('LenhSX').rows.filter(function (x) { return x.soLSX === g.soLSX; })[0];
     if (lx && lx.trangThai === 'HUY') throw fail('VALIDATION', 'Lệnh ' + g.soLSX + ' đã huỷ — không đảo phiếu của lệnh', null);
-    if (g.loai === 'NHAP_TP') readTable('HoSoTu').rows.forEach(function (c) { if (c.soPhieuNhap === gso && c.trangThai !== 'HUY' && c.soPXX) throw fail('VALIDATION', 'Tủ ' + c.serial + ' đã có phiếu xuất xưởng ' + c.soPXX + ' — huỷ PXX trước', null); });
+    var lp = livePxx(); if (g.loai === 'NHAP_TP') readTable('HoSoTu').rows.forEach(function (c) { if (c.soPhieuNhap === gso && c.trangThai !== 'HUY' && c.soPXX && lp[c.soPXX]) throw fail('VALIDATION', 'Tủ ' + c.serial + ' đã có phiếu xuất xưởng ' + c.soPXX + ' — huỷ PXX trước', null); });
   }
   var o = stockOpts(), all = loadVouchers(uniq(g.lines.map(function (l) { return l.maHang; }))), mas = all.mas;
   var sttTry = Number(props().getProperty('seq:stt') || 0) + 1;
@@ -361,18 +390,61 @@ function voucherGet(u, req) {
 }
 
 // ---------- quản trị kho ----------
+/** Số dư theo bộ máy sổ kho đến hết ngày d (phiếu có ngày hiệu lực ≤ d), tính với ngày khoá = d. */
+function balancesAt(d) {
+  var o = stockOpts(); o.ngayKhoaSo = d;
+  var all = loadVouchers(null), eff = QStock.effDates(all.vouchers, o), r = QStock.replay(all.vouchers.filter(function (p) { return eff[p.soPhieu] && eff[p.soPhieu] <= d; }), o);
+  var m = {}, q3 = function (x) { return Math.round((Number(x) || 0) * 1000) / 1000; };
+  Object.keys(r.ton).forEach(function (ma) { var t = r.ton[ma]; m[ma + '|*'] = { maHang: ma, kho: '*', soLuong: q3(t.pool.q), giaTri: Math.round(t.pool.v) };
+    Object.keys(t.kho).forEach(function (k) { if (q3(t.kho[k])) m[ma + '|' + k] = { maHang: ma, kho: k, soLuong: q3(t.kho[k]), giaTri: '' }; }); });
+  return { bal: m, errors: r.errors.filter(function (e) { return !e.ngay || e.ngay <= d; }) };
+}
+/** Bộ số dư chốt mới nhất của ngày khoá d (rỗng nếu khoá từ trước khi có bảng chốt). */
+function snapshotAt(d) {
+  var rows = readTable('SoDuKhoaSo').rows.filter(function (r) { return r.ngayKhoa === d; }); if (!rows.length) return null;
+  var last = rows.reduce(function (m, r) { return String(r.thoiGian) > m ? String(r.thoiGian) : m; }, ''), o = {};
+  rows.forEach(function (r) { if (String(r.thoiGian) === last && r.maHang) o[r.maHang + '|' + r.kho] = r; });
+  return o;
+}
+/** Khoá sổ chỉ TIẾN: trước khi khoá dọn phiếu dở, chặn nếu còn tồn âm trong kỳ, lưu số dư chốt. Lùi ngày / mở khoá: Quản trị ghi lý do. */
 function periodLock(u, req, logs) {
-  var d = String(req.ngay || '');
+  var d = String(req.ngay || ''), lyDo = String(req.lyDo || '').trim().slice(0, 300), old = cfg('ngayKhoaSo');
   if (d && !QValidate.isoDate(d)) throw fail('VALIDATION', 'Ngày khoá sổ không hợp lệ', { ngay: 'YYYY-MM-DD' });
   if (d && d >= today()) throw fail('VALIDATION', 'Chỉ khoá sổ đến trước hôm nay', { ngay: 'Chọn ngày đã qua' });
-  var old = cfg('ngayKhoaSo'); setCfg('ngayKhoaSo', d);
-  logs.push({ action: d ? 'period.lock' : 'period.unlock', doiTuong: 'CauHinh', id: 'ngayKhoaSo', truoc: { ngay: old }, sau: { ngay: d } });
-  return { ngayKhoaSo: d };
+  if (d === old) return { ngayKhoaSo: d };
+  var lui = !d || (old && d < old), n = 0;
+  if (lui && !lyDo) throw fail('VALIDATION', (d ? 'Lùi ngày khoá sổ về ' + d : 'Mở khoá sổ') + ' (đang khoá đến ' + old + ') phải ghi lý do', { lyDo: 'Bắt buộc' });
+  if (!lui) {
+    cleanupOrphans(logs, true);
+    var b = balancesAt(d);
+    if (b.errors.length) { var e = b.errors[0]; throw fail('VALIDATION', 'Chưa khoá được: đến ngày ' + d + ' còn ' + b.errors.length + ' chỗ tồn/giá trị âm (vd mã ' + e.maHang + (e.soPhieu ? ', phiếu ' + e.soPhieu : '') + ') — sửa phiếu rồi khoá', b.errors.slice(0, 20)); }
+    var t = nowIso(), rows = Object.keys(b.bal).sort().map(function (k) { var x = b.bal[k]; return { ngayKhoa: d, maHang: x.maHang, kho: x.kho, soLuong: x.soLuong, giaTri: x.giaTri, thoiGian: t }; });
+    appendBlock('SoDuKhoaSo', rows); n = rows.length;
+  }
+  setCfg('ngayKhoaSo', d);
+  logs.push({ action: d && !lui ? 'period.lock' : 'period.unlock', doiTuong: 'CauHinh', id: 'ngayKhoaSo', truoc: { ngay: old }, sau: { ngay: d, lyDo: lyDo || undefined, soDuChot: n || undefined } });
+  return { ngayKhoaSo: d, soDuChot: n };
+}
+/** So số dư kỳ đã khoá tính lại với số dư chốt lúc khoá. */
+function lockDiff(lock) {
+  var snap = snapshotAt(lock); if (!snap) return [];
+  var b = balancesAt(lock).bal, out = [];
+  uniq(Object.keys(snap).concat(Object.keys(b))).forEach(function (k) {
+    var a = snap[k] || { soLuong: 0, giaTri: k.slice(-2) === '|*' ? 0 : '' }, c = b[k] || { soLuong: 0, giaTri: k.slice(-2) === '|*' ? 0 : '' };
+    if (Math.abs((Number(a.soLuong) || 0) - (Number(c.soLuong) || 0)) > 1e-6 || (k.slice(-2) === '|*' && Math.abs((Number(a.giaTri) || 0) - (Number(c.giaTri) || 0)) > 0.5))
+      out.push({ maHang: k.split('|')[0], kho: k.split('|')[1], luocKhoa: { soLuong: Number(a.soLuong) || 0, giaTri: a.giaTri }, tinhLai: { soLuong: c.soLuong, giaTri: c.giaTri } });
+  });
+  return out;
 }
 function stockRebuild(u, req, logs) {
   FRESH = true;   // tính lại: luôn đọc thẳng sheet, không tin bộ đệm
   var w = readTable('Phieu').warnings.concat(readTable('ChiTietPhieu').warnings);
   if (w.length) throw fail('VALIDATION', 'Sheet phiếu có ' + w.length + ' ô sai kiểu, sửa trước khi tính lại (vd ' + w[0] + ')', null);
+  var lock = cfg('ngayKhoaSo'), lech = lock ? lockDiff(lock) : [];
+  if (lech.length) {   // kỳ đã khoá ra số khác lúc khoá (sửa tay loại kho / dữ liệu cũ…) → không ghi gì, để kế toán quyết
+    logs.push({ action: 'stock.rebuild', doiTuong: 'TonKho', id: '*', truoc: null, sau: { chanKyKhoa: lock, lechSoDu: lech.length } });
+    return { chanKyKhoa: true, ngayKhoaSo: lock, lechSoDu: lech.slice(0, 50), ma: 0, tinhLai: 0, loiTonAm: [], lechKyKhoa: [] };
+  }
   cleanupOrphans(logs, true);
   var mas = uniq(readTable('HangHoa').rows.map(function (i) { return i.maHang; }).concat(readTable('ChiTietPhieu').rows.map(function (l) { return l.maHang; })));
   if (typeof cabExitSync === 'function') cabExitSync(readTable('HoSoTu').rows.map(function (c) { return c.key; }));   // lần xuất hiện hành của mọi tủ
@@ -395,7 +467,12 @@ function simpleUpsert(n, kf, v, req, logs, act) {
   logs.push({ action: act, doiTuong: n, id: v[kf], truoc: cur ? strip(cur) : null, sau: v });
   return mk(kf, v[kf]);
 }
-function warehouseUpsert(u, req, logs) { return simpleUpsert('Kho', 'maKho', need(QValidate.warehouse(req.warehouse)), req, logs, 'warehouse.upsert'); }
+function warehouseUpsert(u, req, logs) {
+  var v = need(QValidate.warehouse(req.warehouse)), cur = findByKey('Kho', v.maKho);
+  if (cur && cur.loai !== v.loai && readTable('Phieu').rows.some(function (h) { return h.kho === v.maKho || h.khoDen === v.maKho; }))
+    throw fail('VALIDATION', 'Kho ' + v.maKho + ' đã có phiếu — không đổi loại kho được (làm tính lại giá vốn các kỳ đã ghi). Cần kho khác loại thì thêm kho mới', { loai: 'Không đổi được' });
+  return simpleUpsert('Kho', 'maKho', v, req, logs, 'warehouse.upsert');
+}
 function customerUpsert(u, req, logs) { return simpleUpsert('KhachHang', 'maKH', need(QValidate.customer(req.customer)), req, logs, 'customer.upsert'); }
 function projectUpsert(u, req, logs) {
   var v = need(QValidate.project(req.project));

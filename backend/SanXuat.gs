@@ -26,6 +26,7 @@ function prevRow(n, req) { var id = String(req.requestId); return readTable(n).r
 /** Ghi nhiều dòng đã có của 1 sheet trong 1 lần setValues (khối từ dòng nhỏ nhất đến lớn nhất; dòng khác giữ nguyên). */
 function putMany(n, objs) {
   if (!objs.length) return; if (objs.length === 1) return putRow(n, strip(objs[0]), objs[0]._row);
+  guardTable(n);
   var cur = readTable(n).rows, byRow = {}; cur.forEach(function (r) { byRow[r._row] = r; }); objs.forEach(function (o) { byRow[o._row] = o; });
   var lo = Math.min.apply(null, objs.map(function (o) { return o._row; })), hi = Math.max.apply(null, objs.map(function (o) { return o._row; })), vals = [], cols = QSchema.SHEETS[n].cols;
   for (var r = lo; r <= hi; r++) vals.push(byRow[r] ? QSchema.toRow(n, strip(byRow[r])) : cols.map(function () { return ''; }));
@@ -41,6 +42,8 @@ function lsxVouchers(so) {
 function lsxMas(so) { var m = {}; lsxVouchers(so).forEach(function (h) { h.lines.forEach(function (l) { m[l.maHang] = 1; }); }); return Object.keys(m); }
 /** Hồ sơ tủ hợp lệ = phiếu nhập TP của nó đã HOÀN TẤT và chưa đảo (chặn "tủ ma" của phiếu ghi dở). */
 function cabHeads() { var m = {}; readTable('Phieu').rows.forEach(function (h) { if (h.loai === 'NHAP_TP' && h.trangThai === 'HOAN_TAT' && !h.daDao) m[h.soPhieu] = 1; }); return m; }
+/** PXX còn hiệu lực theo số. Hồ sơ tủ chỉ coi là "đã có PXX" khi số đó có dòng PXX PHAT_HANH (lệnh phát hành chết giữa chừng để lại số treo → bỏ qua). */
+function livePxx() { var m = {}; readTable('PhieuXuatXuong').rows.forEach(function (p) { if (p.trangThai === 'PHAT_HANH') m[p.soPXX] = p; }); return m; }
 function cabOK(c, heads) { return c && c.trangThai !== 'HUY' && !!heads[c.soPhieuNhap]; }
 /** Trạng thái lệnh: MOI → DANG_LAP → CHO_KIEM_TRA (đủ tủ) → HOAN_TAT (đủ tủ, tất cả đạt KCS). HUY giữ nguyên. Chỉ đọc đầu phiếu. */
 function lsxRefresh(so) {
@@ -97,6 +100,7 @@ function recalcApply(x) { var n = applyChanges(x.changes, x.all.rowOf, x.all.mas
 
 // ---------- mẫu tủ ----------
 function templateUpsert(u, req, logs) {
+  var pv = prevRow('MauSanPham', req)[0]; if (pv) return { maMau: pv.maMau, phienBan: pv.phienBan, lapLai: true };
   var v = need(QSX.validateTemplate(req.template)), items = mapBy(readTable('HangHoa').rows, 'maHang'), tp = items[v.maHang], e = {};
   if (!tp) throw fail('VALIDATION', 'Không có mã thành phẩm ' + v.maHang, { maHang: 'Tạo mã hàng tủ trước' });
   if (!tp.quanLySerial) throw fail('VALIDATION', 'Mã thành phẩm ' + v.maHang + ' phải bật "Quản lý serial" (mỗi tủ 1 số xê-ri)', { maHang: 'Bật quản lý serial' });
@@ -107,7 +111,7 @@ function templateUpsert(u, req, logs) {
   if (Object.keys(e).length) throw fail('VALIDATION', firstErr(e), e);
   var ver = readTable('MauSanPham').rows.reduce(function (m, t) { return t.maMau === v.maMau ? Math.max(m, Number(t.phienBan) || 0) : m; }, 0) + 1;
   var row = { id: v.maMau + '|' + ver, maMau: v.maMau, phienBan: ver, maHang: v.maHang, ten: v.ten, kichThuoc: v.kichThuoc, moTa: v.moTa, vatLieu: v.vatLieu, ketCau: v.ketCau, filePLC: v.filePLC, thongSoDien: v.thongSoDien, ghiChuDM: v.ghiChuDM, thangBH: v.thangBH,
-    bom: JSON.stringify(v.bom), kcs: JSON.stringify(v.kcs), trangThai: 'HOAT_DONG', nguoiTao: u.email, thoiGian: nowIso() };
+    bom: JSON.stringify(v.bom), kcs: JSON.stringify(v.kcs), trangThai: 'HOAT_DONG', nguoiTao: u.email, thoiGian: nowIso(), requestId: String(req.requestId) };
   appendBlock('MauSanPham', [row]);
   logs.push({ action: 'template.upsert', doiTuong: 'MauSanPham', id: row.id, truoc: null, sau: { maHang: v.maHang, bom: v.bom.length, kcs: v.kcs.length } });
   return { maMau: v.maMau, phienBan: ver };
@@ -115,6 +119,7 @@ function templateUpsert(u, req, logs) {
 
 // ---------- lệnh sản xuất ----------
 function lsxCreate(u, req, logs) {
+  var pv = prevRow('LenhSX', req)[0]; if (pv) return { soLSX: pv.soLSX, lapLai: true };
   var x = req.lsx || {}, t = template(up(x.maMau)), n = x.soLuong;
   if (!t) throw fail('VALIDATION', 'Không có mẫu tủ ' + x.maMau, { maMau: 'Chọn mẫu có sẵn' });
   if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > 500) throw fail('VALIDATION', 'Số tủ từ 1 đến 500', { soLuong: '1–500' });
@@ -125,7 +130,7 @@ function lsxCreate(u, req, logs) {
   if (maCT && !readTable('CongTrinh').rows.some(function (r) { return r.maCongTrinh === maCT; })) throw fail('VALIDATION', 'Công trình ' + maCT + ' chưa có', { maCongTrinh: 'Chọn công trình có sẵn' });
   var yr = ngay.slice(0, 4), so = 'LSX-' + yr + '-' + pad(nextId('LSX:' + yr), 5);
   appendBlock('LenhSX', [{ soLSX: so, ngay: ngay, maMau: t.maMau, phienBan: t.phienBan, maHang: t.maHang, soLuong: n, maKH: maKH, maCongTrinh: maCT, canCuCheTao: txt(x.canCuCheTao, 300),
-    kho: kho.maKho, trangThai: 'MOI', ghiChu: txt(x.ghiChu, 500), nguoiTao: u.email, thoiGian: nowIso(), lyDoHuy: '' }]);
+    kho: kho.maKho, trangThai: 'MOI', ghiChu: txt(x.ghiChu, 500), nguoiTao: u.email, thoiGian: nowIso(), lyDoHuy: '', requestId: String(req.requestId) }]);
   logs.push({ action: 'lsx.create', doiTuong: 'LenhSX', id: so, truoc: null, sau: { maMau: t.maMau, phienBan: t.phienBan, soLuong: n } });
   return { soLSX: so };
 }
@@ -167,9 +172,9 @@ function cpWrite(u, req, l, c) {
   if (nq >= Number(l.soLuong) && c.ngay > last) throw fail('VALIDATION', 'Lệnh đã nhập đủ tủ ngày ' + last + ' — chi phí phải ghi đến ngày đó', { ngay: 'Không sau ' + last });
   var oldO = JSON.parse(JSON.stringify(o)); o.lsx[l.soLSX].chiPhi.push({ ngay: c.ngay, soTien: c.soTien, loai: c.loai });
   var mas = lsxMas(l.soLSX), x = mas.length ? recalcStrict(mas, o, oldO) : null;
-  var id = 'CP' + pad(nextId('CPLSX'), 6);
+  var id = 'CP' + pad(nextId('CPLSX'), 6), n = x ? recalcApply(x) : 0;   // tính lại giá thành TRƯỚC, dòng chi phí ghi CUỐI: có dòng = đã tính xong; chết giữa chừng thì gửi lại tính ra đúng như vậy
   appendBlock('ChiPhiLSX', [{ id: id, soLSX: l.soLSX, ngay: c.ngay, loai: c.loai, soTien: c.soTien, soCTGoc: c.soCTGoc, ngayCTGoc: c.ngayCTGoc, ghiChu: c.ghiChu, nguoiTao: u.email, thoiGian: nowIso(), requestId: String(req.requestId) }]);
-  return { id: id, tinhLai: x ? recalcApply(x) : 0 };
+  return { id: id, tinhLai: n };
 }
 /** Huỷ 1 dòng chi phí ghi sai (QT): ghi dòng âm cùng ngày, cùng loại; tính lại giá thành. */
 function lsxChiPhiHuy(u, req, logs) {
@@ -273,8 +278,9 @@ function lsxHuy(u, req, logs) {
   var o = stockOpts(), mas = lsxMas(l.soLSX), bal;
   if (mas.length) { var rr = QStock.replay(loadVouchers(mas).vouchers, o); bal = QSX.balance(rr.lsx[l.soLSX], o.lsx[l.soLSX], null); }
   else bal = QSX.balance(null, o.lsx[l.soLSX], null);
-  // KC_HUY luôn ghi (kể cả 0) để tự cân khi giá linh kiện của lệnh được tính lại về sau
-  appendBlock('ChiPhiLSX', [{ id: 'CP' + pad(nextId('CPLSX'), 6), soLSX: l.soLSX, ngay: ngay, loai: 'KC_HUY', soTien: -bal, soCTGoc: l.soLSX, ngayCTGoc: '', ghiChu: 'Kết chuyển chi phí khi huỷ lệnh: ' + lyDo, nguoiTao: u.email, thoiGian: nowIso(), requestId: String(req.requestId) }]);
+  // KC_HUY luôn ghi (kể cả 0) để tự cân khi giá linh kiện của lệnh được tính lại về sau; gửi lại sau khi đã ghi → không ghi lần 2
+  var kcPrev = prevRow('ChiPhiLSX', req).filter(function (c) { return c.loai === 'KC_HUY' && c.soLSX === l.soLSX; })[0];
+  if (kcPrev) bal = -Number(kcPrev.soTien); else appendBlock('ChiPhiLSX', [{ id: 'CP' + pad(nextId('CPLSX'), 6), soLSX: l.soLSX, ngay: ngay, loai: 'KC_HUY', soTien: -bal, soCTGoc: l.soLSX, ngayCTGoc: '', ghiChu: 'Kết chuyển chi phí khi huỷ lệnh: ' + lyDo, nguoiTao: u.email, thoiGian: nowIso(), requestId: String(req.requestId) }]);
   var cur = getLSX(l.soLSX), x = strip(cur); x.trangThai = 'HUY'; x.lyDoHuy = lyDo; putRow('LenhSX', x, cur._row);
   logs.push({ action: 'lsx.huy', doiTuong: 'LenhSX', id: l.soLSX, truoc: { trangThai: l.trangThai }, sau: { trangThai: 'HUY', lyDo: lyDo, nhapLai: made, ketChuyen: bal } });
   return sxMark(u, req, { phieuNhapLai: made, ketChuyen: bal });
@@ -283,12 +289,17 @@ function lsxHuy(u, req, logs) {
 // ---------- kiểm tra xuất xưởng ----------
 function kcsAdd(u, req, logs) {
   var d = sxDone(u, req); if (d) return d;
-  var pv = prevRow('KiemTraXX', req)[0]; if (pv) return sxMark(u, req, { lanKiem: pv.lanKiem, dat: pv.dat });
+  var pv = prevRow('KiemTraXX', req)[0];
+  if (pv) {   // gửi lại: dòng kiểm đã ghi → bảo đảm hồ sơ tủ đã nhận kết quả (lệnh trước có thể chết trước bước này)
+    var h0 = cabHeads(), c0 = readTable('HoSoTu').rows.filter(function (x) { return x.serial === pv.serial && cabOK(x, h0); })[0];
+    if (c0 && Number(c0.lanKiemCuoi || 0) < Number(pv.lanKiem)) { var y0 = strip(c0); y0.kcsDat = pv.dat; y0.lanKiemCuoi = pv.lanKiem; putRow('HoSoTu', y0, c0._row); lsxRefresh(c0.soLSX); }
+    return sxMark(u, req, { lanKiem: pv.lanKiem, dat: pv.dat, lapLai: true });
+  }
   var ser = QSerial.norm(req.serial), heads = cabHeads(), c = readTable('HoSoTu').rows.filter(function (x) { return x.serial === ser && cabOK(x, heads); })[0];
   if (!c) throw fail('VALIDATION', 'Không có hồ sơ tủ ' + ser, { serial: 'Xê-ri không có' });
   var sr = mapBy(readTable('Serial').rows, 'key')[c.key];
   if (!sr || sr.trangThai !== 'TRONG_KHO') throw fail('VALIDATION', 'Tủ ' + ser + ' không còn trong kho (' + (sr ? sr.trangThai : '?') + ') — không kiểm tra lại', null);
-  if (c.soPXX) throw fail('VALIDATION', 'Tủ ' + ser + ' đã có phiếu xuất xưởng ' + c.soPXX + ' — huỷ PXX trước khi kiểm lại', null);
+  if (c.soPXX && livePxx()[c.soPXX]) throw fail('VALIDATION', 'Tủ ' + ser + ' đã có phiếu xuất xưởng ' + c.soPXX + ' — huỷ PXX trước khi kiểm lại', null);
   var ngay = chkDate(String(req.ngay || today())), t = template(c.maMau, c.phienBan), items = t ? t.kcsL : [];
   if (!items.length) throw fail('VALIDATION', 'Mẫu tủ ' + c.maMau + ' bản ' + c.phienBan + ' không có mục kiểm tra', null);
   var res = Array.isArray(req.ketQua) ? req.ketQua.slice(0, 201).map(function (r) { return { ketQua: up(r && r.ketQua), ghiChu: txt(r && r.ghiChu, 300) }; }) : [];
@@ -307,15 +318,20 @@ function kcsAdd(u, req, logs) {
 // ---------- phiếu xuất xưởng ----------
 function pxxIssue(u, req, logs) {
   var d = sxDone(u, req); if (d) return d;
-  var pv = prevRow('PhieuXuatXuong', req)[0]; if (pv) return sxMark(u, req, { soPXX: pv.soPXX, lapLai: true });
+  var pv = prevRow('PhieuXuatXuong', req)[0];
+  if (pv) {   // gửi lại: dòng PXX đã ghi → gắn lại tủ (làm lại an toàn)
+    if (pv.trangThai === 'PHAT_HANH') { var want = {}; parseSerials(pv.serials).forEach(function (z) { want[z] = 1; }); var h0 = cabHeads();
+      putMany('HoSoTu', readTable('HoSoTu').rows.filter(function (c) { return want[c.serial] && cabOK(c, h0) && c.soPXX !== pv.soPXX; }).map(function (c) { c.soPXX = pv.soPXX; return c; })); }
+    return sxMark(u, req, { soPXX: pv.soPXX, lapLai: true });
+  }
   var x = req.pxx || {}, ngay = chkDate(String(x.ngay || today()));
   if (!Array.isArray(x.serials) || !x.serials.length || x.serials.length > 50 || x.serials.some(function (s) { return typeof s !== 'string'; })) throw fail('VALIDATION', 'Chọn 1–50 tủ', { serials: '1–50 tủ' });
   var heads = cabHeads(), sers = uniq(x.serials.map(QSerial.norm)), hs = mapBy(readTable('HoSoTu').rows.filter(function (c) { return cabOK(c, heads); }), 'serial'), mau = null;
-  var inPxx = {}; readTable('PhieuXuatXuong').rows.forEach(function (p) { if (p.trangThai === 'PHAT_HANH') parseSerials(p.serials).forEach(function (s) { inPxx[s] = p.soPXX; }); });
+  var inPxx = {}, lp = livePxx(); readTable('PhieuXuatXuong').rows.forEach(function (p) { if (p.trangThai === 'PHAT_HANH') parseSerials(p.serials).forEach(function (s) { inPxx[s] = p.soPXX; }); });
   sers.forEach(function (s) { var c = hs[s];
     if (!c) throw fail('VALIDATION', 'Không có hồ sơ tủ ' + s, { serials: s });
     if (!c.kcsDat) throw fail('VALIDATION', 'Tủ ' + s + ' chưa đạt kiểm tra xuất xưởng (KCS)', { serials: s });
-    if (c.soPXX || inPxx[s]) throw fail('VALIDATION', 'Tủ ' + s + ' đã thuộc phiếu xuất xưởng ' + (c.soPXX || inPxx[s]), { serials: s });
+    if (inPxx[s] || (c.soPXX && lp[c.soPXX])) throw fail('VALIDATION', 'Tủ ' + s + ' đã thuộc phiếu xuất xưởng ' + (inPxx[s] || c.soPXX), { serials: s });
     if (mau && mau !== c.maMau) throw fail('VALIDATION', 'Một phiếu xuất xưởng gồm các tủ cùng mẫu', { serials: s }); mau = c.maMau; });
   var maKH = up(x.maKH), maCT = up(x.maCongTrinh);
   if (maKH && !readTable('KhachHang').rows.some(function (r) { return r.maKH === maKH; })) throw fail('VALIDATION', 'Khách hàng ' + maKH + ' chưa có', { maKH: 'Chọn khách có sẵn' });
@@ -334,6 +350,10 @@ function pxxCancel(u, req, logs) {
   var so = txt(req.soPXX, 40), lyDo = txt(req.lyDo, 300);
   if (!lyDo) throw fail('VALIDATION', 'Nhập lý do huỷ phiếu xuất xưởng', { lyDo: 'Bắt buộc' });
   var p = readTable('PhieuXuatXuong').rows.filter(function (r) { return r.soPXX === so; })[0];
+  if (p && p.trangThai === 'HUY') {   // đã huỷ (gửi lại sau khi chết giữa chừng): gỡ nốt tủ còn trỏ số này
+    putMany('HoSoTu', readTable('HoSoTu').rows.filter(function (c) { return c.soPXX === so; }).map(function (c) { c.soPXX = ''; return c; }));
+    return { soPXX: so, lapLai: true };
+  }
   if (!p || p.trangThai !== 'PHAT_HANH') throw fail('VALIDATION', 'Không có phiếu xuất xưởng còn hiệu lực ' + so, null);
   var y = strip(p); y.trangThai = 'HUY'; y.lyDoHuy = lyDo; putRow('PhieuXuatXuong', y, p._row);
   putMany('HoSoTu', readTable('HoSoTu').rows.filter(function (c) { return c.soPXX === so; }).map(function (c) { c.soPXX = ''; return c; }));
@@ -354,7 +374,7 @@ function sxGet(u, req) {
   var so = up(req.soLSX), l = readTable('LenhSX').rows.filter(function (x) { return x.soLSX === so; })[0];
   if (!l) return { ok: false, code: 'NOT_FOUND', error: 'Không có lệnh ' + so };
   var admin = u.vaiTro === 'QUAN_TRI', t = template(l.maMau, l.phienBan), vs = lsxVouchers(so), heads = cabHeads(), names = userNames();
-  var tus = readTable('HoSoTu').rows.filter(function (c) { return c.soLSX === so && (c.trangThai === 'HUY' || heads[c.soPhieuNhap]); }).map(strip), cost = admin ? cabinetCosts(so) : {};
+  var lp = livePxx(), tus = readTable('HoSoTu').rows.filter(function (c) { return c.soLSX === so && (c.trangThai === 'HUY' || heads[c.soPhieuNhap]); }).map(function (c) { var x = strip(c); if (x.soPXX && !lp[x.soPXX]) x.soPXX = ''; return x; }), cost = admin ? cabinetCosts(so) : {};
   if (admin) tus.forEach(function (c) { if (c.trangThai !== 'HUY') c.giaThanh = cost[c.serial]; });
   var ss = {}; tus.forEach(function (c) { ss[c.serial] = 1; });
   var out = { lsx: strip(l), template: t ? { maMau: t.maMau, phienBan: t.phienBan, maHang: t.maHang, ten: t.ten, kichThuoc: t.kichThuoc, moTa: t.moTa, vatLieu: t.vatLieu, ketCau: t.ketCau, filePLC: t.filePLC, thongSoDien: t.thongSoDien, ghiChuDM: t.ghiChuDM, thangBH: t.thangBH, bom: t.bomL, kcs: t.kcsL } : null,
@@ -377,7 +397,7 @@ function serialGet(u, req) {
   var out = { serial: sr ? strip(sr) : null, item: { maHang: it.maHang, ten: it.ten, dvt: it.dvt, hang: it.hang, thangBH: it.thangBH }, cha: cha ? strip(cha) : null };
   if (hs) {
     var names = userNames();
-    out.hoSo = strip(hs);
+    out.hoSo = strip(hs); if (hs.soPXX && !livePxx()[hs.soPXX]) out.hoSo.soPXX = '';
     out.con = parseSerials(hs.serialCon).map(function (k) { var c = sk[k]; return c ? strip(c) : { key: k, serial: k.split('|')[1], trangThai: '?' }; });
     out.kcs = readTable('KiemTraXX').rows.filter(function (k) { return k.serial === q; }).map(function (k) { return kcsOut(k, names); }).sort(function (a, b) { return a.lanKiem - b.lanKiem; });
     var p = hs.soPXX && readTable('PhieuXuatXuong').rows.filter(function (r) { return r.soPXX === hs.soPXX; })[0]; out.pxx = p ? strip(p) : null; if (out.pxx) delete out.pxx.requestId;

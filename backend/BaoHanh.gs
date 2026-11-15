@@ -107,12 +107,16 @@ function bhCreate(u, req, logs) {
   logs.push({ action: 'bh.create', doiTuong: 'PhieuBaoHanh', id: so, truoc: null, sau: { serial: r.q, serialTu: b.serialTu, tinhTrangBH: tt } });
   return sxMark(u, req, { soPBH: so, serialTu: b.serialTu, tinhTrangBH: tt, hanBH: cur ? cur.hanBH : '' });
 }
+/** Lệnh cùng requestId đã ghi nhật ký (đã chạy xong phần ghi). */
+function prevLog(req) { var id = String(req.requestId); return readTail('NhatKy', 300).rows.some(function (l) { return l.requestId === id; }); }
 function bhTicket(so) {
   var t = readTable('PhieuBaoHanh').rows.filter(function (x) { return x.soPBH === String(so || '').trim().toUpperCase(); })[0];
   if (!t) throw fail('VALIDATION', 'Không có phiếu bảo hành ' + so, null); return t;
 }
 function bhUpdate(u, req, logs) {
-  var t = bhTicket(req.soPBH), v = need(QBH.validateUpdate({ trangThai: req.trangThai, ketQua: req.ketQua, nguyenNhan: req.nguyenNhan || t.nguyenNhan }, t.trangThai)), x = strip(t);
+  var t = bhTicket(req.soPBH);
+  if (t.trangThai === up(req.trangThai) && String(t.nguoiXuLy).toLowerCase() === u.email && prevLog(req)) return { soPBH: t.soPBH, trangThai: t.trangThai, lapLai: true };   // gửi lại sau khi đã ghi
+  var v = need(QBH.validateUpdate({ trangThai: req.trangThai, ketQua: req.ketQua, nguyenNhan: req.nguyenNhan || t.nguyenNhan }, t.trangThai)), x = strip(t);
   if (v.trangThai === 'TU_CHOI' && t.soPhieuXuat) throw fail('VALIDATION', 'Phiếu đã xuất linh kiện (' + t.soPhieuXuat + ') — không từ chối được; đóng Hoàn thành và ghi nguyên nhân', { trangThai: 'Đã thay linh kiện' });
   x.trangThai = v.trangThai; if (v.nguyenNhan) x.nguyenNhan = v.nguyenNhan; if (v.ketQua) x.ketQua = v.ketQua; x.nguoiXuLy = u.email;
   if (v.trangThai === 'HOAN_THANH' || v.trangThai === 'TU_CHOI') x.ngayDong = today();

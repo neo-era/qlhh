@@ -137,7 +137,7 @@ test('phiếu mồ côi NHAP_DO (máy chủ chết giữa chừng) → lệnh gh
   V(nhap('2026-10-01', [{ maHang: 'LOGO', soLuongCT: 1, gia: 100, serials: ['S1'] }]));
   const so = V(nhap('2026-10-02', [{ maHang: 'LOGO', soLuongCT: 1, gia: 300, serials: ['S2'] }])).data.soPhieu;
   const row = a.sheets.Phieu.d.findIndex(r => r[0] === so); a.sheets.Phieu.d[row][11] = 'NHAP_DO';   // giả lập chết trước khi đổi HOAN_TAT
-  a.cache['pending:' + so] = '1'; a.cache.pendingList = JSON.stringify([so]);   // dấu "đang ghi" còn lại khi máy chủ chết
+  a.raw['pend:' + so] = '{}';   // dấu "đang ghi" (bền, ScriptProperties) còn lại khi máy chủ chết
   assert.equal(V(nhap('2026-10-03', [{ maHang: 'CB40', soLuongCT: 1, gia: 1 }])).ok, true);
   assert.equal(a.sheets.Phieu.d[row][11], 'LOI_GHI');
   const d = pull(a, s);
@@ -315,7 +315,8 @@ test('khoá sổ đọc nhanh nhưng đổi là có hiệu lực ngay', () => {
   V(nhap('2026-10-01', [{ maHang: 'CB40', soLuongCT: 5, gia: 1 }]));
   assert.equal(a.post({ action: 'period.lock', session: s, requestId: rid(), ngay: '2026-10-05' }).ok, true);
   assert.equal(V(nhap('2026-10-05', [{ maHang: 'CB40', soLuongCT: 1, gia: 1 }])).code, 'PERIOD_LOCKED');
-  assert.equal(a.post({ action: 'period.lock', session: s, requestId: rid(), ngay: '' }).ok, true);
+  assert.equal(a.post({ action: 'period.lock', session: s, requestId: rid(), ngay: '' }).ok, false, 'mở khoá phải ghi lý do');
+  assert.equal(a.post({ action: 'period.lock', session: s, requestId: rid(), ngay: '', lyDo: 'Bổ sung phiếu nhập 05/10' }).ok, true);
   assert.equal(V(nhap('2026-10-05', [{ maHang: 'CB40', soLuongCT: 1, gia: 1 }])).ok, true);
 });
 test('bộ đệm luôn trùng nội dung sheet thật sau chuỗi thao tác hỗn hợp (ghi thẳng TonKho/HangHoa đúng kiểu)', () => {

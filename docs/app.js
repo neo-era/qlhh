@@ -50,7 +50,7 @@
 
   // ---------------- giao tiếp máy chủ ----------------
   const rid = () => 'r' + Date.now().toString(36) + Array.from(crypto.getRandomValues(new Uint8Array(8)), b => b.toString(16).padStart(2, '0')).join('');
-  const RETRY = ['LOCK_TIMEOUT', 'INTERNAL', 'NOT_JSON', 'NETWORK'];
+  const RETRY = ['LOCK_TIMEOUT', 'INTERNAL', 'NOT_JSON', 'NETWORK', 'STALE'];
   async function call(action, body = {}, tries = 1) {
     if (!S.co || !S.co.url) return { ok: false, code: 'CONFIG', error: 'Công ty chưa cấu hình máy chủ' };
     let wait = 1000, last;
@@ -349,7 +349,7 @@
 
   // ======================= ĐỢT ②: KHO =======================
   const LOAI = Object.fromEntries(Object.entries(QStock.TYPES).map(([k, t]) => [k, t.ten]));
-  const TAO_DUOC = ['NHAP_MUA', 'XUAT_BAN', 'XUAT_CONG_TRINH', 'CHUYEN_KHO', 'KIEM_KE', 'KHACH_TRA', 'TRA_NCC', 'XUAT_BH', 'NHAP_HANG_LOI', 'TON_DAU'];
+  const TAO_DUOC = ['NHAP_MUA', 'XUAT_BAN', 'XUAT_CONG_TRINH', 'CHUYEN_KHO', 'KIEM_KE', 'KHACH_TRA', 'TRA_NCC', 'NHAP_HANG_LOI', 'TON_DAU'];   // xuất bảo hành: lập từ phiếu bảo hành
   const NHOM_PHIEU = { nhap: ['TON_DAU', 'NHAP_MUA', 'KHACH_TRA', 'NHAP_TP', 'NHAP_LAI_SX', 'NHAP_HANG_LOI'], xuat: ['XUAT_BAN', 'XUAT_CONG_TRINH', 'XUAT_BH', 'XUAT_SX', 'TRA_NCC'], khac: ['CHUYEN_KHO', 'KIEM_KE'], dao: ['DAO'] };
   const num = n => n === '' || n === null || n === undefined ? '—' : Number(n).toLocaleString('vi-VN', { maximumFractionDigits: 3 });
   const itemOf = ma => S.data.items.find(i => i.maHang === ma) || { maHang: ma, ten: ma, dvt: '' };
@@ -619,8 +619,12 @@
       <div class="acts" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"><button class="btn" type="button" id="wAdd">${ic('plus')} Thêm kho</button><button class="btn" type="button" id="lockB">Khoá sổ${d.config && d.config.ngayKhoaSo ? ' (đang: ' + esc(d.config.ngayKhoaSo) + ')' : ''}</button><button class="btn" type="button" id="rbB">Tính lại tồn & giá vốn</button><button class="btn" type="button" id="nxtB">Báo cáo N-X-T</button></div>`, null, dlg => {
       $$('[data-w]', dlg).forEach(r => r.onclick = () => { dlg.close(); warehouseForm(d.warehouses.find(w => w.maKho === r.dataset.w)); });
       $('#wAdd', dlg).onclick = () => { dlg.close(); warehouseForm(); };
-      $('#lockB', dlg).onclick = () => { dlg.close(); dialog('Khoá sổ', `<p>Không lập, đảo phiếu có ngày đến hết ngày khoá; giá vốn kỳ đã khoá không bị tính lại. Để trống = mở khoá.</p>${fld('ngay', 'Khoá sổ đến hết ngày', (d.config || {}).ngayKhoaSo || '', { type: 'date' })}`, async (v, x) => submit(x, 'period.lock', { ngay: v.ngay }, v.ngay ? 'Đã khoá sổ đến ' + v.ngay : 'Đã mở khoá sổ'), null, 'Lưu'); };
-      $('#rbB', dlg).onclick = async e => { const b = e.currentTarget; b.classList.add('busy'); const r = await write('stock.rebuild', {}); b.classList.remove('busy'); if (!r.ok) return toast('Lỗi: ' + (r.error || r.code)); toast(`Đã tính lại ${r.data.ma} mã · sửa ${r.data.tinhLai} dòng${r.data.loiTonAm.length ? ' · ⚠ ' + r.data.loiTonAm.length + ' chỗ tồn âm' : ''}`); sync(); };
+      $('#lockB', dlg).onclick = () => { dlg.close(); const cur = (d.config || {}).ngayKhoaSo || '';
+        dialog('Khoá sổ', `<p>Không lập, đảo phiếu có ngày đến hết ngày khoá; giá vốn kỳ đã khoá không bị tính lại. Khi khoá, hệ thống lưu số dư chốt của từng mã hàng.</p>${cur ? `<p class="mut">Đang khoá đến hết ngày <b>${esc(vnD(cur))}</b>. Lùi ngày hoặc để trống (mở khoá) phải ghi lý do.</p>` : ''}${fld('ngay', 'Khoá sổ đến hết ngày', cur, { type: 'date' })}${fld('lyDo', 'Lý do (khi lùi ngày / mở khoá)', '')}`,
+          async (v, x) => submit(x, 'period.lock', { ngay: v.ngay, lyDo: v.lyDo }, v.ngay ? 'Đã khoá sổ đến ' + vnD(v.ngay) : 'Đã mở khoá sổ'), null, 'Lưu'); };
+      $('#rbB', dlg).onclick = async e => { const b = e.currentTarget; b.classList.add('busy'); const r = await write('stock.rebuild', {}); b.classList.remove('busy'); if (!r.ok) return toast('Lỗi: ' + (r.error || r.code));
+        if (r.data.chanKyKhoa) { const l = r.data.lechSoDu; return dialog('Chưa tính lại', `<p>Kỳ đã khoá sổ đến <b>${esc(vnD(r.data.ngayKhoaSo))}</b> tính lại ra <b>${l.length}</b> số dư khác lúc khoá (thường do sửa tay trên Google Sheet). Hệ thống không ghi gì.</p><div class="tbl"><table><tr><th>Mã</th><th>Kho</th><th>Lúc khoá</th><th>Tính lại</th></tr>${l.map(z => `<tr><td>${esc(z.maHang)}</td><td>${esc(z.kho === '*' ? 'Tổng' : z.kho)}</td><td>${esc(String(z.luocKhoa.soLuong))}${z.kho === '*' ? ' · ' + esc(money(z.luocKhoa.giaTri)) : ''}</td><td>${esc(String(z.tinhLai.soLuong))}${z.kho === '*' ? ' · ' + esc(money(z.tinhLai.giaTri)) : ''}</td></tr>`).join('')}</table></div><p class="mut">Kiểm tra lại sheet; nếu số mới đúng thì mở khoá sổ (ghi lý do), tính lại, rồi khoá lại.</p>`, null, null, 'Đóng'); }
+        toast(`Đã tính lại ${r.data.ma} mã · sửa ${r.data.tinhLai} dòng${r.data.loiTonAm.length ? ' · ⚠ ' + r.data.loiTonAm.length + ' chỗ tồn âm' : ''}${r.data.lechKyKhoa.length ? ' · ⚠ ' + r.data.lechKyKhoa.length + ' dòng kỳ đã khoá khác' : ''}`); sync(); };
       $('#nxtB', dlg).onclick = () => { dlg.close(); location.hash = '#/baocao'; };
     });
   }

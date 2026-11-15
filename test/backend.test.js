@@ -1,6 +1,6 @@
 // Test máy chủ v0.1 (Code.gs thật + lõi) trên Sheet giả lập. Viết TRƯỚC khi code backend.
 const test = require('node:test'), assert = require('node:assert');
-const { env, google, ready, rid } = require('./gas-mock.js');
+const { env, google, ready, rid, jwt } = require('./gas-mock.js');
 const ADMIN = 'maivulam2020@gmail.com', NV = 'nv@gmail.com', XEM = 'xem@gmail.com';
 const item = (o = {}) => ({ maHang: 'DL-STR-100', ten: 'Đèn LED đường phố 100W', dvt: 'bộ', nhom: '', giaBan: 3850000, thangBH: 24, ...o });
 
@@ -28,7 +28,7 @@ test('đăng nhập: nonce máy chủ, phiên HMAC, phiên giả bị từ chố
 });
 test('gửi lại cùng token trong 2 phút → cùng phiên', () => {
   const a = ready(); a.st.nonce = a.post({ action: 'auth.nonce' }).data.nonce;
-  const r1 = a.post({ action: 'auth.login', idToken: 'T1' }), r2 = a.post({ action: 'auth.login', idToken: 'T1' });
+  const T1 = jwt(a.st.nonce), r1 = a.post({ action: 'auth.login', idToken: T1 }), r2 = a.post({ action: 'auth.login', idToken: T1 });
   assert.equal(r2.data.session, r1.data.session);
 });
 

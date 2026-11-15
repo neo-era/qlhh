@@ -38,7 +38,7 @@ function env(tokeninfo, ownerEmail = 'MaiVuLam2020@gmail.com', shared) {
   const G = {
     SpreadsheetApp: { getActive: () => ({ getSheetByName: n => sheets[n] || null, insertSheet: mk }), flush() {} },
     Session: { getEffectiveUser: () => ({ getEmail: () => ownerEmail }) },
-    PropertiesService: { getScriptProperties: () => ({ getProperty: k => (k in props ? props[k] : null), setProperty: (k, v) => props[k] = String(v), getProperties: () => ({ ...props }), setProperties: o => { for (const k in o) props[k] = String(o[k]); } }) },
+    PropertiesService: { getScriptProperties: () => ({ getProperty: k => (k in props ? props[k] : null), setProperty: (k, v) => props[k] = String(v), getProperties: () => ({ ...props }), setProperties: o => { for (const k in o) props[k] = String(o[k]); }, deleteProperty: k => { delete props[k]; } }) },
     Utilities: {
       getUuid: () => crypto.randomUUID(), sleep() {}, Charset: { UTF_8: 'utf8' }, DigestAlgorithm: { SHA_256: 'sha256' },
       computeDigest: (a, s) => [...crypto.createHash('sha256').update(s).digest()],
@@ -71,10 +71,12 @@ function ready(users = {}) {
   const st = { email: 'maivulam2020@gmail.com', nonce: '' };
   const a = env(google(st)); a.setup(); a.raw.CLIENT_ID = 'CID';
   for (const [email, role] of Object.entries(users)) a.sheets.NguoiDung.appendRow([email, '', role, 'HOAT_DONG', '']);
-  a.login = (email = 'maivulam2020@gmail.com') => { st.email = email; st.nonce = a.post({ action: 'auth.nonce' }).data.nonce; const r = a.post({ action: 'auth.login', idToken: 'tok-' + Math.random() }); return r.ok ? r.data.session : r; };
+  a.login = (email = 'maivulam2020@gmail.com') => { st.email = email; st.nonce = a.post({ action: 'auth.nonce' }).data.nonce; const r = a.post({ action: 'auth.login', idToken: jwt(st.nonce) }); return r.ok ? r.data.session : r; };
   a.st = st;
   a.twin = () => { const b = env(google(st), undefined, { sheets: a.sheets, props: a.raw, cache: a.cache, reads: a.reads }); b.post = o => JSON.parse(b.doPost({ postData: { contents: JSON.stringify(o) } }).t); return b; };
   return a;
 }
+// idToken giả dạng JWT (phần thân chứa nonce) — máy chủ đọc nonce trước khi gọi Google
+const jwt = (nonce) => 'h.' + Buffer.from(JSON.stringify({ nonce, r: Math.random() })).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') + '.s';
 let n = 0; const rid = () => 'req-' + (++n).toString().padStart(8, '0') + '-' + Math.random().toString(36).slice(2, 6);
-module.exports = { env, google, ready, rid, BACKEND_FILES };
+module.exports = { env, google, ready, rid, jwt, BACKEND_FILES };

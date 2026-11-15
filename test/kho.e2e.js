@@ -1,6 +1,6 @@
 // E2E giao diện đợt ② — kho (Playwright + máy chủ giả lập Code.gs + Kho.gs thật). Chạy: node test/kho.e2e.js
 const { chromium } = require('playwright'), http = require('http'), fs = require('fs'), path = require('path');
-const { ready, rid } = require('./gas-mock.js');
+const { ready, rid, jwt } = require('./gas-mock.js');
 const DOCS = path.join(__dirname, '..', 'docs'), SHOTS = process.env.SHOTS || '/tmp/qlhh-shots'; fs.mkdirSync(SHOTS, { recursive: true });
 const api = ready({ 'nv@gmail.com': 'NHAP_LIEU' });
 const srv = http.createServer((q, r) => {
@@ -25,7 +25,7 @@ async function page(b, vp, email = 'maivulam2020@gmail.com', scheme = 'light') {
     if (drop > 0 && JSON.parse(rt.request().postData()).action === 'voucher.create') { drop--; return rt.abort(); }   // nhưng phản hồi bị mất
     await rt.fulfill({ contentType: 'application/json', body });
   });
-  await p.route('https://accounts.google.com/**', async rt => { const u = new URL(rt.request().url()); api.st.email = email; api.st.nonce = u.searchParams.get('nonce'); await rt.fulfill({ status: 302, headers: { location: BASE + '#id_token=tok-' + Math.random() + '&state=LAVIPCO' } }); });
+  await p.route('https://accounts.google.com/**', async rt => { const u = new URL(rt.request().url()); api.st.email = email; api.st.nonce = u.searchParams.get('nonce'); await rt.fulfill({ status: 302, headers: { location: BASE + '#id_token=' + jwt(api.st.nonce) + '&state=LAVIPCO' } }); });
   await p.goto(BASE); await p.waitForSelector('#loginBtn'); await p.click('#loginBtn');
   await p.waitForFunction(() => window.QLHH_DEBUG && window.QLHH_DEBUG.data, null, { timeout: 10000 });
   return p;

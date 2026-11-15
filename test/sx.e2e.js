@@ -1,6 +1,6 @@
 // E2E giao diện sản xuất tủ (SX-1): Playwright + máy chủ giả lập (Code.gs + Kho.gs + SanXuat.gs thật). Chạy: node test/sx.e2e.js
 const { chromium } = require('playwright'), http = require('http'), fs = require('fs'), path = require('path');
-const { ready, rid } = require('./gas-mock.js');
+const { ready, rid, jwt } = require('./gas-mock.js');
 const DOCS = path.join(__dirname, '..', 'docs'), SHOTS = process.env.SHOTS || '/tmp/qlhh-shots'; fs.mkdirSync(SHOTS, { recursive: true });
 const api = ready({ 'nv@gmail.com': 'NHAP_LIEU' });
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.svg': 'image/svg+xml' };
@@ -33,7 +33,7 @@ async function page(b, vp, email = 'maivulam2020@gmail.com', scheme = 'light') {
   p.on('console', m => { if (m.type() === 'error') console.log('console: ' + m.text()); });
   await p.addInitScript(() => { window.print = () => { window.__printed = (window.__printed || 0) + 1; window.__printHTML = (document.getElementById('printArea') || {}).innerHTML; }; });
   await p.route('https://script.google.com/**', async rt => rt.fulfill({ contentType: 'application/json', body: api.doPost({ postData: { contents: rt.request().postData() } }).t }));
-  await p.route('https://accounts.google.com/**', async rt => { const u = new URL(rt.request().url()); api.st.email = email; api.st.nonce = u.searchParams.get('nonce'); await rt.fulfill({ status: 302, headers: { location: BASE + '#id_token=tok-' + Math.random() + '&state=LAVIPCO' } }); });
+  await p.route('https://accounts.google.com/**', async rt => { const u = new URL(rt.request().url()); api.st.email = email; api.st.nonce = u.searchParams.get('nonce'); await rt.fulfill({ status: 302, headers: { location: BASE + '#id_token=' + jwt(api.st.nonce) + '&state=LAVIPCO' } }); });
   await p.goto(BASE); await p.waitForSelector('#loginBtn'); await p.click('#loginBtn');
   await p.waitForFunction(() => window.QLHH_DEBUG && window.QLHH_DEBUG.data, null, { timeout: 10000 });
   return p;

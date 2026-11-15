@@ -1,6 +1,6 @@
 // E2E giao diện QLHH (Playwright) + máy chủ giả lập (Code.gs thật). Chạy: node test/app.e2e.js
 const { chromium } = require('playwright'), http = require('http'), fs = require('fs'), path = require('path');
-const { ready } = require('./gas-mock.js');
+const { ready, jwt } = require('./gas-mock.js');
 const DOCS = path.join(__dirname, '..', 'docs'), SHOTS = process.env.SHOTS || '/tmp/qlhh-shots'; fs.mkdirSync(SHOTS, { recursive: true });
 const api = ready({ 'nv@gmail.com': 'NHAP_LIEU', 'xem@gmail.com': 'XEM' });
 const srv = http.createServer((q, r) => {
@@ -18,7 +18,7 @@ async function page(b, vp, email = 'maivulam2020@gmail.com', scheme = 'light') {
   await p.route('https://accounts.google.com/**', async rt => {
     const u = new URL(rt.request().url()); api.st.email = email; api.st.nonce = u.searchParams.get('nonce');
     if (u.searchParams.get('redirect_uri') !== BASE || u.searchParams.get('response_type') !== 'id_token' || u.searchParams.get('state') !== 'LAVIPCO') fails.push('tham số Google sai');
-    await rt.fulfill({ status: 302, headers: { location: BASE + '#id_token=tok-' + Math.random() + '&state=LAVIPCO' } });
+    await rt.fulfill({ status: 302, headers: { location: BASE + '#id_token=' + jwt(api.st.nonce) + '&state=LAVIPCO' } });
   });
   await p.goto(BASE); await p.waitForSelector('#loginBtn');
   return p;

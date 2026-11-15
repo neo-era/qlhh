@@ -1,7 +1,7 @@
 /** QLHH — máy chủ Apps Script v0.2 (đợt ①: danh mục, giá, NCC, người dùng, góp ý · đợt ②: kho — xem backend/Kho.gs).
  *  Dán chung 1 file với lõi: core/auth.js, idem.js, schema.js, validate.js, perm.js, price.js, stock.js, serial.js (do build.sh ghép).
  *  Thiết kế: QLHH-thiet-ke.md. */
-var VER = '0.4.0';
+var VER = '0.4.1';
 var SESSION_TTL = 10 * 3600;
 
 // ======================= CÀI ĐẶT =======================
@@ -17,6 +17,7 @@ function setup() {
       if (h.length < d.cols.length && d.cols.slice(0, h.length).every(function (c, i) { return h[i] === c; })) s.getRange(1, h.length + 1, 1, d.cols.length - h.length).setValues([d.cols.slice(h.length)]);
     }
     s.setFrozenRows(1);
+    if (typeof s.getProtections === 'function' && !s.getProtections(SpreadsheetApp.ProtectionType.SHEET).length) s.protect().setDescription('QLHH — dữ liệu do app ghi; sửa tay có thể làm sai số liệu').setWarningOnly(true);   // sửa tay → Sheets hỏi lại
     d.cols.forEach(function (c, i) { if ((d.num || []).indexOf(c) < 0) { var L = String.fromCharCode(65 + i); s.getRange(L + ':' + L).setNumberFormat('@'); } });   // mọi cột chữ dạng văn bản: không tự đổi kiểu, không chạy công thức
   });
   var nd = ss.getSheetByName('NguoiDung');
@@ -43,7 +44,7 @@ function doPost(e) {
   var t0 = Date.now();
   try {
     var req = JSON.parse((e && e.postData && e.postData.contents) || '{}');
-    KCLOG = []; MEMO = {}; PROF = [[ 'start', t0 ]]; DIRTY = {}; WT = {}; VERS = null; FRESH = false;
+    KCLOG = []; MEMO = {}; PROF = [[ 'start', t0 ]]; DIRTY = {}; WT = {}; VERS = null; FRESH = false; WROTE = false; VERIFIED = {};
     var res; try { res = route(req); } finally { flushVers(); }
     res.ms = Date.now() - t0; res.ver = VER;
     if (req.prof && res.ok) res.prof = PROF.map(function (x, i) { return x[0] + ':' + (i ? x[1] - PROF[i - 1][1] : 0); }).join(' ');
@@ -125,16 +126,29 @@ function route(req) {
 }
 
 // ======================= XÁC THỰC =======================
+/* Nonce không trạng thái: thời điểm + ngẫu nhiên + chữ ký HMAC (không ghi bộ đệm → gọi dồn không đẩy được dấu chống ghi trùng ra khỏi bộ đệm). */
+var NONCE_TTL = 600;
 function issueNonce() {
-  var n = Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '');
-  CacheService.getScriptCache().put('n:' + n, '1', 600);
-  return { ok: true, code: 'OK', data: { nonce: n } };
+  var ts = now().toString(36), r = Utilities.getUuid().replace(/-/g, '');
+  return { ok: true, code: 'OK', data: { nonce: ts + '.' + r + '.' + hmac(props().getProperty('SESSION_KEY'), 'nonce|' + ts + '|' + r) } };
+}
+function nonceOK(n) {
+  var p = String(n || '').split('.'); if (p.length !== 3 || p[0].length > 12 || p[1].length > 64) return false;
+  var want = hmac(props().getProperty('SESSION_KEY'), 'nonce|' + p[0] + '|' + p[1]), age = now() - parseInt(p[0], 36);
+  if (want.length !== p[2].length) return false; var d = 0; for (var i = 0; i < want.length; i++) d |= want.charCodeAt(i) ^ p[2].charCodeAt(i);
+  return d === 0 && age >= -60 && age <= NONCE_TTL;
+}
+/** Đọc nonce trong phần thân idToken (chưa xác minh chữ ký) để loại token rác TRƯỚC khi gọi Google. */
+function tokenNonce(t) {
+  var p = String(t).split('.'); if (p.length !== 3) return '';
+  try { var b = p[1]; while (b.length % 4) b += '='; return String(JSON.parse(Utilities.newBlob(Utilities.base64DecodeWebSafe(b)).getDataAsString()).nonce || ''); } catch (e) { return ''; }
 }
 function login(req) {
   var p = props(), cid = p.getProperty('CLIENT_ID');
   if (typeof req.idToken !== 'string' || !req.idToken || req.idToken.length > 4096) return { ok: false, code: 'VALIDATION', error: 'Thiếu idToken' };
   var cache = CacheService.getScriptCache(), th = 't:' + sha(req.idToken);
   var prev = cache.get('r:' + th); if (prev) return JSON.parse(prev);   // gửi lại cùng token trong 2 phút
+  if (!nonceOK(tokenNonce(req.idToken))) return { ok: false, code: 'AUTH_INVALID', error: 'Phiên đăng nhập hết hạn hoặc không hợp lệ — bấm Đăng nhập lại' };   // không tốn lượt gọi Google
   var claims = null, wait = 500;
   for (var i = 0; i < 3 && !claims; i++) {
     var r = UrlFetchApp.fetch('https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(req.idToken), { muteHttpExceptions: true });
@@ -145,11 +159,10 @@ function login(req) {
   }
   if (!claims) return { ok: false, code: 'INTERNAL', error: 'Không xác minh được với Google, thử lại' };
   var n = String(claims.nonce || '');
-  if (!n || cache.get('n:' + n) !== '1') return { ok: false, code: 'AUTH_INVALID', error: 'Nonce không hợp lệ hoặc đã dùng' };
+  if (!nonceOK(n) || n !== tokenNonce(req.idToken)) return { ok: false, code: 'AUTH_INVALID', error: 'Nonce không hợp lệ hoặc đã hết hạn' };
   if (cache.get(th)) return { ok: false, code: 'AUTH_INVALID', error: 'Token đã được dùng' };
   var chk = QAuth.checkClaims(claims, { clientId: cid, nonce: n, now: now() });
   if (!chk.ok) return chk;
-  cache.remove('n:' + n);
   var u = findUser(chk.email, true);
   if (!u) return { ok: false, code: 'FORBIDDEN', error: 'Email ' + chk.email + ' chưa được cấp quyền hoặc đã bị khoá' };
   var res = { ok: true, code: 'OK', data: { session: QAuth.issueSession(chk.email, now(), SESSION_TTL, p.getProperty('SESSION_KEY'), hmac), email: chk.email, vaiTro: u.vaiTro, hoTen: u.hoTen } };
@@ -177,14 +190,14 @@ var TABLES = { items: 'HangHoa', groups: 'NhomHang', suppliers: 'NhaCungCap', pr
    - ghi sheet → cấp phiên bản mới (DIRTY), đẩy lên ScriptProperties TRƯỚC khi nhả khoá (kể cả khi lỗi) → không lệnh nào đọc phải bản cũ;
    - ghi xong cả bảng (TonKho, HangHoa) → đặt luôn bản mới vào bộ đệm (write-through) để lệnh sau khỏi đọc lại;
    - sheet bị sửa tay ngoài app: bộ đệm sống tối đa 10 phút; "Tính lại tồn" luôn đọc thẳng sheet (FRESH). */
-var MEMO = {}, PROF = [], DIRTY = {}, WT = {}, VERS = null, FRESH = false;
+var MEMO = {}, PROF = [], DIRTY = {}, WT = {}, VERS = null, FRESH = false, WROTE = false, VERIFIED = {};
 var CACHE_T = ['HangHoa', 'NhomHang', 'NhaCungCap', 'BangGia', 'Kho', 'QuyDoiDVT', 'KhachHang', 'CongTrinh', 'TonKho', 'CauHinh', 'MauSanPham', 'LenhSX', 'ChiPhiLSX', 'HoSoTu', 'LapDat', 'PhieuBaoHanh'];
 function mark(l) { PROF.push([l, Date.now()]); }
 function newVer() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 function vers() { if (!VERS) VERS = props().getProperties(); return VERS; }
 function cachedT(n) { return CACHE_T.indexOf(n) >= 0; }
 function dirty(n) {
-  delete MEMO[n]; Object.keys(MEMO).forEach(function (k) { if (k.indexOf(n + '#') === 0) delete MEMO[k]; });
+  WROTE = true; delete MEMO[n]; Object.keys(MEMO).forEach(function (k) { if (k.indexOf(n + '#') === 0) delete MEMO[k]; });
   if (cachedT(n) && (!DIRTY[n] || WT[n])) { DIRTY[n] = newVer(); WT[n] = false; }
 }
 function flushVers() {   // gọi trước khi nhả khoá / cuối lệnh
@@ -220,7 +233,7 @@ function cloneT(t) { return { rows: t.rows.map(function (r) { var c = {}; for (v
 function readTable(n) {
   if (MEMO[n]) return cloneT(MEMO[n]);
   if (cachedT(n) && !DIRTY[n] && !FRESH) { var t = cacheGetT(n); if (t) { MEMO[n] = t; mark('cache ' + n); return cloneT(t); } }
-  MEMO[n] = QSchema.toObjects(n, sheet(n).getDataRange().getValues()); mark('read ' + n);
+  MEMO[n] = QSchema.toObjects(n, sheet(n).getDataRange().getValues()); mark('read ' + n); VERIFIED[n] = true;
   if (cachedT(n) && !DIRTY[n]) {
     var v = vers()['ver:' + n]; if (!v) { v = newVer(); props().setProperty('ver:' + n, v); VERS['ver:' + n] = v; }
     cachePutT(n, v, MEMO[n]);
@@ -234,6 +247,26 @@ function readTail0(n, k) {
   var from = Math.max(2, last - k + 1);
   return QSchema.toObjects(n, [cols].concat(s.getRange(from, 1, last - from + 1, cols.length).getValues()));
 }
+/* Chống ghi đè sai dòng khi Sheet bị sửa tay (sắp xếp, chèn, xoá dòng) trong lúc bộ đệm còn sống:
+   trước khi GHI THEO SỐ DÒNG vào bảng lấy từ bộ đệm, đọc 1 lần cột khoá của sheet và đối chiếu với bộ đệm.
+   Lệch → bỏ bộ đệm bảng đó, báo STALE; write() đọc thẳng sheet rồi chạy lại lệnh 1 lần (các bước đã ghi được dọn/làm tiếp theo requestId). */
+function keyCols(n) { return QSchema.SHEETS[n].key ? 1 : 2; }
+function kv(v) { return v instanceof Date ? new Date(v.getTime() + 7 * 3600e3).toISOString().slice(0, 10) : String(v === undefined || v === null ? '' : v).trim().replace(/^'(?=[=+\-@])/, ''); }
+function guardTable(n) {
+  if (!cachedT(n) || VERIFIED[n] || !MEMO[n]) return;
+  var s = sheet(n), last = s.getLastRow(), k = keyCols(n), cols = QSchema.SHEETS[n].cols, at = {};
+  var vals = last >= 2 ? s.getRange(2, 1, last - 1, k).getValues() : []; mark('guard ' + n);
+  MEMO[n].rows.forEach(function (r) { at[r._row] = r; });
+  for (var i = 0; i < vals.length; i++) {
+    var row = i + 2, r = at[row], key = vals[i].map(kv).join('|');
+    if (!r) { if (key.replace(/\|/g, '')) return stale(n); continue; }
+    if (key !== cols.slice(0, k).map(function (c) { return kv(r[c]); }).join('|')) return stale(n);
+    delete at[row];
+  }
+  if (Object.keys(at).length) return stale(n);
+  VERIFIED[n] = true;
+}
+function stale(n) { DIRTY[n] = newVer(); WT[n] = false; delete MEMO[n]; throw fail('STALE', 'Sheet ' + n + ' vừa được sửa trực tiếp trên Google Sheet — máy chủ đọc lại, thử lại', null); }
 function syncPull(u, req) {
   var ver = Number(props().getProperty('dataVersion') || 1);   // đọc version TRƯỚC dữ liệu
   if (req.since && Number(req.since) === ver) return { unchanged: true, version: ver };
@@ -243,7 +276,7 @@ function syncPull(u, req) {
     var t = k === 'logs' ? readTail('NhatKy', 300) : k === 'vouchers' ? readTail('Phieu', 500) : readTable(TABLES[k]); raw[k] = t.rows; warnings = warnings.concat(t.warnings);
   });
   raw.vouchers = raw.vouchers.filter(function (p) { return p.trangThai === 'HOAN_TAT'; });
-  var tuK = {}; (raw.cabinets || []).forEach(function (c) { if (c.trangThai !== 'HUY') tuK[c.key] = 1; });
+  var tuK = {}, lp = livePxx(); (raw.cabinets || []).forEach(function (c) { if (c.trangThai !== 'HUY') tuK[c.key] = 1; if (c.soPXX && !lp[c.soPXX]) c.soPXX = ''; });
   raw.serials = raw.serials.filter(function (x) { return x.trangThai === 'TRONG_KHO' || x.trangThai === 'HANG_LOI' || (x.trangThai === 'DA_BAN' && tuK[x.key]); });   // để chọn serial khi xuất + tủ đã giao (theo dõi bảo hành)
   var last = {}; raw.templates.forEach(function (t) { if (!last[t.maMau] || t.phienBan > last[t.maMau].phienBan) last[t.maMau] = t; });
   raw.templates = Object.keys(last).sort().map(function (k) { return last[k]; });   // chỉ phiên bản mẫu mới nhất
@@ -282,20 +315,27 @@ function write(u, req, fn, pre) {
         try { CacheService.getScriptCache().put('req:' + id, JSON.stringify({ email: String(v.email), data: v.data }), 21600); } catch (e) { }
       }
     };
-    var res = QIdem.once(store, u.email, req.requestId, function () {
+    var body = function () {
       var d = fn(u, req, logs, ctx);
       logs.push.apply(logs, KCLOG); KCLOG = [];
       appendBlock('NhatKy', logs.map(function (l) { return { thoiGian: nowIso(), email: u.email, action: l.action, doiTuong: l.doiTuong, id: String(l.id), truoc: l.truoc ? JSON.stringify(l.truoc).slice(0, 45000) : '', sau: l.sau ? JSON.stringify(l.sau).slice(0, 45000) : '', requestId: String(req.requestId) }; }));   // 1 lần ghi
-      bumpVersion();
       return d;
-    });
-    mark('request+'); SpreadsheetApp.flush(); mark('flush');
+    }, res;
+    try { res = QIdem.once(store, u.email, req.requestId, body); }
+    catch (e1) {   // bảng trong bộ đệm lệch với sheet (sửa tay): đọc thẳng sheet, chạy lại 1 lần — phần đã ghi được dọn / làm tiếp theo requestId
+      if (!(e1 && e1.qlhh && e1.qlhh.code === 'STALE')) throw e1;
+      MEMO = {}; FRESH = true; KCLOG = []; logs.length = 0; mark('stale-retry');
+      res = QIdem.once(store, u.email, req.requestId, body);
+    }
+    mark('request+');
     if (res.ok) { res.code = 'OK'; res.lockMs = Date.now() - t0; }
     return res;
   } catch (err) {
     if (err && err.qlhh) return err.qlhh;
     throw err;
-  } finally { try { flushVers(); } finally { lock.releaseLock(); } }   // phiên bản bảng lên TRƯỚC khi nhả khoá
+  } finally {   // đã ghi (kể cả khi lỗi giữa chừng): đẩy hết lệnh ghi xuống sheet RỒI mới tăng phiên bản dữ liệu; phiên bản bảng lên TRƯỚC khi nhả khoá
+    try { if (WROTE) { SpreadsheetApp.flush(); mark('flush'); bumpVersion(); } } finally { try { flushVers(); } finally { lock.releaseLock(); } }
+  }
 }
 /* Tra requestId đã xử lý: bộ đệm trước (lần gửi lại thường trong vài giây), rồi đọc 300 dòng cuối của Request trong 1 lần gọi
    (thay cho tìm kiếm toàn cột). Gửi lại sau hơn 300 lệnh ghi không xảy ra với cách client giữ requestId theo hộp thoại. */
@@ -323,6 +363,7 @@ function findByKey(n, key) {
   o._row = cell.getRow(); return o;
 }
 function putRow(n, obj, row) {
+  if (row) guardTable(n);
   dirty(n);
   var s = sheet(n), vals = QSchema.toRow(n, obj);
   if (row) s.getRange(row, 1, 1, vals.length).setValues([vals]); else s.appendRow(vals);
@@ -343,7 +384,7 @@ function itemUpsert(u, req, logs) {
   if (cur && cur.trangThai) v.trangThai = cur.trangThai;   // đổi trạng thái qua item.stop
   v.capNhat = nowIso();
   if (!cur && v.giaBan !== '' && v.giaBan > 0) {   // giá bán ban đầu → ghi vào lịch sử giá TRƯỚC dòng hàng
-    var g = { id: 'G' + ('000000' + nextId('BangGia')).slice(-6), maHang: v.maHang, loai: 'BAN', maNCC: '', gia: v.giaBan, tuNgay: today(), ghiChu: 'Giá ban đầu', nguoiTao: u.email, thoiGian: nowIso() };
+    var g = { id: 'G' + ('000000' + nextId('BangGia')).slice(-6), maHang: v.maHang, loai: 'BAN', maNCC: '', gia: v.giaBan, tuNgay: today(), ghiChu: 'Giá ban đầu', nguoiTao: u.email, thoiGian: nowIso(), requestId: String(req.requestId) };
     putRow('BangGia', g);
   }
   putRow('HangHoa', v, cur && cur._row);
@@ -378,12 +419,14 @@ function supplierUpsert(u, req, logs) {
   return { maNCC: v.maNCC };
 }
 function priceAdd(u, req, logs) {
-  var v = need(QValidate.price(req.price));
+  var pv = prevRow('BangGia', req)[0], v = pv ? strip(pv) : need(QValidate.price(req.price));   // gửi lại sau khi chết giữa chừng: dòng giá đã ghi → làm tiếp
   var it = findByKey('HangHoa', v.maHang);
   if (!it) throw fail('VALIDATION', 'Không có mã hàng ' + v.maHang, { maHang: 'Chọn mã có sẵn' });
-  if (v.loai === 'NHAP' && !findByKey('NhaCungCap', v.maNCC)) throw fail('VALIDATION', 'Nhà cung cấp ' + v.maNCC + ' chưa có', { maNCC: 'Chọn NCC có sẵn' });
-  v.id = 'G' + ('000000' + nextId('BangGia')).slice(-6); v.nguoiTao = u.email; v.thoiGian = nowIso();
-  putRow('BangGia', v);
+  if (!pv) {
+    if (v.loai === 'NHAP' && !findByKey('NhaCungCap', v.maNCC)) throw fail('VALIDATION', 'Nhà cung cấp ' + v.maNCC + ' chưa có', { maNCC: 'Chọn NCC có sẵn' });
+    v.id = 'G' + ('000000' + nextId('BangGia')).slice(-6); v.nguoiTao = u.email; v.thoiGian = nowIso(); v.requestId = String(req.requestId);
+    putRow('BangGia', v);
+  }
   if (v.loai === 'BAN') {                       // cập nhật giá bán hiện hành của hàng
     var all = readTable('BangGia').rows.map(function (p) { p.thoiGian = String(p.thoiGian); return p; });
     var eff = QPrice.effective(all, v.maHang, 'BAN', today());
@@ -409,8 +452,9 @@ function userUpsert(u, req, logs) {
   return { email: v.email };
 }
 function feedbackAdd(u, req, logs) {
+  var pv = prevRow('GopY', req)[0]; if (pv) return { id: pv.id, lapLai: true };
   var v = need(QValidate.feedback(req.feedback));
-  v.id = 'GY' + ('00000' + nextId('GopY')).slice(-5); v.thoiGian = nowIso(); v.email = u.email; v.trangThai = 'MOI'; v.note = '';
+  v.id = 'GY' + ('00000' + nextId('GopY')).slice(-5); v.thoiGian = nowIso(); v.email = u.email; v.trangThai = 'MOI'; v.note = ''; v.requestId = String(req.requestId);
   putRow('GopY', v);
   logs.push({ action: 'feedback.add', doiTuong: 'GopY', id: v.id, truoc: null, sau: { sao: v.sao, loai: v.loai } });
   return { id: v.id };
