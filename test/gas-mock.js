@@ -10,7 +10,7 @@ function env(tokeninfo, ownerEmail = 'MaiVuLam2020@gmail.com', shared) {
   const hold = {};
   // Mô phỏng Sheets: "'abc" → lưu 'abc' dạng văn bản; "=..." ở ô thường → CHẠY công thức (ở đây trả 'CONG_THUC_DA_CHAY' để test bắt rò rỉ)
   const conv = (v, txt) => { if (typeof v !== 'string') return v; if (v[0] === "'") return v.slice(1); if (txt) return v; if (/^=/.test(v)) return 'CONG_THUC_DA_CHAY'; if (/^-?\d+(\.\d+)?$/.test(v)) return Number(v); if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return new Date(v + 'T00:00:00Z'); return v; };
-  const colIdx = a => a.charCodeAt(0) - 65;
+  const colIdx = a => { const m = String(a).match(/^([A-Z]+)/); return m ? m[1].split('').reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0) - 1 : 0; };   // A=0 … Z=25, AA=26 …
   const mk = n => {
     const s = {
       n, d: [], txt: {},
@@ -22,7 +22,7 @@ function env(tokeninfo, ownerEmail = 'MaiVuLam2020@gmail.com', shared) {
       getDataRange() { const me = this; reads[n] = (reads[n] || 0) + 1; return { getValues: () => me.d.map(r => r.slice()) }; },
       getRange(r, c, nr, nc) {
         const me = this;
-        if (typeof r === 'string') { const [a, b] = r.split(':'), c0 = colIdx(a), c1 = colIdx(b || a), r0 = Number(a.slice(1)) || 1; return { setNumberFormat: f => { for (let i = c0; i <= c1; i++) me.txt[i] = f === '@'; }, getValues: () => { reads[n + '#col'] = (reads[n + '#col'] || 0) + 1; return Array.from({ length: Math.max(0, me.d.length - r0 + 1) + 3 }, (_, i) => Array.from({ length: c1 - c0 + 1 }, (_, j) => { const row = me.d[r0 - 1 + i] || []; const v = row[c0 + j]; return v === undefined ? '' : v; })); } }; }
+        if (typeof r === 'string') { const [a, b] = r.split(':'), c0 = colIdx(a), c1 = colIdx(b || a), r0 = Number((a.match(/\d+$/) || [])[0]) || 1; return { setNumberFormat: f => { for (let i = c0; i <= c1; i++) me.txt[i] = f === '@'; }, getValues: () => { reads[n + '#col'] = (reads[n + '#col'] || 0) + 1; return Array.from({ length: Math.max(0, me.d.length - r0 + 1) + 3 }, (_, i) => Array.from({ length: c1 - c0 + 1 }, (_, j) => { const row = me.d[r0 - 1 + i] || []; const v = row[c0 + j]; return v === undefined ? '' : v; })); } }; }
         nr = nr || 1; nc = nc || 1;
         return {
           getValues: () => Array.from({ length: nr }, (_, i) => Array.from({ length: nc }, (_, j) => { const row = me.d[r - 1 + i] || []; const v = row[c - 1 + j]; return v === undefined ? '' : v; })),
