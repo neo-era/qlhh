@@ -411,10 +411,10 @@
 
   // ======================= ĐỢT ②: KHO =======================
   const LOAI = Object.fromEntries(Object.entries(QStock.TYPES).map(([k, t]) => [k, t.ten]));
-  const TAO_DUOC = ['NHAP_MUA', 'XUAT_BAN', 'XUAT_CONG_TRINH', 'CHUYEN_KHO', 'KIEM_KE', 'KHACH_TRA', 'TRA_NCC', 'NHAP_KHAC', 'XUAT_HUY', 'NHAP_HANG_LOI', 'GUI_NCC', 'NHAN_NCC', 'CHUYEN_SUA', 'TRA_KHACH_SUA', 'TON_DAU'];   // xuất bảo hành / xuất sửa chữa: lập từ phiếu bảo hành
+  const TAO_DUOC = ['NHAP_MUA', 'XUAT_BAN', 'XUAT_CONG_TRINH', 'CHUYEN_KHO', 'KIEM_KE', 'KHACH_TRA', 'TRA_NCC', 'NHAP_KHAC', 'XUAT_HUY', 'CHUYEN_LOI', 'NHAP_HANG_LOI', 'GUI_NCC', 'NHAN_NCC', 'CHUYEN_SUA', 'TRA_KHACH_SUA', 'TON_DAU'];   // xuất bảo hành / xuất sửa chữa: lập từ phiếu bảo hành
   const LOI_ONLY = ['NHAP_HANG_LOI', 'GUI_NCC', 'CHUYEN_SUA', 'TRA_KHACH_SUA'];   // phiếu lập từ / vào kho hàng lỗi
-  const LYDO_BAT_BUOC = ['XUAT_HUY', 'NHAP_KHAC', 'CHUYEN_SUA'];
-  const NHOM_PHIEU = { nhap: ['TON_DAU', 'NHAP_MUA', 'KHACH_TRA', 'NHAP_TP', 'NHAP_LAI_SX', 'NHAP_HANG_LOI', 'NHAP_KHAC', 'NHAN_NCC', 'CHUYEN_SUA'], xuat: ['XUAT_BAN', 'XUAT_CONG_TRINH', 'XUAT_BH', 'XUAT_SX', 'TRA_NCC', 'XUAT_HUY', 'GUI_NCC', 'TRA_KHACH_SUA', 'XUAT_SUA'], khac: ['CHUYEN_KHO', 'KIEM_KE'], dao: ['DAO'] };
+  const LYDO_BAT_BUOC = ['XUAT_HUY', 'NHAP_KHAC', 'CHUYEN_SUA', 'CHUYEN_LOI'];
+  const NHOM_PHIEU = { nhap: ['TON_DAU', 'NHAP_MUA', 'KHACH_TRA', 'NHAP_TP', 'NHAP_LAI_SX', 'NHAP_HANG_LOI', 'NHAP_KHAC', 'NHAN_NCC', 'CHUYEN_SUA'], xuat: ['XUAT_BAN', 'XUAT_CONG_TRINH', 'XUAT_BH', 'XUAT_SX', 'TRA_NCC', 'XUAT_HUY', 'GUI_NCC', 'TRA_KHACH_SUA', 'XUAT_SUA', 'CHUYEN_LOI'], khac: ['CHUYEN_KHO', 'KIEM_KE'], dao: ['DAO'] };
   const num = n => n === '' || n === null || n === undefined ? '—' : Number(n).toLocaleString('vi-VN', { maximumFractionDigits: 3 });
   const itemOf = ma => S.data.items.find(i => i.maHang === ma) || { maHang: ma, ten: ma, dvt: '' };
   const khoName = k => k === '*' ? 'Tổng' : ((S.data.warehouses || []).find(w => w.maKho === k) || {}).ten || k;
@@ -451,6 +451,7 @@
     const act = (canEdit() ? `<button class="btn pri" id="newV">${ic('plus')}<span>Lập phiếu</span></button>` : '') + (isQT() ? `<button class="btn" id="khoAdm">${ic('layers')}<span>Kho & khoá sổ</span></button>` : '') + (activeKho(true).length ? `<button class="btn" id="loiR">${ic('warn')}<span>Kho hàng lỗi</span></button>` : '') + `<button class="btn" id="xlsT">${ic('dl')}<span>Xuất Excel</span></button>`;
     paint(m, only, header('Tồn kho', act, false, canEdit() ? 'newVM' : '') +
       `<label class="msearch">${ic('search')}<span class="sr">Tìm hàng</span><input id="qkm" type="search" placeholder="Tìm mã, tên hàng…" value="${esc(KS.q)}" autocomplete="off"></label>
+      ${activeKho(true).length ? `<div class="monly mrow"><button class="btn" type="button" id="loiRM">${ic('warn')} Kho hàng lỗi</button></div>` : ''}
       <div class="kpi"><div class="k"><small>Mã có tồn</small><b>${(d.stock || []).filter(t => t.kho === '*' && Number(t.soLuong) > 0).length.toLocaleString('vi-VN')}</b></div>
         <div class="k"><small>⚠ Dưới tồn tối thiểu</small><b>${nLow}</b></div><div class="k"><small>${isQT() ? 'Giá trị tồn (giá vốn)' : 'Số kho'}</small><b>${isQT() ? money(val) : ws.length}</b></div>
         <div class="k"><small>Phiếu tháng này</small><b>${thisMonth}</b></div></div>
@@ -479,7 +480,7 @@
     $('#lowT').onclick = () => { KS.lowOnly = !KS.lowOnly; viewStock(m); };
     $$('#newV,#newVM').forEach(b => b.onclick = () => voucherPick());
     const ka = $('#khoAdm'); if (ka) ka.onclick = khoAdmin;
-    const lr = $('#loiR'); if (lr) lr.onclick = loiReport;
+    $$('#loiR,#loiRM').forEach(b => b.onclick = loiReport);
     $('#xlsT').onclick = () => exportRows(`TonKho_${S.today}`, list.map(i => ({ 'Mã hàng': i.maHang, 'Tên hàng': i.ten, 'ĐVT': i.dvt, ...Object.fromEntries(ws.map(w => [w.ten, tonQ(i.maHang, w.maKho)])), 'Tồn (không gồm hàng lỗi)': tonQ(i.maHang), 'Tồn tối thiểu': i.tonToiThieu, ...(isQT() ? { 'Giá vốn BQ': i.giaVon, 'Giá trị tồn': (tonRow(i.maHang) || {}).giaTri } : {}) })));
     draw(); bindStockDetail();
   }
@@ -491,7 +492,7 @@
       <dl class="dl">${(S.data.warehouses || []).map(w => `<dt>${esc(w.ten)}</dt><dd>${num(tonQ(i.maHang, w.maKho))} ${esc(i.dvt)}${w.loai === 'HANG_LOI' ? ' <small class="mut">(hàng lỗi)</small>' : ''}</dd>`).join('')}
         <dt>Tồn tối thiểu</dt><dd>${i.tonToiThieu !== '' ? num(i.tonToiThieu) + ' ' + esc(i.dvt) : '—'}${low(i) ? ` <span class="tag stop">${ic('warn')} thiếu</span>` : ''}</dd>
         ${isQT() ? `<dt>Giá vốn BQ</dt><dd>${money(i.giaVon)}</dd><dt>Giá trị tồn</dt><dd>${money((tonRow(i.maHang) || {}).giaTri)}</dd>` : ''}</dl>
-      ${canEdit() && !S.offline ? `<div class="acts"><button class="btn pri" id="kIn">Nhập</button><button class="btn" id="kOut">Xuất</button><button class="btn" id="kKK">Kiểm kê</button><button class="btn" id="kXH">Xuất huỷ</button>${activeKho(true).some(w => tonQ(i.maHang, w.maKho) > 0) ? '<button class="btn" id="kCS">Hàng lỗi đã sửa → kho thường</button><button class="btn" id="kGN">Gửi NCC</button>' : ''}</div>` : ''}
+      ${canEdit() && !S.offline ? `<div class="acts"><button class="btn pri" id="kIn">Nhập</button><button class="btn" id="kOut">Xuất</button><button class="btn" id="kKK">Kiểm kê</button><button class="btn" id="kXH">Xuất huỷ</button>${activeKho(true).length ? '<button class="btn" id="kCL">Hàng hỏng → kho lỗi</button>' : ''}${activeKho(true).some(w => tonQ(i.maHang, w.maKho) > 0) ? '<button class="btn" id="kCS">Hàng lỗi đã sửa → kho thường</button><button class="btn" id="kGN">Gửi NCC</button>' : ''}</div>` : ''}
       ${ser.length ? `<div class="hist"><h3>Serial đang trong kho (${ser.length})</h3><ul>${ser.slice(0, 50).map(x => `<li><span class="mono">${esc(x.serial)}</span><span>${esc(khoName(x.kho))}${x.trangThai === 'HANG_LOI' ? ' · lỗi' : ''}</span></li>`).join('')}</ul></div>` : ''}`;
   }
   function bindStockDetail() {
@@ -503,6 +504,7 @@
     const k = $('#kKK'); if (k) k.onclick = () => voucherForm('KIEM_KE', { lines: [line] });
     const loiKho = (activeKho(true).find(w => tonQ(i.maHang, w.maKho) > 0) || {}).maKho;
     const xh = $('#kXH'); if (xh) xh.onclick = () => voucherForm('XUAT_HUY', { lines: [line] });
+    const cl = $('#kCL'); if (cl) cl.onclick = () => voucherForm('CHUYEN_LOI', { lines: [line] });
     const cs = $('#kCS'); if (cs) cs.onclick = () => voucherForm('CHUYEN_SUA', { kho: loiKho, lines: [line] });
     const gn = $('#kGN'); if (gn) gn.onclick = () => voucherForm('GUI_NCC', { kho: loiKho, lines: [line] });
   }
@@ -541,7 +543,7 @@
     $$('[data-so]').forEach(r => r.onclick = () => voucherView(r.dataset.so));
   }
   function voucherPick() {
-    const types = TAO_DUOC.filter(t => !(LOI_ONLY.includes(t) || t === 'NHAN_NCC') || activeKho(true).length);
+    const types = TAO_DUOC.filter(t => !(LOI_ONLY.includes(t) || t === 'NHAN_NCC' || t === 'CHUYEN_LOI') || activeKho(true).length);
     dialog('Lập phiếu kho', `<div class="list">${types.map(t => `<button class="it btn ghost" type="button" style="width:100%;justify-content:flex-start" data-t="${t}"><span class="mono" style="min-width:34px">${QStock.prefix(t)}</span><span style="flex:1;text-align:left">${LOAI[t]}</span></button>`).join('')}</div>`, null, d => $$('[data-t]', d).forEach(b => b.onclick = () => { d.close(); voucherForm(b.dataset.t); }));
   }
   async function voucherView(so) {
@@ -569,7 +571,7 @@
       const rt = $('#vRet', d); if (rt) rt.onclick = () => { d.close(); voucherForm('KHACH_TRA', { phieuGoc: p.soPhieu, kho: p.kho, maKH: p.maKH, maCongTrinh: p.maCongTrinh, lines: L.map(l => ({ maHang: l.maHang, soLuongCT: '', dongGoc: l.dong, gocSerials: l.serials })) }); };
       const tn = $('#vTn', d); if (tn) tn.onclick = () => { d.close(); voucherForm('TRA_NCC', { phieuGoc: p.soPhieu, kho: p.kho, maNCC: p.maNCC, lines: L.map(l => ({ maHang: l.maHang, soLuongCT: '', dongGoc: l.dong, gocSerials: l.serials })) }); };
       const rv = $('#vRev', d); if (rv) rv.onclick = () => { d.close(); reverseForm(p); };
-      const nn = $('#vNN', d); if (nn) nn.onclick = () => { d.close(); voucherForm('NHAN_NCC', { phieuGoc: p.soPhieu, maNCC: p.maNCC, kho: (activeKho(false)[0] || {}).maKho, lines: L.map(l => ({ maHang: l.maHang, soLuongCT: '', dongGoc: l.dong, gocSerials: l.serials })) }); };
+      const nn = $('#vNN', d); if (nn) nn.onclick = () => { d.close(); voucherForm('NHAN_NCC', { phieuGoc: p.soPhieu, maNCC: p.maNCC, khachGui: p.maKH || '', kho: ((p.maKH ? activeKho(true) : activeKho(false))[0] || {}).maKho, lines: L.map(l => ({ maHang: l.maHang, soLuongCT: '', dongGoc: l.dong, gocSerials: l.serials })) }); };
       const ts = $('#vTS', d); if (ts) ts.onclick = () => { d.close(); voucherForm('TRA_KHACH_SUA', { phieuGoc: p.soPhieu, kho: p.kho, maKH: p.maKH, maCongTrinh: p.maCongTrinh, lyDo: 'Trả hàng đã sửa', lines: L.map(l => ({ maHang: l.maHang, soLuongCT: '', dongGoc: l.dong, gocSerials: l.serials })) }); };
       const bh = $('#vBH', d); if (bh) bh.onclick = () => { d.close(); ticketFormLe(p, L); };
     });
@@ -664,8 +666,8 @@
     return (dup.length ? 'Trùng trong danh sách: ' + [...new Set(dup)].join(', ') + '. ' : '') + (has.length ? 'Đã có trên hệ thống: ' + has.join(', ') : '');
   }
   function voucherForm(loai, pre = {}) {
-    const d = S.data, t = QStock.TYPES[loai], priced = t.cost === 'PRICE', kk = loai === 'KIEM_KE', out = t.dir < 0 || loai === 'CHUYEN_KHO' || loai === 'CHUYEN_SUA', nccIn = loai === 'NHAN_NCC';
-    const khos = pre.sx ? activeKho(false).filter(w => w.maKho === pre.kho) : LOI_ONLY.includes(loai) ? activeKho(true) : ['TRA_NCC', 'XUAT_HUY', 'NHAN_NCC'].includes(loai) ? activeKho() : activeKho(false);
+    const d = S.data, t = QStock.TYPES[loai], priced = t.cost === 'PRICE', kk = loai === 'KIEM_KE', out = t.dir < 0 || loai === 'CHUYEN_KHO' || loai === 'CHUYEN_SUA' || loai === 'CHUYEN_LOI', nccIn = loai === 'NHAN_NCC', huy = loai === 'XUAT_HUY';
+    const khos = pre.sx ? activeKho(false).filter(w => w.maKho === pre.kho) : LOI_ONLY.includes(loai) || (nccIn && pre.khachGui) ? activeKho(true) : ['TRA_NCC', 'XUAT_HUY', 'NHAN_NCC', 'KIEM_KE'].includes(loai) ? activeKho() : activeKho(false);
     const danhGia = loai === 'NHAN_NCC' || loai === 'CHUYEN_SUA', nhapK = t.dir > 0 || loai === 'CHUYEN_SUA';
     const opt = (rows, k, n, empty) => [['', empty], ...rows.filter(x => x.trangThai !== 'NGUNG').map(x => [x[k], x[n] + ' (' + x[k] + ')'])];
     const lines = (pre.lines && pre.lines.length ? pre.lines : [{}]).map(l => ({ ...l }));
@@ -674,6 +676,8 @@
       <div class="grid2"><div>${fld('ngay', 'Ngày phiếu', pre.ngay || S.today, { req: 1, type: 'date', max: S.today })}</div>
         <div>${fld('kho', loai === 'CHUYEN_KHO' ? 'Từ kho' : loai === 'CHUYEN_SUA' ? 'Từ kho hàng lỗi' : nccIn ? 'Nhận về kho' : 'Kho', pre.kho || (khos[0] || {}).maKho || '', { opts: khos.map(w => [w.maKho, w.ten + (w.loai === 'HANG_LOI' ? ' (hàng lỗi)' : '')]) })}</div>
         ${loai === 'CHUYEN_KHO' ? `<div>${fld('khoDen', 'Đến kho', '', { opts: [['', '— Chọn kho đến —'], ...activeKho().map(w => [w.maKho, w.ten])] })}</div>` : ''}
+        ${loai === 'CHUYEN_LOI' ? `<div>${fld('khoDen', 'Sang kho hàng lỗi', (activeKho(true)[0] || {}).maKho || '', { opts: activeKho(true).map(w => [w.maKho, w.ten]) })}</div>` : ''}
+        ${loai === 'GUI_NCC' ? `<div>${fld('maKH', 'Hàng của khách (để trống nếu hàng công ty)', pre.maKH || '', { opts: opt(d.customers || [], 'maKH', 'ten', '— Hàng công ty —') })}<small class="mut">Hàng có serial: máy chủ tự nhận theo chủ serial.</small></div>` : ''}
         ${loai === 'CHUYEN_SUA' ? `<div>${fld('khoDen', 'Về kho thường', pre.khoDen || (activeKho(false)[0] || {}).maKho || '', { opts: activeKho(false).map(w => [w.maKho, w.ten]) })}</div>` : ''}
         ${['NHAP_MUA', 'TRA_NCC', 'GUI_NCC', 'NHAN_NCC'].includes(loai) ? `<div>${fld('maNCC', 'Nhà cung cấp', pre.maNCC || '', { opts: opt(d.suppliers, 'maNCC', 'ten', '— Chọn NCC —') })}</div>` : ''}
         ${custProj ? `<div>${fld('maKH', 'Khách hàng', pre.maKH || '', { opts: opt(d.customers || [], 'maKH', 'ten', '— Chọn khách —') })}</div>` : ''}
@@ -682,11 +686,13 @@
         ${loai === 'NHAN_NCC' ? `<div>${fld('phieuGoc', 'Phiếu gửi NCC gốc', pre.phieuGoc || '', { ro: !!pre.phieuGoc, list: 'dlGocG' })}<datalist id="dlGocG">${(d.vouchers || []).filter(x => x.loai === 'GUI_NCC' && !x.daDao).slice(-200).reverse().map(x => `<option value="${esc(x.soPhieu)}">${esc(vnD(x.ngay))} · ${esc(supName(x.maNCC))}</option>`).join('')}</datalist></div>` : ''}
         ${loai === 'TRA_KHACH_SUA' ? `<div>${fld('phieuGoc', 'Phiếu nhận hàng lỗi của khách', pre.phieuGoc || '', { ro: !!pre.phieuGoc, list: 'dlGocL' })}<datalist id="dlGocL">${(d.vouchers || []).filter(x => x.loai === 'NHAP_HANG_LOI' && x.maKH && !x.daDao).slice(-200).reverse().map(x => `<option value="${esc(x.soPhieu)}">${esc(vnD(x.ngay))} · ${esc(custName(x.maKH))}</option>`).join('')}</datalist></div>` : ''}
         ${loai === 'TRA_NCC' ? `<div>${fld('phieuGoc', 'Phiếu nhập gốc (bắt buộc nếu trả từ kho thường)', pre.phieuGoc || '', { ro: !!pre.phieuGoc, list: 'dlGocN' })}<datalist id="dlGocN">${(d.vouchers || []).filter(x => ['NHAP_MUA', 'TON_DAU'].includes(x.loai) && !x.daDao).slice(-200).reverse().map(x => `<option value="${esc(x.soPhieu)}">${esc(vnD(x.ngay))} · ${esc(supName(x.maNCC))}</option>`).join('')}</datalist></div>` : ''}
-        <div>${fld('nguoiGiaoNhan', t.dir > 0 ? 'Người giao hàng' : 'Người nhận hàng', '')}</div>
+        ${huy || loai === 'CHUYEN_LOI' ? '' : `<div>${fld('nguoiGiaoNhan', t.dir > 0 ? 'Người giao hàng' : 'Người nhận hàng', '')}</div>`}
         <div>${fld('soCTGoc', 'Số chứng từ gốc (HĐ, hợp đồng…)', '')}</div><div>${fld('ngayCTGoc', 'Ngày chứng từ gốc', '', { type: 'date', max: S.today })}</div></div>
       ${fld('lyDo', kk ? 'Ghi chú kiểm kê' : loai === 'XUAT_HUY' ? 'Lý do huỷ (số biên bản huỷ / mất)' : loai === 'CHUYEN_SUA' ? 'Nội dung đã sửa' : 'Lý do ' + (nhapK ? 'nhập' : 'xuất'), pre.lyDo || '', { req: LYDO_BAT_BUOC.includes(loai) })}
       ${danhGia ? '<p class="mut" style="font-size:12.5px;margin:4px 0 0">Đơn giá đánh giá: giá trị thu hồi ước tính hoặc phí sửa đã trả (được để 0). Nhận về kho hàng lỗi luôn tính giá 0.</p>' : ''}
-      ${loai === 'XUAT_HUY' ? '<p class="mut" style="font-size:12.5px;margin:4px 0 0">Giá trị huỷ tính theo giá vốn bình quân tại ngày phiếu (kho hàng lỗi: 0).</p>' : ''}
+      ${loai === 'XUAT_HUY' ? '<p class="mut" style="font-size:12.5px;margin:4px 0 0">Giá trị huỷ tính theo giá vốn bình quân tại ngày phiếu (kho hàng lỗi: 0). Hàng giữ hộ khách không huỷ được.</p>' : ''}
+      ${loai === 'CHUYEN_LOI' ? '<p class="mut" style="font-size:12.5px;margin:4px 0 0">Hàng hỏng rời kho thường theo giá vốn bình quân (ghi giảm giá trị tồn), sang kho hàng lỗi giá 0 — sau đó gửi NCC, sửa rồi chuyển về, hoặc xuất huỷ.</p>' : ''}
+      ${nccIn && pre.khachGui ? `<p class="warnbar" role="status">Hàng của khách ${esc(custName(pre.khachGui))} — nhận về kho hàng lỗi rồi lập phiếu Trả khách hàng đã sửa.</p>` : ''}
       <h3 style="font-size:14px;margin:16px 0 6px">Dòng hàng</h3>${nccIn ? '<p class="mut" style="font-size:12.5px;margin:0 0 6px">Hàng có serial: tích serial NCC sửa xong trả lại; NCC đổi hàng mới thì gõ serial mới cạnh serial đã gửi.</p>' : ''}
       <datalist id="dlItems">${d.items.filter(i => i.trangThai !== 'NGUNG').map(i => `<option value="${esc(i.maHang)}">${esc(i.ten)}</option>`).join('')}</datalist>
       <div id="vLines"></div><button class="btn" type="button" id="addLine">${ic('plus')} Thêm dòng</button>
@@ -761,6 +767,7 @@
       if (!clean.length) { dlgMsg(dlg, 'Phiếu chưa có dòng hàng'); return false; }
       const vh = { ...v, loai, phieuGoc: v.phieuGoc || pre.phieuGoc || '', lines: clean.map(l => ({ maHang: String(l.maHang).trim().toUpperCase(), dvt: l.dvt, soLuongCT: l.soLuongCT === '' ? '' : Number(String(l.soLuongCT).replace(',', '.')), gia: l.gia === undefined ? undefined : Number(l.gia), slThucTe: l.slThucTe === undefined ? undefined : Number(String(l.slThucTe).replace(',', '.')), dongGoc: l.dongGoc, serials: l.serials || [], serialsDoi: l.serialsDoi && l.serialsDoi.length ? l.serialsDoi : undefined })) };
       const r = QValidate.voucherHead(vh); if (!r.ok) { showErrors(dlg, r.errors); dlgMsg(dlg, Object.values(r.errors)[0]); return false; }
+      if (huy) { const ss = vh.lines.flatMap(l => l.serials || []); if (ss.length && !confirm(`Xuất huỷ ${ss.length} serial: ${ss.join(', ')}.\nSố serial đã huỷ không dùng lại được. Tiếp tục?`)) return false; }   // tóm tắt trước khi huỷ hàng có serial
       if (pre.sx) { SX.stale = true; return submitV(dlg, 'lsx.xuatSX', { soLSX: pre.sx, ngay: vh.ngay, lyDo: vh.lyDo, nguoiGiaoNhan: vh.nguoiGiaoNhan, lines: vh.lines }, so => 'Đã xuất linh kiện, phiếu ' + so); }
       return submitV(dlg, 'voucher.create', { voucher: vh }, so => 'Đã lưu phiếu ' + so);
     }, dlg => {
@@ -815,7 +822,7 @@
       ${kk ? `<p>- Thời điểm kiểm kê: ${ngay.toLowerCase()} · Kho: ${esc(khoName(base.kho))}<br>- Ban kiểm kê: ……………………………………………………………<br>- ${esc(p.lyDo || 'Đã kiểm kê các mặt hàng dưới đây')}</p>`
         : `<p>- Họ và tên người ${nhapKho ? 'giao' : 'nhận'}: ${esc(p.nguoiGiaoNhan || '……………………')}${partner ? `<br>- Đơn vị: ${esc(partner.ten)}${partner.mst ? ' · MST ' + esc(partner.mst) : ''}${partner.dc ? '<br>- Địa chỉ: ' + esc(partner.dc) : ''}` : ''}
           <br>- Lý do ${nhapKho ? 'nhập' : 'xuất'} kho: ${esc(sign < 0 ? LOAI[base.loai] + ' (đảo)' : (p.lyDo || LOAI[base.loai]))}${base.maCongTrinh && !sxP ? ' — công trình ' + esc(projName(base.maCongTrinh)) : ''}
-          ${base.soLSX ? '<br>- Lệnh sản xuất: <b>' + esc(base.soLSX) + '</b> (bộ phận sản xuất)' : ''}<br>- Theo chứng từ số: ${esc((sign < 0 ? '' : p.soCTGoc) || '……')} ngày ${esc((sign < 0 ? '' : p.ngayCTGoc) || '……')}<br>- ${ck || cs ? 'Từ kho: ' + esc(khoName(base.kho)) + ' → đến kho: ' + esc(khoName(base.khoDen)) : (nhapKho ? 'Nhập' : 'Xuất') + ' tại kho: ' + esc(khoName(base.kho))}</p>`}
+          ${base.soLSX ? '<br>- Lệnh sản xuất: <b>' + esc(base.soLSX) + '</b> (bộ phận sản xuất)' : ''}<br>- Theo chứng từ số: ${esc((sign < 0 ? '' : p.soCTGoc) || '……')} ngày ${esc((sign < 0 ? '' : p.ngayCTGoc) || '……')}<br>- ${ck || cs || base.loai === 'CHUYEN_LOI' ? 'Từ kho: ' + esc(khoName(base.kho)) + ' → đến kho: ' + esc(khoName(base.khoDen)) : (nhapKho ? 'Nhập' : 'Xuất') + ' tại kho: ' + esc(khoName(base.kho))}</p>`}
       <table class="pv-t"><thead>${kk ? '<tr><th rowspan="2">STT</th><th rowspan="2">Tên vật tư, hàng hóa</th><th rowspan="2">Mã số</th><th rowspan="2">ĐVT</th><th rowspan="2">Đơn giá</th><th colspan="2">Số lượng</th><th colspan="2">Chênh lệch</th><th rowspan="2">Giá trị chênh lệch</th></tr><tr><th>Theo sổ sách</th><th>Theo kiểm kê</th><th>Thừa</th><th>Thiếu</th></tr>'
         : `<tr><th rowspan="2">STT</th><th rowspan="2">Tên, nhãn hiệu, quy cách vật tư, hàng hóa</th><th rowspan="2">Mã số</th><th rowspan="2">ĐVT</th><th colspan="2">Số lượng</th><th rowspan="2">Đơn giá</th><th rowspan="2">Thành tiền</th></tr><tr><th>Theo chứng từ</th><th>Thực ${nhapKho ? 'nhập' : 'xuất'}</th></tr>`}</thead>
         <tbody>${rows}<tr><td></td><td><b>Cộng</b></td><td></td><td></td><td></td><td></td><td></td>${kk ? '<td></td><td></td>' : ''}<td class="n"><b>${showMoney ? num(tot) : ''}</b></td></tr></tbody></table>
@@ -922,16 +929,18 @@
     const r = await load('report.loi', {}, 'Đang đọc kho hàng lỗi…'); if (!r.ok) return toast('Không đọc được: ' + (r.error || r.code));
     const R = r.data.rows, ed = canEdit() && !S.offline, many = activeKho(true).length > 1;
     dialog('Báo cáo kho hàng lỗi', R.length ? `<p class="mut" style="font-size:12.5px;margin-top:0">Kho hàng lỗi không tính giá vốn (giá trị 0) — chỉ theo dõi số lượng. Hàng của khách gửi sửa: trả lại bằng phiếu "Trả khách hàng đã sửa" từ phiếu nhận hàng lỗi.</p>
-      <div class="tbl" style="max-height:none"><table><thead><tr><th>Mã</th><th>Tên hàng</th><th class="n">Tồn kho lỗi</th><th>Serial trong kho lỗi</th><th>Đang gửi NCC</th>${ed ? '<th>Lập phiếu</th>' : ''}</tr></thead><tbody>
+      <div class="tbl" style="max-height:none"><table><thead><tr><th>Mã</th><th>Tên hàng</th><th class="n">Tồn kho lỗi</th><th>Serial trong kho lỗi</th><th>Giữ hộ khách</th><th>Đang gửi NCC</th>${ed ? '<th>Lập phiếu (hàng công ty)</th>' : ''}</tr></thead><tbody>
       ${R.map(x => { const tk = Object.entries(x.ton); return `<tr><td class="mono">${esc(x.maHang)}</td><td>${esc(x.ten)}</td><td class="n">${tk.length ? tk.map(([k, q]) => num(q) + ' ' + esc(x.dvt) + (many ? ' <small class="mut">' + esc(khoName(k)) + '</small>' : '')).join('<br>') : '—'}</td>
         <td><small class="mono">${x.serials.map(z => esc(z.serial)).join(', ')}</small></td>
+        <td>${(x.cuaKhach || []).map(c => `${esc(custName(c.maKH))}: <b>${num(c.soLuong)}</b>${c.serials.length ? ' <small class="mono">' + c.serials.map(esc).join(', ') + '</small>' : ''}${ed ? ` <button class="btn ghost" type="button" data-lgk="${esc(c.maKH)}" data-m="${esc(x.maHang)}" data-k="${esc((Object.keys(x.ton)[0]) || '')}">Gửi NCC</button>` : ''}`).join('<br>') || '—'}</td>
         <td>${x.dangGui.map(g => `<button class="linkbtn mono" type="button" data-vso="${esc(g.soPhieu)}">${esc(g.soPhieu)}</button> ${esc(vnD(g.ngay))} · ${esc(supName(g.maNCC))} · còn <b>${num(g.con)}</b>/${num(g.gui)}${g.serials.length ? '<br><small class="mono">' + g.serials.map(esc).join(', ') + '</small>' : ''}`).join('<br>')}</td>
-        ${ed ? `<td style="white-space:nowrap">${tk.length ? `<button class="btn ghost" type="button" data-lt="CHUYEN_SUA" data-m="${esc(x.maHang)}" data-k="${esc(tk[0][0])}">Về kho thường</button><button class="btn ghost" type="button" data-lt="GUI_NCC" data-m="${esc(x.maHang)}" data-k="${esc(tk[0][0])}">Gửi NCC</button><button class="btn ghost" type="button" data-lt="XUAT_HUY" data-m="${esc(x.maHang)}" data-k="${esc(tk[0][0])}">Huỷ</button>` : ''}</td>` : ''}</tr>`; }).join('')}</tbody></table></div>
+        ${ed ? `<td style="white-space:nowrap">${tk.length && x.congTy > 0 ? `<button class="btn ghost" type="button" data-lt="CHUYEN_SUA" data-m="${esc(x.maHang)}" data-k="${esc(tk[0][0])}">Về kho thường</button><button class="btn ghost" type="button" data-lt="GUI_NCC" data-m="${esc(x.maHang)}" data-k="${esc(tk[0][0])}">Gửi NCC</button><button class="btn ghost" type="button" data-lt="XUAT_HUY" data-m="${esc(x.maHang)}" data-k="${esc(tk[0][0])}">Xuất huỷ</button>` : ''}</td>` : ''}</tr>`; }).join('')}</tbody></table></div>
       <button class="btn" type="button" id="loiX">${ic('dl')} Xuất Excel</button>` : '<div class="empty">Kho hàng lỗi trống và không có hàng đang gửi NCC.</div>', null, d => {
       d.classList.add('wide');
       $$('[data-vso]', d).forEach(b => b.onclick = () => { d.close(); voucherView(b.dataset.vso); });
       $$('[data-lt]', d).forEach(b => b.onclick = () => { d.close(); voucherForm(b.dataset.lt, { kho: b.dataset.k, lines: [{ maHang: b.dataset.m }] }); });
-      const xb = $('#loiX', d); if (xb) xb.onclick = () => exportRows(`KhoHangLoi_${S.today}`, R.map(x => ({ 'Mã hàng': x.maHang, 'Tên hàng': x.ten, 'ĐVT': x.dvt, 'Tồn kho lỗi': Object.values(x.ton).reduce((a, q) => a + q, 0), 'Serial': x.serials.map(z => z.serial).join(', '), 'Đang gửi NCC': x.dangGui.map(g => `${g.soPhieu} (${supName(g.maNCC)}) còn ${g.con}/${g.gui}`).join('; ') })));
+      $$('[data-lgk]', d).forEach(b => b.onclick = () => { d.close(); voucherForm('GUI_NCC', { kho: b.dataset.k, maKH: b.dataset.lgk, lines: [{ maHang: b.dataset.m }] }); });
+      const xb = $('#loiX', d); if (xb) xb.onclick = () => exportRows(`KhoHangLoi_${S.today}`, R.map(x => ({ 'Mã hàng': x.maHang, 'Tên hàng': x.ten, 'ĐVT': x.dvt, 'Tồn kho lỗi': Object.values(x.ton).reduce((a, q) => a + q, 0), 'Của công ty': x.congTy, 'Giữ hộ khách': (x.cuaKhach || []).map(c => custName(c.maKH) + ': ' + c.soLuong).join('; '), 'Serial': x.serials.map(z => z.serial).join(', '), 'Đang gửi NCC': x.dangGui.map(g => `${g.soPhieu} (${supName(g.maNCC)}) còn ${g.con}/${g.gui}`).join('; ') })));
     });
   }
   async function exportRows(name, rows) {
@@ -1383,10 +1392,10 @@
   function ticketUpdate(t) {
     const next = { TIEP_NHAN: ['DANG_XU_LY', 'HOAN_THANH', 'TU_CHOI'], DANG_XU_LY: ['HOAN_THANH', 'TU_CHOI'] }[t.trangThai] || [];
     dialog('Cập nhật ' + esc(t.soPBH), `${fld('trangThai', 'Chuyển sang', next[0], { opts: next.map(k => [k, PBH_TT[k]]) })}${fld('nguyenNhan', 'Nguyên nhân', t.nguyenNhan, { opts: [['', '— Chưa xác định —'], ...Object.entries(NN)] })}
-      ${fld('ketQua', 'Kết quả xử lý / lý do từ chối', t.ketQua, { type: 'textarea' })}${fld('phiSua', 'Phí sửa chữa thu khách (₫, để trống nếu miễn phí)', t.phiSua === '' || t.phiSua === undefined ? '' : String(t.phiSua), { im: 'numeric' })}<p class="mut" style="font-size:12.5px">Sét đánh, quá áp, tác động cơ học, tự ý sửa chữa thuộc điều kiện loại trừ bảo hành ghi trên phiếu xuất xưởng. Phí sửa là căn cứ xuất hoá đơn dịch vụ.</p>`,
+      ${fld('ketQua', 'Kết quả xử lý / lý do từ chối', t.ketQua, { type: 'textarea' })}${fld('ngay', 'Ngày hoàn thành / từ chối (ghi nhận doanh thu sửa)', S.today, { type: 'date', max: S.today })}${fld('phiSua', 'Phí sửa chữa thu khách (₫, để trống nếu miễn phí)', t.phiSua === '' || t.phiSua === undefined ? '' : String(t.phiSua), { im: 'numeric' })}<p class="mut" style="font-size:12.5px">Sét đánh, quá áp, tác động cơ học, tự ý sửa chữa thuộc điều kiện loại trừ bảo hành ghi trên phiếu xuất xưởng. Phí sửa là căn cứ xuất hoá đơn dịch vụ.</p>`,
       async (v, dlg) => { const c = QBH.validateUpdate(v, t.trangThai); if (!c.ok) { showErrors(dlg, c.errors); dlgMsg(dlg, Object.values(c.errors)[0]); return false; }
         const ps = String(v.phiSua || '').replace(/[.\s,₫]/g, ''); if (ps && !/^\d+$/.test(ps)) { showErrors(dlg, { phiSua: 'Số tiền VND' }); return false; }
-        const r = await submitSX(dlg, 'bh.update', { soPBH: t.soPBH, trangThai: v.trangThai, ketQua: v.ketQua, nguyenNhan: v.nguyenNhan, phiSua: ps === '' ? undefined : Number(ps) }, z => `${t.soPBH}: ${PBH_TT[z.trangThai]}`); if (r) setTimeout(() => ticketView(t.soPBH), 0); return !!r; }, null, 'Lưu');
+        const r = await submitSX(dlg, 'bh.update', { soPBH: t.soPBH, trangThai: v.trangThai, ketQua: v.ketQua, nguyenNhan: v.nguyenNhan, phiSua: ps === '' ? undefined : Number(ps), ngay: ['HOAN_THANH', 'TU_CHOI'].includes(v.trangThai) ? v.ngay : undefined }, z => `${t.soPBH}: ${PBH_TT[z.trangThai]}`); if (r) setTimeout(() => ticketView(t.soPBH), 0); return !!r; }, null, 'Lưu');
   }
   /** Tiếp nhận bảo hành hàng KHÔNG serial (đèn…) theo phiếu xuất. */
   function ticketFormLe(p, L) {
@@ -1482,7 +1491,7 @@
     dialog('Chi phí bảo hành', `<div class="grid2"><div>${fld('from', 'Từ ngày', m0, { type: 'date' })}</div><div>${fld('to', 'Đến ngày', S.today, { type: 'date' })}</div></div><div id="bhR"></div>`,
       async (v, dlg) => { const r = await call('report.bh', { from: v.from, to: v.to }, 3); if (!r.ok) { dlgMsg(dlg, r.error || r.code); return false; }
         const x = r.data; $('#bhR', dlg).innerHTML = `<p>Chi phí linh kiện xuất bảo hành: <b>${money(x.tong)}</b> · tủ còn hạn bảo hành đến ${vnD(x.to)}: <b>${num(x.tuConBH)}</b> (cơ sở trích dự phòng TK 352)<br>Sửa có thu tiền: giá vốn linh kiện <b>${money(x.tongSua || 0)}</b> (TK 632) · phí sửa thu khách (phiếu hoàn thành trong kỳ) <b>${money(x.phiSua || 0)}</b> (TK 511)</p>
-          ${x.rows.length ? `<div class="tbl"><table><thead><tr><th>Phiếu xuất</th><th>Ngày</th><th>Phiếu BH</th><th>Tủ / hàng</th><th>Hình thức</th><th>Tình trạng</th><th class="n">Giá trị</th></tr></thead><tbody>${x.rows.map(z => `<tr><td class="mono">${esc(z.soPhieu)}</td><td>${vnD(z.ngay)}</td><td class="mono">${esc(z.soPBH)}</td><td class="mono">${esc(z.serialTu || z.serial || (z.maHang ? z.maHang + ' × ' + z.soLuong : ''))}</td><td>${z.loai === 'THU_TIEN' ? 'Sửa thu tiền' : z.thienChi ? 'Thiện chí' : 'Bảo hành'}</td><td>${esc(TT_BH[z.tinhTrangBH] || '')}${z.nguyenNhan ? ' · ' + esc(NN[z.nguyenNhan] || z.nguyenNhan) : ''}</td><td class="n">${num(z.giaTri)}</td></tr>`).join('')}</tbody></table></div>
+          ${x.rows.length ? `<div class="tbl"><table><thead><tr><th>Phiếu xuất</th><th>Ngày</th><th>Phiếu BH</th><th>Tủ / hàng</th><th>Hình thức</th><th>Tình trạng</th><th class="n">Giá trị</th></tr></thead><tbody>${x.rows.map(z => `<tr><td class="mono">${esc(z.soPhieu)}${z.dao ? ' <small class="mut">đảo ' + esc(z.phieuGoc) + '</small>' : ''}</td><td>${esc(vnD(z.ngay))}</td><td class="mono">${esc(z.soPBH)}</td><td class="mono">${esc(z.serialTu || z.serial || (z.maHang ? z.maHang + ' × ' + z.soLuong : ''))}</td><td>${z.loai === 'THU_TIEN' ? 'Sửa thu tiền' : z.thienChi ? 'Thiện chí' : 'Bảo hành'}</td><td>${esc(TT_BH[z.tinhTrangBH] || '')}${z.nguyenNhan ? ' · ' + esc(NN[z.nguyenNhan] || z.nguyenNhan) : ''}</td><td class="n">${num(z.giaTri)}</td></tr>`).join('')}</tbody></table></div>
           <button class="btn" type="button" id="bhX">${ic('dl')} Xuất Excel</button>` : '<div class="empty">Không có phiếu xuất bảo hành trong kỳ.</div>'}`;
         const xb = $('#bhX', dlg); if (xb) xb.onclick = () => exportRows(`ChiPhiBH_${v.from}_${v.to}`, x.rows.map(z => ({ 'Phiếu xuất': z.soPhieu, 'Ngày': z.ngay, 'Phiếu BH': z.soPBH, 'Tủ / hàng': z.serialTu || z.serial || z.maHang, 'Hình thức': z.loai === 'THU_TIEN' ? 'Sửa thu tiền' : z.thienChi ? 'Thiện chí' : 'Bảo hành', 'Tình trạng BH': TT_BH[z.tinhTrangBH] || '', 'Nguyên nhân': NN[z.nguyenNhan] || '', 'Thiện chí': z.thienChi, 'Giá trị': z.giaTri })));
         return false; }, dlg => dlg.classList.add('wide'), 'Xem báo cáo');
@@ -1598,7 +1607,7 @@
     if (S.scanStop) S.scanStop();
     const d = $('#dlg');
     const back = document.activeElement;
-    d.innerHTML = `<form method="dialog" novalidate><header><h2>${title}</h2><button class="btn ghost iconbtn" type="button" data-x aria-label="Đóng">${ic('x')}</button></header><div class="body">${body}<div class="dlgmsg" id="dlgMsg" role="alert"></div></div>${onSubmit ? `<footer><button class="btn" type="button" data-x>Huỷ</button><button class="btn pri" id="dlgOk" type="submit">${submitText}</button></footer>` : ''}</form>`;
+    d.innerHTML = `<form method="dialog" novalidate><header><h2>${title}</h2><button class="btn ghost iconbtn" type="button" data-x aria-label="Đóng">${ic('x')}</button></header><div class="body">${body}<div class="dlgmsg" id="dlgMsg" role="alert"></div></div>${onSubmit ? `<footer><button class="btn" type="button" data-x>Đóng</button><button class="btn pri" id="dlgOk" type="submit">${submitText}</button></footer>` : ''}</form>`;
     const f = $('form', d);
     d._rid = null; d._guard = null;   // 1 requestId cho cả vòng đời hộp thoại: bấm Lưu lại sau khi mất phản hồi KHÔNG tạo phiếu thứ 2
     d._dirty = false; d._noGuard = /^(Báo cáo|Chi phí bảo hành|Tra )/.test(title) || ['Xem', 'Tra', 'Lọc'].includes(submitText);   // hộp lọc / tra cứu: không hỏi lại khi đóng

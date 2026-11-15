@@ -44,7 +44,7 @@ async function page(b, vp, email = OWNER) {
   const ctx = await b.newContext({ viewport: vp, serviceWorkers: 'block', hasTouch: vp.width < 900 });
   const p = await ctx.newPage();
   p.on('pageerror', e => { console.log('JS lỗi: ' + e.message); fails.push('JS lỗi: ' + e.message); });
-  p.on('dialog', dg => dg.accept());
+  p._dlgs = []; p.on('dialog', dg => { p._dlgs.push(dg.message()); dg.accept(); });
   await p.addInitScript(() => { window.print = () => { window.__printHTML = (document.getElementById('printArea') || {}).innerHTML; }; });
   await p.route('https://script.google.com/**', async rt => rt.fulfill({ contentType: 'application/json', body: api.doPost({ postData: { contents: rt.request().postData() } }).t }));
   await p.route('https://accounts.google.com/**', async rt => { const u = new URL(rt.request().url()); api.st.email = email; api.st.nonce = u.searchParams.get('nonce'); await rt.fulfill({ status: 302, headers: { location: BASE + '#id_token=' + jwt(api.st.nonce) + '&state=LAVIPCO' } }); });
@@ -69,6 +69,8 @@ const reload = async p => { await p.reload(); await p.waitForFunction(() => wind
     // báo cáo kho lỗi
     await p.goto(BASE + '#/kho'); await settle(p); await p.click('#loiR'); await p.waitForSelector('#loiX');
     const lr = await dlgT(p); ok(lr.includes('VPC005') && lr.includes('Đèn LED 100W') && lr.includes('không tính giá vốn'), 'báo cáo kho hàng lỗi: serial + hàng không serial');
+    ok(lr.includes('Giữ hộ khách') && !(await p.$('[data-lt][data-m="DEN-LED"]')) && !!(await p.$('[data-lgk="TN"][data-m="DEN-LED"]')), 'vòng 1 KT-C3/A2: đèn của khách hiện ở cột Giữ hộ khách, không có nút Về kho thường / Xuất huỷ');
+    ok(await p.textContent('[data-lt="XUAT_HUY"][data-m="LOGO"]') === 'Xuất huỷ', 'vòng 1 C2: nút ở báo cáo kho lỗi ghi "Xuất huỷ"');
     await p.screenshot({ path: SHOTS + '/d3-kho-loi.png' });
     // gửi NCC từ báo cáo kho lỗi
     await p.click('[data-lt="GUI_NCC"][data-m="LOGO"]'); await p.waitForSelector('#vLines');
@@ -87,7 +89,9 @@ const reload = async p => { await p.reload(); await p.waitForFunction(() => wind
     ok(/lý do/i.test(await p.textContent('#e_lyDo')), 'nhập khác thiếu lý do → báo lỗi tại ô');
     await p.fill('#f_lyDo', 'Thừa khi kiểm hàng về'); await p.click('#dlgOk'); ok(await closed(p), 'lưu phiếu Nhập khác');
     // xuất huỷ
-    await pick(p, 'XUAT_HUY'); await p.fill('#l_ma_0', 'CT'); await p.dispatchEvent('#l_ma_0', 'change'); await settle(p);
+    await pick(p, 'XUAT_HUY');
+    ok(!(await p.$('#f_nguoiGiaoNhan')) && (await p.textContent('#dlg footer [data-x]')).trim() === 'Đóng', 'vòng 1 C2: form xuất huỷ không có ô Người nhận, nút đóng ghi "Đóng"');
+    await p.fill('#l_ma_0', 'CT'); await p.dispatchEvent('#l_ma_0', 'change'); await settle(p);
     await p.fill('#l_sl_0', '1'); await p.fill('#f_lyDo', 'BB huỷ 01 — vỡ'); await p.click('#dlgOk'); ok(await closed(p), 'lưu phiếu Xuất huỷ');
     // chuyển hàng đã sửa về kho thường (CT ở kho lỗi)
     await pick(p, 'CHUYEN_SUA'); await p.fill('#l_ma_0', 'CT'); await p.dispatchEvent('#l_ma_0', 'change'); await settle(p);
@@ -118,6 +122,9 @@ const reload = async p => { await p.reload(); await p.waitForFunction(() => wind
     ok((await dlgT(p)).includes('Lần thay đã huỷ'), 'phiếu BH hiện "Lần thay đã huỷ"');
     ok(ser('VPC003').trangThai === 'TRONG_KHO' && ser('VPC001').trangThai === 'DA_LAP', 'huỷ lần thay: LOGO! mới về kho, LOGO! cũ lắp lại');
     await p.click('[data-x]'); await closed(p);
+    await pick(p, 'XUAT_HUY'); await p.fill('#l_ma_0', 'LOGO'); await p.dispatchEvent('#l_ma_0', 'change'); await p.waitForSelector('#l_sp_0');
+    await p.fill('#l_sl_0', '1'); await p.check('#l_sp_0 input[data-s="VPC004"]'); await p.fill('#f_lyDo', 'BB huỷ 02 — cháy'); p._dlgs.length = 0; await p.click('#dlgOk'); ok(await closed(p), 'xuất huỷ LOGO! có serial');
+    ok(p._dlgs.some(m => m.includes('VPC004') && m.includes('không dùng lại')), 'vòng 1 C3: xuất huỷ có serial hỏi xác nhận, nêu serial');
     ok(await noOverflow(p), 'máy tính: không tràn ngang');
     await p.close();
   }
@@ -127,6 +134,8 @@ const reload = async p => { await p.reload(); await p.waitForFunction(() => wind
   // ================= điện thoại — Nhập liệu =================
   {
     const p = await page(b, { width: 390, height: 844 }, 'nv@gmail.com');
+    await p.goto(BASE + '#/kho'); await settle(p); ok(await p.isVisible('#loiRM'), 'vòng 1 B2: điện thoại thấy nút Kho hàng lỗi');
+    await p.click('#loiRM'); await p.waitForFunction(() => document.querySelector('#dlg').open && document.querySelector('#dlg h2').textContent.includes('kho hàng lỗi')); ok(await noOverflow(p), 'điện thoại: báo cáo kho lỗi không tràn ngang'); await p.click('[data-x]'); await closed(p);
     await p.goto(BASE + '#/bh'); await settle(p); await p.click('[data-tab=pbh]'); await settle(p); await p.click(`[data-pbh="${pbh2}"]`); await p.waitForSelector('#pXB');
     ok((await dlgT(p)).includes('Ngoài bảo hành'), 'PBH ngoài BH: gợi ý sửa có thu tiền / xuất bán');
     await p.click('#pXB'); await p.waitForSelector('#vLines');

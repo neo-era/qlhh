@@ -300,3 +300,7 @@ dialog.kcsd .body{display:flex;flex-direction:column}
 .nccrow .in{flex:1 1 180px;min-width:0}
 ul.conlist li{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:4px 0}
 ul.conlist li .btn{min-height:44px}
+
+/* đợt 3 vòng 1: nút chỉ hiện trên điện thoại (thanh .top bị ẩn) */
+.monly{display:none}.mrow{gap:8px;flex-wrap:wrap;margin:0 0 10px}
+@media (max-width:899px),(orientation:landscape) and (max-height:520px){.monly{display:flex}}
