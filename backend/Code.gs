@@ -18,7 +18,7 @@ function setup() {
     }
     s.setFrozenRows(1);
     if (typeof s.getProtections === 'function' && SpreadsheetApp.ProtectionType && !s.getProtections(SpreadsheetApp.ProtectionType.SHEET).length) s.protect().setDescription('QLHH — dữ liệu do app ghi; sửa tay có thể làm sai số liệu').setWarningOnly(true);   // sửa tay → Sheets hỏi lại
-    d.cols.forEach(function (c, i) { if ((d.num || []).indexOf(c) < 0) { var L = String.fromCharCode(65 + i); s.getRange(L + ':' + L).setNumberFormat('@'); } });   // mọi cột chữ dạng văn bản: không tự đổi kiểu, không chạy công thức
+    d.cols.forEach(function (c, i) { if ((d.num || []).indexOf(c) < 0) { var L = colLetter(i); s.getRange(L + ':' + L).setNumberFormat('@'); } });   // mọi cột chữ dạng văn bản: không tự đổi kiểu, không chạy công thức
   });
   var nd = ss.getSheetByName('NguoiDung');
   var has = nd.getDataRange().getValues().some(function (r) { return String(r[0]).trim().toLowerCase() === me; });
@@ -37,6 +37,9 @@ function setup() {
   }
   Logger.log('Xong setup v%s. Chủ: %s', VER, me);
 }
+
+/** Chữ cái cột theo chỉ số 0: 0 → A, 25 → Z, 26 → AA (bảng > 26 cột, vd PhieuBaoHanh). */
+function colLetter(i) { var s = ''; i += 1; while (i > 0) { var m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; }
 
 // ======================= KHUNG =======================
 function doGet() { return out({ ok: true, code: 'OK', data: { app: 'QLHH', ver: VER } }); }
@@ -107,6 +110,8 @@ var HANDLERS = {
   'bh.replace': function (u, r) { return write(u, r, bhReplace); },
   'install.void': function (u, r) { return write(u, r, installVoid); },
   'report.bh': reportBH,
+  'bh.replaceVoid': function (u, r) { return write(u, r, bhReplaceVoid); },
+  'report.loi': reportLoi,
   'sx.get': sxGet,
   'serial.get': serialGet
 };

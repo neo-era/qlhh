@@ -331,7 +331,8 @@ function pxxIssue(u, req, logs) {
   var x = req.pxx || {}, ngay = chkDate(String(x.ngay || today()));
   if (!Array.isArray(x.serials) || !x.serials.length || x.serials.length > 50 || x.serials.some(function (s) { return typeof s !== 'string'; })) throw fail('VALIDATION', 'Chọn 1–50 tủ', { serials: '1–50 tủ' });
   var heads = cabHeads(), sers = uniq(x.serials.map(QSerial.norm)), hs = mapBy(readTable('HoSoTu').rows.filter(function (c) { return cabOK(c, heads); }), 'serial'), mau = null;
-  var inPxx = {}, lp = livePxx(); readTable('PhieuXuatXuong').rows.forEach(function (p) { if (p.trangThai === 'PHAT_HANH') parseSerials(p.serials).forEach(function (s) { inPxx[s] = p.soPXX; }); });
+  var inPxx = {}, lp = livePxx(); readTable('PhieuXuatXuong').rows.forEach(function (p) { if (p.trangThai !== 'PHAT_HANH') return; var tra = {}; parseSerials(p.traLai).forEach(function (z) { tra[z.serial] = 1; });
+    parseSerials(p.serials).forEach(function (s) { if (!tra[s]) inPxx[s] = p.soPXX; }); });   // tủ khách đã trả lại không còn thuộc PXX cũ
   sers.forEach(function (s) { var c = hs[s];
     if (!c) throw fail('VALIDATION', 'Không có hồ sơ tủ ' + s, { serials: s });
     if (!c.kcsDat) throw fail('VALIDATION', 'Tủ ' + s + ' chưa đạt kiểm tra xuất xưởng (KCS)', { serials: s });

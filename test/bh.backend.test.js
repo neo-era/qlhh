@@ -84,6 +84,7 @@ test('khách trả tủ rồi bán lại → chu kỳ bảo hành mới (bàn gi
   const x = sold(); lap(x, x.t1);
   x.W('voucher.create', { voucher: { loai: 'KHACH_TRA', ngay: '2026-11-10', kho: 'KHO', maKH: 'TN', phieuGoc: x.px, lines: [{ maHang: 'TU-DKCS-2N', soLuongCT: 1, dongGoc: 1, serials: [x.t1] }] } });
   assert.equal(x.W('serial.get', { serial: x.t1 }).baoHanh.ngayBanGiao, undefined, 'tủ về kho → hết chu kỳ cũ');
+  x.W('kcs.add', { serial: x.t1, ngay: '2026-11-11', ketQua: x.pass() }, x.nv);   // đợt 3 (B7): tủ khách trả phải KCS lại trước khi bán
   x.W('voucher.create', { voucher: { loai: 'XUAT_BAN', ngay: '2026-11-11', kho: 'KHO', maKH: 'TN', maCongTrinh: 'PDG', lines: [{ maHang: 'TU-DKCS-2N', soLuongCT: 1, serials: [x.t1] }] } });
   const r = lap(x, x.t1, { ngay: '2026-11-11' }); assert.equal(r.ok, true, JSON.stringify(r));
   assert.equal(r.data.hanBH, '2027-11-10');
@@ -144,6 +145,7 @@ test('BH-B4/B5 thay LOGO! phải chọn LOGO! cũ thu hồi; phiếu BH không t
 test('BH-B9 khách trả rồi bán lại cùng ngày → vẫn bàn giao lại được (chu kỳ theo số phiếu xuất); B6 Quản trị huỷ dòng bàn giao ghi nhầm', () => {
   const x = sold(); lap(x, x.t1, { ngay: '2026-11-09' });
   x.W('voucher.create', { voucher: { loai: 'KHACH_TRA', ngay: '2026-11-09', kho: 'KHO', maKH: 'TN', phieuGoc: x.px, lines: [{ maHang: 'TU-DKCS-2N', soLuongCT: 1, dongGoc: 1, serials: [x.t1] }] } });
+  x.W('kcs.add', { serial: x.t1, ngay: '2026-11-09', ketQua: x.pass() }, x.nv);   // đợt 3 (B7): KCS lại
   x.W('voucher.create', { voucher: { loai: 'XUAT_BAN', ngay: '2026-11-09', kho: 'KHO', maKH: 'TN', maCongTrinh: 'PDG', lines: [{ maHang: 'TU-DKCS-2N', soLuongCT: 1, serials: [x.t1] }] } });
   const r = lap(x, x.t1, { ngay: '2026-11-09', thangBH: 6 }); assert.equal(r.ok, true, JSON.stringify(r)); assert.equal(r.data.hanBH, '2027-05-08');
   assert.equal(x.pull().data.cabinets.find(c => c.serial === x.t1).ngayXuat, '2026-11-09');

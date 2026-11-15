@@ -70,7 +70,7 @@ function loadVouchers(mas, lsxs) {   // lsxs: lệnh SX của phiếu sắp ghi 
 }
 function loadVoucher(so) {
   var h = findByKey('Phieu', so); if (!h) return null;
-  h.lines = readTable('ChiTietPhieu').rows.filter(function (l) { return l.soPhieu === so; }).map(function (l) { l.serials = parseSerials(l.serials); return l; });
+  h.lines = readTable('ChiTietPhieu').rows.filter(function (l) { return l.soPhieu === so; }).map(function (l) { l.serials = parseSerials(l.serials); l.serialsDoi = parseSerials(l.serialsDoi); return l; });
   return h;
 }
 function engineMsg(r) {
@@ -173,6 +173,7 @@ function cleanOne(so, logs) {
       nguoiGiaoNhan: '', lyDo: 'Lỗi ghi hệ thống — bỏ số (lệnh ghi dở đã được dọn)', soCTGoc: '', ngayCTGoc: '', tongTien: 0, ghiChu: '', nguoiTao: info.email || '', thoiGian: nowIso(), requestId: info.rid || '', hieuLuc: '', soLSX: '' }]);   // đầu phiếu "bỏ số": số phiếu nhảy có giải thích; quét đầy đủ không coi là mồ côi nữa
     revertSerials(so);
     if (info.loai === 'NHAP_TP') cabinetsVoid(so);   // hồ sơ tủ của phiếu nhập TP dở dang
+    if (info.loai === 'KHACH_TRA' && typeof cabReturnUndo === 'function') cabReturnUndo(so);   // tủ khách trả ghi dở: khôi phục KCS, PXX, phiếu BH
     var mas = (info.mas || []).concat(readTable('ChiTietPhieu').rows.filter(function (l) { return l.soPhieu === so; }).map(function (l) { return l.maHang; }));
     if (info.loai === 'DAO' && info.phieuGoc) { var g = loadVoucher(info.phieuGoc); if (g) { mas = mas.concat(g.lines.map(function (l) { return l.maHang; })); if (g.daDao) setVoucherState(g.soPhieu, g.trangThai, { daDao: false }); } }
     if (mas.length) rebuildFor(uniq(mas));   // dòng phiếu không có đầu phiếu bị bỏ qua khi tính → TonKho, giá vốn về đúng
@@ -214,7 +215,7 @@ function rebuildFor(mas) {
 }
 
 // ---------- lập phiếu ----------
-var SX_ONLY = ['NHAP_TP', 'NHAP_LAI_SX', 'XUAT_SX'], GOC_OK = ['KHACH_TRA', 'TRA_NCC'];
+var SX_ONLY = ['NHAP_TP', 'NHAP_LAI_SX', 'XUAT_SX'], GOC_OK = ['KHACH_TRA', 'TRA_NCC', 'NHAN_NCC', 'TRA_KHACH_SUA'];
 var SERIAL_RE = /^[A-Z0-9][A-Z0-9._\/\-]{0,59}$/;
 /** Phiếu đã HOÀN TẤT với cùng requestId của cùng người (lỗi xảy ra sau khi ghi phiếu, trước khi ghi Request) → trả lại kết quả cũ. */
 function doneByRequest(id, email) {   // ghi ở cache NGAY khi phiếu HOÀN TẤT (trước NhatKy/Request) — tra O(1), không quét sheet
@@ -229,7 +230,8 @@ function headByReq(req, email, dao) {
 /** Gửi lại sau khi phiếu đã ghi đủ: làm lại các bước SAU đầu phiếu (đều làm lại được an toàn) rồi trả kết quả cũ. */
 function voucherReplay(h, logs, act) {
   var ks = uniq(readTable('LichSuSerial').rows.filter(function (x) { return x.soPhieu === h.soPhieu; }).map(function (x) { return x.key; }));
-  if (act === 'voucher.reverse') { var g = findByKey('Phieu', h.phieuGoc); if (g && g.loai === 'NHAP_TP') cabinetsVoid(g.soPhieu); if (g && g.soLSX) lsxRefresh(g.soLSX); }
+  if (act === 'voucher.reverse') { var g = findByKey('Phieu', h.phieuGoc); if (g && g.loai === 'NHAP_TP') cabinetsVoid(g.soPhieu); if (g && g.soLSX) lsxRefresh(g.soLSX); if (g && g.loai === 'KHACH_TRA' && typeof cabReturnUndo === 'function') cabReturnUndo(g.soPhieu); }
+  if (act === 'voucher.create' && h.loai === 'KHACH_TRA' && ks.length && typeof cabReturn === 'function') cabReturn(h.soPhieu, h, ks);
   if (ks.length && typeof cabExitSync === 'function') cabExitSync(ks);
   logs.push({ action: act, doiTuong: 'Phieu', id: h.soPhieu, truoc: null, sau: { lapLai: true } });
   return { soPhieu: h.soPhieu, stt: h.stt, tinhLai: 0, lapLai: true };
@@ -248,6 +250,7 @@ function voucherPrep(u, req, sx) {
   if (!sx && SX_ONLY.indexOf(h.loai) >= 0) throw fail('VALIDATION', 'Phiếu sản xuất được lập từ Lệnh sản xuất', { loai: 'Không lập trực tiếp' });
   if (h.loai === 'TON_DAU' && u.vaiTro !== 'QUAN_TRI') throw fail('FORBIDDEN', 'Chỉ Quản trị lập phiếu tồn đầu kỳ');
   if (!sx && h.loai === 'XUAT_BH') throw fail('VALIDATION', 'Phiếu xuất bảo hành được lập từ Phiếu bảo hành (nút "Thay linh kiện") — linh kiện bán cho khách thì lập Phiếu xuất bán', { loai: 'Lập từ phiếu bảo hành' });
+  if (!sx && h.loai === 'XUAT_SUA') throw fail('VALIDATION', 'Phiếu xuất sửa chữa được lập từ Phiếu bảo hành (Thay linh kiện — sửa có thu tiền)', { loai: 'Lập từ phiếu bảo hành' });
   if (!sx && h.loai === 'NHAP_HANG_LOI' && /BH-\d{4}-\d+/i.test(String(h.soCTGoc || '') + ' ' + String(h.lyDo || ''))) throw fail('VALIDATION', 'Linh kiện thu hồi khi bảo hành được nhận về kho lỗi qua Phiếu bảo hành (nút "Thay linh kiện")', { soCTGoc: 'Không ghi số phiếu bảo hành' });
   if (h.loai === 'TRA_NCC' && !h.maNCC) throw fail('VALIDATION', 'Chọn nhà cung cấp nhận hàng trả', { maNCC: 'Bắt buộc' });
   noFuture(h);
@@ -257,11 +260,15 @@ function voucherPrep(u, req, sx) {
     if (!k[1]) return; var w = kho[k[1]];
     if (!w || w.trangThai !== 'HOAT_DONG') throw fail('VALIDATION', 'Kho ' + k[1] + ' không có hoặc đã ngừng', mk(k[0], 'Chọn kho đang hoạt động'));
   });
+  var gG = h.phieuGoc && (h.loai === 'NHAN_NCC' || h.loai === 'TRA_KHACH_SUA') ? findByKey('Phieu', h.phieuGoc) : null;
+  if (h.loai === 'NHAN_NCC' && gG && gG.maNCC && gG.maNCC !== h.maNCC) throw fail('VALIDATION', 'Phiếu gửi ' + h.phieuGoc + ' là của NCC ' + gG.maNCC, { maNCC: 'Nhận đúng NCC đã gửi' });
+  if (h.loai === 'TRA_KHACH_SUA' && gG) { h.maKH = gG.maKH; h.maCongTrinh = gG.maCongTrinh; }   // hàng của khách nào trả đúng khách đó
+  var zeroP = h.loai === 'NHAN_NCC' && kho[h.kho] && kho[h.kho].loai === 'HANG_LOI';   // nhận về kho lỗi: giá 0 (kho lỗi không tính giá vốn)
   var has = function (n, k, v) { return v && readTable(n).rows.some(function (r) { return r[k] === v; }); };   // 1 lần đọc bảng nhỏ thay cho tìm từng dòng
   if (h.maNCC && !has('NhaCungCap', 'maNCC', h.maNCC)) throw fail('VALIDATION', 'Nhà cung cấp ' + h.maNCC + ' chưa có', { maNCC: 'Chọn NCC có sẵn' });
   if (h.maKH && !has('KhachHang', 'maKH', h.maKH)) throw fail('VALIDATION', 'Khách hàng ' + h.maKH + ' chưa có', { maKH: 'Chọn khách có sẵn' });
   if (h.maCongTrinh && !has('CongTrinh', 'maCongTrinh', h.maCongTrinh)) throw fail('VALIDATION', 'Công trình ' + h.maCongTrinh + ' chưa có', { maCongTrinh: 'Chọn công trình có sẵn' });
-  if (!sx && !(h.loai === 'KHACH_TRA' && h.phieuGoc)) custProj(h.maKH, h.maCongTrinh);   // chỉ khi người dùng tự chọn; phiếu sinh từ lệnh/bảo hành, khách trả theo phiếu gốc thì kế thừa
+  if (!sx && !((h.loai === 'KHACH_TRA' || h.loai === 'TRA_KHACH_SUA') && h.phieuGoc)) custProj(h.maKH, h.maCongTrinh);   // chỉ khi người dùng tự chọn; phiếu sinh từ lệnh/bảo hành, khách trả theo phiếu gốc thì kế thừa
   if (h.loai === 'TRA_NCC' && h.phieuGoc) { var gN = findByKey('Phieu', h.phieuGoc); if (gN && gN.maNCC && gN.maNCC !== h.maNCC) throw fail('VALIDATION', 'Phiếu gốc ' + h.phieuGoc + ' là của NCC ' + gN.maNCC, { maNCC: 'Trả đúng NCC đã nhập' }); }
   var items = mapBy(readTable('HangHoa').rows, 'maHang'), qd = readTable('QuyDoiDVT').rows, priced = QStock.TYPES[h.loai].cost === 'PRICE';
   var lines = [], le = [];
@@ -275,15 +282,21 @@ function voucherPrep(u, req, sx) {
       if (!Array.isArray(l.serials) || l.serials.length > 1000 || l.serials.some(function (z) { return typeof z !== 'string' || !SERIAL_RE.test(QSerial.norm(z)); })) { le.push({ dong: d, field: 'serials', msg: 'Số serial chỉ gồm chữ không dấu, số, . _ / - (≤ 60 ký tự)' }); return; }
       ser = l.serials.map(QSerial.norm);
     }
-    var y = { dong: d, maHang: ma, dvt: it.dvt, soLuongCT: '', heSo: 1, soLuong: '', donGia: '', thanhTien: '', giaTriKho: '', slSoSach: '', slThucTe: '', dongGoc: Number(l.dongGoc) || '', serials: ser };
+    var doi = [];
+    if (it.quanLySerial && h.loai === 'NHAN_NCC' && l.serialsDoi !== undefined && l.serialsDoi !== null) {   // serial gửi đi được NCC đổi bằng serial mới
+      if (!Array.isArray(l.serialsDoi) || l.serialsDoi.length > 1000 || l.serialsDoi.some(function (z) { return typeof z !== 'string' || !SERIAL_RE.test(QSerial.norm(z)); })) { le.push({ dong: d, field: 'serialsDoi', msg: 'Serial được đổi không hợp lệ' }); return; }
+      doi = l.serialsDoi.map(QSerial.norm);
+    }
+    var y = { dong: d, maHang: ma, dvt: it.dvt, soLuongCT: '', heSo: 1, soLuong: '', donGia: '', thanhTien: '', giaTriKho: '', slSoSach: '', slThucTe: '', dongGoc: Number(l.dongGoc) || '', serials: ser, serialsDoi: doi };
     if (h.loai === 'KIEM_KE') { y.slThucTe = Number(l.slThucTe); y.soLuongCT = y.slThucTe; }
     else {
       if (typeof l.soLuongCT !== 'number' && typeof l.soLuongCT !== 'string' || !(Number(l.soLuongCT) > 0)) { le.push({ dong: d, field: 'soLuongCT', msg: 'Số lượng phải là số > 0' }); return; }
-      var c = QStock.convert({ maHang: ma, dvt: String(l.dvt || it.dvt), soLuongCT: l.soLuongCT, gia: priced ? l.gia : undefined }, it, qd);
+      var lg = zeroP ? 0 : l.gia;
+      var c = QStock.convert({ maHang: ma, dvt: String(l.dvt || it.dvt), soLuongCT: l.soLuongCT, gia: priced ? lg : undefined }, it, qd);
       if (c.error) { le.push({ dong: d, field: 'dvt', msg: c.error }); return; }
       y.dvt = c.dvt; y.soLuongCT = Number(l.soLuongCT); y.heSo = c.heSo; y.soLuong = c.soLuong;
       if (priced) {
-        var g = Number(l.gia);
+        var g = (l.gia === undefined || l.gia === null || l.gia === '') && !zeroP ? NaN : Number(lg);
         if (!(g >= 0) || !Number.isInteger(g) || g > 1e12) { le.push({ dong: d, field: 'gia', msg: 'Đơn giá là số nguyên VND từ 0 đến 1.000 tỷ' }); return; }
         y.donGia = c.donGia; y.thanhTien = QStock.money(y.soLuongCT * g);
         if (!Number.isSafeInteger(y.thanhTien)) { le.push({ dong: d, field: 'gia', msg: 'Thành tiền quá lớn' }); return; }
@@ -306,7 +319,7 @@ function voucherCreate(u, req, logs, ctx) {
   markDone(req.requestId, u.email, r.soPhieu, r.stt);
   return { soPhieu: r.soPhieu, stt: r.stt, tinhLai: r.tinhLai };
 }
-var BAN_RA = ['XUAT_BAN', 'XUAT_CONG_TRINH', 'XUAT_BH'];
+var BAN_RA = ['XUAT_BAN', 'XUAT_CONG_TRINH', 'XUAT_BH', 'XUAT_SUA'];
 /** Ghi 1 phiếu (trong khoá). opt.beforeHead(soPhieu): ghi thêm dữ liệu kèm phiếu TRƯỚC khi ghi đầu phiếu (vd hồ sơ tủ). */
 function commitVoucher(u, req, logs, ctx, opt) {
   opt = opt || {};
@@ -347,12 +360,13 @@ function commitVoucher(u, req, logs, ctx, opt) {
     trangThai: 'HOAN_TAT', nguoiGiaoNhan: h.nguoiGiaoNhan, lyDo: h.lyDo, soCTGoc: h.soCTGoc, ngayCTGoc: h.ngayCTGoc, tongTien: tong, ghiChu: h.ghiChu, nguoiTao: u.email, thoiGian: nowIso(), requestId: String(req.requestId), hieuLuc: '', soLSX: h.soLSX || '' };
   if (lines.some(function (l) { return JSON.stringify(l.serials).length > 45000; })) throw fail('VALIDATION', 'Quá nhiều serial trong 1 dòng — tách phiếu', null);
   markPending(so, { loai: h.loai, phieuGoc: h.phieuGoc, mas: mas, ngay: h.ngay, kho: h.kho, email: u.email, rid: String(req.requestId) });
-  appendBlock('ChiTietPhieu', lines.map(function (l) { var c = {}; for (var k in l) c[k] = l[k]; c.serials = l.serials.length ? JSON.stringify(l.serials.map(QSerial.norm)) : ''; return c; }));
+  appendBlock('ChiTietPhieu', lines.map(function (l) { var c = {}; for (var k in l) c[k] = l[k]; c.serials = l.serials.length ? JSON.stringify(l.serials.map(QSerial.norm)) : ''; c.serialsDoi = l.serialsDoi && l.serialsDoi.length ? JSON.stringify(l.serialsDoi) : ''; return c; }));
   applySerials(sr.changes, so);
   var changed = all ? applyChanges(r.changes, all.rowOf, mas) : 0;
   if (all) syncKcHuy(r.result.lsx);
   Object.keys(r.result.ton).forEach(function (m) { var t = r.result.ton[m]; if (t.last && t.last.stt === sttTry) t.last.stt = stt; });
   writeTon(r.result.ton, mas); updateCost(r.result.ton, mas);
+  if (h.loai === 'KHACH_TRA' && sr.changes.length && typeof cabReturn === 'function') cabReturn(so, h, sr.changes.map(function (c) { return c.key; }));   // tủ khách trả: KCS lại, gỡ PXX, đóng phiếu BH — TRƯỚC đầu phiếu (chết giữa chừng thì dọn phiếu dở hoàn tác)
   if (opt.beforeHead) opt.beforeHead(so, r);
   appendBlock('Phieu', [head]);   // ĐẦU PHIẾU GHI CUỐI, 1 LẦN: có đầu phiếu = phiếu đủ (thiếu đầu phiếu thì dòng phiếu bị bỏ qua và được dọn)
   clearPending(so);
@@ -362,6 +376,12 @@ function commitVoucher(u, req, logs, ctx, opt) {
 }
 function mk(k, v) { var o = {}; o[k] = v; return o; }
 
+/** Phiếu do luồng Thay linh kiện của phiếu bảo hành sinh ra (XB / XR / HL) — không đảo riêng (linh kiện gắn với hồ sơ tủ); huỷ cả lần thay bằng bh.replaceVoid. */
+function thayBHVoucher(g) {
+  if (g.loai === 'XUAT_SUA') return true;   // chỉ lập được từ phiếu bảo hành
+  return (g.loai === 'XUAT_BH' || g.loai === 'NHAP_HANG_LOI') && readTable('PhieuBaoHanh').rows.some(function (t) { return t.soPBH === g.soCTGoc && ((String(t.soPhieuXuat) + ',' + String(t.soPhieuLoi)).split(/\s*,\s*/).indexOf(g.soPhieu) >= 0
+      || /^(Bảo hành|Linh kiện thu hồi khi bảo hành|Sửa chữa thu tiền) /.test(String(g.lyDo || ''))); });   // kể cả lần thay chết giữa chừng; phiếu lập tay kiểu cũ thì đảo được
+}
 function voucherReverse(u, req, logs) {
   var dup = doneByRequest(req.requestId, u.email); if (dup) return dup;
   var ph = headByReq(req, u.email, true); if (ph) { var rp = voucherReplay(ph, logs, 'voucher.reverse'); markDone(req.requestId, u.email, rp.soPhieu, rp.stt); return { soPhieu: rp.soPhieu, tinhLai: 0, lapLai: true }; }
@@ -371,26 +391,34 @@ function voucherReverse(u, req, logs) {
   if (!QValidate.isoDate(ngay)) throw fail('VALIDATION', 'Ngày phiếu đảo không hợp lệ', { ngay: 'YYYY-MM-DD' });
   noFuture({ ngay: ngay });
   var g = loadVoucher(gso); if (!g || g.trangThai !== 'HOAN_TAT') throw fail('VALIDATION', 'Không có phiếu ' + gso, { phieuGoc: 'Phiếu không tồn tại' });
-  if ((g.loai === 'XUAT_BH' || g.loai === 'NHAP_HANG_LOI') && readTable('PhieuBaoHanh').rows.some(function (t) { return t.soPBH === g.soCTGoc && ((String(t.soPhieuXuat) + ',' + String(t.soPhieuLoi)).split(/\s*,\s*/).indexOf(gso) >= 0
-      || /^(Bảo hành|Linh kiện thu hồi khi bảo hành) /.test(String(g.lyDo || ''))); }))   // phiếu do luồng Thay linh kiện sinh ra (kể cả lần thay chết giữa chừng); phiếu lập tay kiểu cũ thì đảo được
-    throw fail('VALIDATION', 'Phiếu ' + gso + ' là lần thay linh kiện của phiếu bảo hành ' + g.soCTGoc + ' — không đảo riêng (linh kiện đang gắn với hồ sơ tủ)', null);
+  if (thayBHVoucher(g)) throw fail('VALIDATION', 'Phiếu ' + gso + ' là lần thay linh kiện của phiếu bảo hành ' + g.soCTGoc + ' — không đảo riêng; Quản trị dùng "Huỷ lần thay" trên phiếu bảo hành', null);
   if (g.soLSX) {
     var lx = readTable('LenhSX').rows.filter(function (x) { return x.soLSX === g.soLSX; })[0];
     if (lx && lx.trangThai === 'HUY') throw fail('VALIDATION', 'Lệnh ' + g.soLSX + ' đã huỷ — không đảo phiếu của lệnh', null);
     var lp = livePxx(); if (g.loai === 'NHAP_TP') readTable('HoSoTu').rows.forEach(function (c) { if (c.soPhieuNhap === gso && c.trangThai !== 'HUY' && c.soPXX && lp[c.soPXX]) throw fail('VALIDATION', 'Tủ ' + c.serial + ' đã có phiếu xuất xưởng ' + c.soPXX + ' — huỷ PXX trước', null); });
   }
-  var o = stockOpts(), all = loadVouchers(uniq(g.lines.map(function (l) { return l.maHang; }))), mas = all.mas;
-  var sttTry = Number(props().getProperty('seq:stt') || 0) + 1;
-  var cand = { soPhieu: '~MOI', stt: sttTry, loai: 'DAO', ngay: ngay, kho: g.kho, khoDen: g.khoDen, phieuGoc: gso, lines: [] };
+  var r = reverseCore(u, req, logs, g, ngay, lyDo, {});
+  markDone(req.requestId, u.email, r.soPhieu, r.stt);   // dấu "xong" đặt SAU mọi bước: chết giữa chừng thì gửi lại đi đường voucherReplay làm nốt
+  return { soPhieu: r.soPhieu, tinhLai: r.tinhLai };
+}
+/** Kiểm phiếu đảo của g (không ghi gì): sổ kho + serial. opt.alt: trạng thái serial thay thế được chấp nhận (huỷ lần thay). */
+function reverseCheck(g, ngay, opt) {
+  var o = stockOpts(), all = loadVouchers(uniq(g.lines.map(function (l) { return l.maHang; })));
+  var cand = { soPhieu: '~MOI', stt: Number(props().getProperty('seq:stt') || 0) + 1, loai: 'DAO', ngay: ngay, kho: g.kho, khoDen: g.khoDen, phieuGoc: g.soPhieu, lines: [] };
   var r = QStock.check(all.vouchers, cand, o);
-  if (!r.ok) throw fail(r.code, engineMsg(r), r.errors);
-  var hist = readTable('LichSuSerial').rows.filter(function (x) { return x.soPhieu === gso; });
-  var sr = QSerial.reverse(QSerial.index(readTable('Serial').rows), hist, '');
-  if (!sr.ok) throw fail(sr.code, engineMsg(sr), sr.errors);
+  if (!r.ok) throw fail(r.code, 'Đảo ' + g.soPhieu + ': ' + engineMsg(r), r.errors);
+  var hist = readTable('LichSuSerial').rows.filter(function (x) { return x.soPhieu === g.soPhieu; });
+  var sr = QSerial.reverse(QSerial.index(readTable('Serial').rows), hist, '', opt && opt.alt);
+  if (!sr.ok) throw fail(sr.code, 'Đảo ' + g.soPhieu + ': ' + engineMsg(sr), sr.errors);
+  return { o: o, all: all, cand: cand, r: r, sr: sr };
+}
+/** Ghi 1 phiếu đảo cho g (trong khoá): kiểm lại ngay trước khi ghi (dữ liệu có thể vừa đổi bởi phiếu đảo trước trong cùng lệnh). */
+function reverseCore(u, req, logs, g, ngay, lyDo, opt) {
+  var gso = g.soPhieu, c = reverseCheck(g, ngay, opt), r = c.r, sr = c.sr, all = c.all, mas = all.mas;
   guardEarly(['TonKho', 'HangHoa', 'HoSoTu', 'LenhSX']);
   var stt = nextId('stt'), yr = ngay.slice(0, 4), so = 'DA-' + yr + '-' + pad(nextId('PH:DA:' + yr), 5), tong = 0;
   var lines = g.lines.map(function (l) { var v = r.result.lines['~MOI#' + l.dong] || 0; tong += v;
-    return { soPhieu: so, dong: l.dong, maHang: l.maHang, dvt: l.dvt, soLuongCT: l.soLuongCT, heSo: l.heSo, soLuong: l.soLuong, donGia: l.donGia, thanhTien: l.thanhTien, giaTriKho: v, slSoSach: l.slSoSach, slThucTe: l.slThucTe, dongGoc: l.dong, serials: l.serials.length ? JSON.stringify(l.serials) : '', chenhLechGV: r.result.adj['~MOI#' + l.dong] || '' }; });
+    return { soPhieu: so, dong: l.dong, maHang: l.maHang, dvt: l.dvt, soLuongCT: l.soLuongCT, heSo: l.heSo, soLuong: l.soLuong, donGia: l.donGia, thanhTien: l.thanhTien, giaTriKho: v, slSoSach: l.slSoSach, slThucTe: l.slThucTe, dongGoc: l.dong, serials: l.serials.length ? JSON.stringify(l.serials) : '', chenhLechGV: r.result.adj['~MOI#' + l.dong] || '', serialsDoi: l.serialsDoi && l.serialsDoi.length ? JSON.stringify(l.serialsDoi) : '' }; });
   markPending(so, { loai: 'DAO', phieuGoc: gso, mas: mas, ngay: ngay, kho: g.kho, email: u.email, rid: String(req.requestId) }); var dhead = { soPhieu: so, stt: stt, loai: 'DAO', ngay: ngay, kho: g.kho, khoDen: g.khoDen, maNCC: g.maNCC, maKH: g.maKH, maCongTrinh: g.maCongTrinh, phieuGoc: gso, daDao: false,
     trangThai: 'HOAN_TAT', nguoiGiaoNhan: '', lyDo: lyDo, soCTGoc: gso, ngayCTGoc: g.ngay, tongTien: tong, ghiChu: '', nguoiTao: u.email, thoiGian: nowIso(), requestId: String(req.requestId), hieuLuc: r.hieuLuc };
   appendBlock('ChiTietPhieu', lines);
@@ -402,10 +430,29 @@ function voucherReverse(u, req, logs) {
   clearPending(so);
   if (g.loai === 'NHAP_TP') cabinetsVoid(gso);
   if (g.soLSX) lsxRefresh(g.soLSX);
-  if (sr.changes.length && typeof cabExitSync === 'function') cabExitSync(sr.changes.map(function (c) { return c.key; }));
-  markDone(req.requestId, u.email, so, stt);   // dấu "xong" đặt SAU mọi bước: chết giữa chừng thì gửi lại đi đường voucherReplay làm nốt
+  if (g.loai === 'KHACH_TRA' && typeof cabReturnUndo === 'function') cabReturnUndo(gso);
+  if (sr.changes.length && typeof cabExitSync === 'function') cabExitSync(sr.changes.map(function (x) { return x.key; }));
   logs.push({ action: 'voucher.reverse', doiTuong: 'Phieu', id: so, truoc: { phieuGoc: gso }, sau: { ngay: ngay, lyDo: lyDo, tinhLai: changed } });
-  return { soPhieu: so, tinhLai: changed };
+  return { soPhieu: so, stt: stt, tinhLai: changed };
+}
+
+/** Báo cáo kho hàng lỗi (mọi vai trò, không có giá): tồn từng kho lỗi theo mã + serial; hàng đang gửi NCC theo phiếu gửi (đã gửi / đã nhận / còn lại). */
+function reportLoi(u, req) {
+  var loi = {}; readTable('Kho').rows.forEach(function (k) { if (k.loai === 'HANG_LOI') loi[k.maKho] = 1; });
+  var items = mapBy(readTable('HangHoa').rows, 'maHang'), rows = {};
+  function R0(m) { var it = items[m] || {}; return rows[m] || (rows[m] = { maHang: m, ten: it.ten || '', dvt: it.dvt || '', ton: {}, serials: [], dangGui: [] }); }
+  readTable('TonKho').rows.forEach(function (t) { if (loi[t.kho] && Number(t.soLuong)) R0(t.maHang).ton[t.kho] = Number(t.soLuong); });
+  var sk = readTable('Serial').rows;
+  sk.forEach(function (z) { if (loi[z.kho] && (z.trangThai === 'HANG_LOI' || z.trangThai === 'TRONG_KHO')) R0(z.maHang).serials.push({ serial: z.serial, kho: z.kho }); });
+  var at = {}; sk.forEach(function (z) { if (z.trangThai === 'GUI_NCC') at[z.maHang + '|' + z.serial] = 1; });
+  var heads = readTable('Phieu').rows.filter(function (h) { return h.trangThai === 'HOAN_TAT' && !h.daDao && (h.loai === 'GUI_NCC' || h.loai === 'NHAN_NCC'); }), by = mapBy(heads, 'soPhieu'), gui = {};
+  var lines = readTable('ChiTietPhieu').rows.filter(function (l) { return by[l.soPhieu]; });
+  lines.forEach(function (l) { var h = by[l.soPhieu]; if (h.loai !== 'GUI_NCC') return; var k = h.soPhieu + '|' + l.maHang;
+    var x = gui[k] || (gui[k] = { soPhieu: h.soPhieu, ngay: h.ngay, maNCC: h.maNCC, maHang: l.maHang, gui: 0, nhan: 0, serials: [] }); x.gui += Number(l.soLuong) || 0;
+    parseSerials(l.serials).forEach(function (z) { if (at[l.maHang + '|' + z]) x.serials.push(z); }); });
+  lines.forEach(function (l) { var h = by[l.soPhieu]; if (h.loai !== 'NHAN_NCC') return; var x = gui[h.phieuGoc + '|' + l.maHang]; if (x) x.nhan += Number(l.soLuong) || 0; });
+  Object.keys(gui).forEach(function (k) { var x = gui[k]; x.gui = Math.round(x.gui * 1000) / 1000; x.nhan = Math.round(x.nhan * 1000) / 1000; x.con = Math.round((x.gui - x.nhan) * 1000) / 1000; if (x.con > 0) R0(x.maHang).dangGui.push(x); });
+  return { rows: Object.keys(rows).sort().map(function (m) { return rows[m]; }).filter(function (r) { return Object.keys(r.ton).length || r.serials.length || r.dangGui.length; }) };
 }
 
 /** Công trình phải thuộc khách đã chọn (công trình chưa gắn khách thì không ràng buộc). */
