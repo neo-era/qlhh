@@ -99,6 +99,11 @@ const focusId = p => p.evaluate(() => document.activeElement && document.activeE
     await p.fill('#vMon', '2026-10'); await p.dispatchEvent('#vMon', 'change'); await p.waitForTimeout(900);
     ok((await p.$$('[data-so]')).length === 1 && /05\/10\/2026/.test(await main(p)), tag + 'V1 A3 danh sách bị cắt → lọc tháng cũ hỏi máy chủ, hiện đủ phiếu');
     await p.click('#vMonX'); await settle(p);
+    let nList = 0; await p.route('https://script.google.com/**', async rt => { const b = JSON.parse(rt.request().postData()); if (b.action === 'voucher.list') { nList++; return rt.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: false, code: 'FORBIDDEN', error: 'Không có quyền' }) }); } rt.fallback(); });
+    await p.fill('#vMon', '2026-08'); await p.dispatchEvent('#vMon', 'change'); await p.waitForTimeout(2500);
+    ok(nList === 1 && await p.isVisible('#vRetry'), tag + 'V2 A lọc tháng bị máy chủ báo lỗi → gọi 1 lần, hiện lỗi + Thử lại (không lặp) — số lần gọi: ' + nList);
+    await p.unroute('https://script.google.com/**'); await p.route('https://script.google.com/**', async rt => rt.fulfill({ contentType: 'application/json', body: api.doPost({ postData: { contents: rt.request().postData() } }).t }));
+    await p.click('#vMonX'); await settle(p);
     // ---------- A3: khách ↔ công trình ----------
     await p.goto(BASE + '#/phieu'); await settle(p); await p.click(mob ? '#newVM' : '#newV'); await p.click('[data-t="XUAT_BAN"]'); await p.waitForSelector('#f_maKH');
     await p.selectOption('#f_maKH', 'TN'); let opts = await p.$$eval('#f_maCongTrinh option', o => o.map(x => x.value));
@@ -134,6 +139,9 @@ const focusId = p => p.evaluate(() => document.activeElement && document.activeE
     await p.click(mob ? '#newVM' : '#newV'); await p.click('[data-t="NHAP_MUA"]'); await p.waitForSelector('#l_ma_0'); await p.fill('#l_ma_0', 'CB40'); await p.dispatchEvent('#l_ma_0', 'input');
     let askB = false; p.once('dialog', d => { askB = true; d.dismiss(); }); await p.evaluate(() => { location.hash = '#/kho'; }); await settle(p);
     ok(askB && await p.evaluate(() => document.querySelector('#dlg').open && location.hash === '#/phieu'), tag + 'V1 B3 đổi màn khi đang nhập phiếu → hỏi lại; ở lại thì phiếu và địa chỉ giữ nguyên');
+    ok(/Phiếu kho/.test(await p.textContent('#main h1')), tag + 'V2 B1 ở lại: màn nền vẫn là Phiếu kho');
+    let askB2 = false; p.once('dialog', d => { askB2 = true; d.dismiss(); }); await p.goBack(); await settle(p);
+    ok(askB2 && await p.evaluate(() => document.querySelector('#dlg').open), tag + 'V2 B1 bấm Back lần nữa vẫn hỏi lại');
     p.once('dialog', d => d.accept()); await p.click('#dlg [data-x]'); await closed(p);
     // ---------- A4: nhập serial — đếm + báo trùng ----------
     await p.click(mob ? '#newVM' : '#newV'); await p.click('[data-t="NHAP_MUA"]'); await p.waitForSelector('#l_ma_0');
@@ -174,6 +182,10 @@ const focusId = p => p.evaluate(() => document.activeElement && document.activeE
     // ---------- B5: mở phiếu có "đang tải"; chuyển màn đóng hộp thoại ----------
     await p.click('[data-so]'); await p.waitForFunction(() => document.querySelector('#dlg').open);
     await p.goto(BASE + '#/kho'); await settle(p); ok(!(await p.evaluate(() => document.querySelector('#dlg').open)), tag + 'C đổi màn → hộp thoại tự đóng');
+    const nd = api.sheets.NguoiDung; const ui = nd.d.findIndex(r => r[0] === 'nv@gmail.com'); const st0 = nd.d[ui].slice(); nd.d[ui][nd.d[0].indexOf('trangThai')] = 'KHOA'; for (const k of Object.keys(api.cache)) if (k.startsWith('u:')) delete api.cache[k];
+    await p.evaluate(() => QLHH_DEBUG._poll(true)); await settle(p);
+    ok(await p.evaluate(async () => !QLHH_DEBUG.user && !!document.querySelector('#loginBtn')), tag + 'V2 B7 tài khoản bị khoá → lần tự kiểm tra kế tiếp xoá dữ liệu trên máy, về màn đăng nhập');
+    nd.d[ui] = st0; for (const k of Object.keys(api.cache)) if (k.startsWith('u:')) delete api.cache[k];
     await p.context().close();
   }
   // ---------- B4: KCS màu đúng khi máy tự để chế độ tối ----------

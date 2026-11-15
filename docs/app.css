@@ -290,6 +290,6 @@ dialog.kcsd .body{display:flex;flex-direction:column}
 .newbar{position:sticky;top:0;z-index:5;margin:0 0 10px;padding:8px 12px;border-radius:var(--r);background:var(--acc-soft);border:1px solid var(--acc);display:flex;gap:10px;align-items:center;justify-content:space-between}
 .lineerr{color:var(--bad);font-size:13px;font-weight:600;margin-top:6px}
 .stickacts{position:sticky;bottom:0;background:var(--panel);padding:10px 0 4px;margin-bottom:-4px;z-index:2;border-top:1px solid var(--line)}
-.dl dd .linkbtn{min-height:0;padding:10px 0;margin:-10px 0}   /* trong bảng thông tin: vẫn dễ chạm nhưng không lệch dòng nhãn */
+.dl dd .linkbtn{min-height:0;padding:12px 0;margin:-12px 0}   /* trong bảng thông tin: vẫn dễ chạm nhưng không lệch dòng nhãn */
 .monrow{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 0 10px}.monrow .in{width:auto;min-width:160px;flex:0 1 200px}
 @media (max-width:899px),(pointer:coarse){.serf,.search input,.msearch input{min-height:48px}.sxbar .btn{min-height:48px}}

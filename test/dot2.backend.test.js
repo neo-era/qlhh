@@ -63,3 +63,13 @@ test('V1 tech B4/B5: sync.ver chỉ trả phiên bản + ngày (không đọc sh
   x.a.raw.dataVersion = String(Number(x.a.raw.dataVersion) + 1); for (const k of Object.keys(x.a.cache)) if (/dataVersion|^ver:/.test(k)) delete x.a.cache[k];
   assert.equal(x.pull().vouchersCut, true);
 });
+
+// ================= vòng 2 =================
+test('V2 tech B6: đổi khoá phiên (rotateSessionKey) → phiên cũ hết hiệu lực ngay, đăng nhập lại dùng được', () => {
+  const x = plant(); const old = x.nv;
+  assert.equal(x.P('sync.ver', {}, old).ok, true);
+  x.a.rotateSessionKey();
+  assert.equal(x.P('sync.ver', {}, old).code, 'AUTH_INVALID', 'phiên cũ bị từ chối ngay');
+  const s2 = x.a.login('nv@gmail.com'); assert.equal(typeof s2, 'string');
+  assert.equal(x.a.post({ action: 'sync.ver', session: s2 }).ok, true, 'phiên mới dùng được ngay');
+});

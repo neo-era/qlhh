@@ -34,7 +34,7 @@
     const open = () => dbp || (dbp = new Promise((res, rej) => { try { const r = indexedDB.open('qlhh', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); } catch (e) { rej(e); } }));
     const tx = (mode, fn) => open().then(db => new Promise((res, rej) => { const t = db.transaction('kv', mode), s = t.objectStore('kv'), r = fn(s); t.oncomplete = () => res(r && r.result); t.onerror = () => rej(t.error); }));
     const clr = pre => tx('readwrite', s => { const r = s.openCursor(); r.onsuccess = () => { const c = r.result; if (!c) return; if (String(c.key).startsWith(pre)) c.delete(); c.continue(); }; return null; }).catch(() => null);
-    return { clr, get: k => tx('readonly', s => s.get(k)).catch(() => null), set: (k, v) => tx('readwrite', s => s.put(v, k)).catch(() => null), del: k => tx('readwrite', s => s.delete(k)).catch(() => null) };
+    return { clr: pre => { LS.set('qlhh-vk', LS.get('qlhh-vk', []).filter(k => !k.startsWith(pre))); return clr(pre); }, get: k => tx('readonly', s => s.get(k)).catch(() => null), set: (k, v) => tx('readwrite', s => s.put(v, k)).catch(() => null), del: k => tx('readwrite', s => s.delete(k)).catch(() => null) };
   })();
 
   // ---------------- trạng thái ----------------
@@ -159,7 +159,7 @@
     }
     if (r.data.unchanged && !opt.force) { if (S.wasOff) { S.wasOff = false; renderView(); } flushFeedbackQueue(); return; }   // không đổi: không vẽ lại (giữ cuộn, ô đang gõ)
     if (!r.data.unchanged) {
-      SX.stale = true; KS.vmc = null;
+      SX.stale = true; if (KS.vmc) Object.keys(KS.vmc).forEach(k => { if (k >= addMonth(S.today, -1)) delete KS.vmc[k]; });   // tháng cũ giữ bản đã tải
       S.data = r.data.data; S.data.vouchersCut = !!r.data.vouchersCut; S.version = r.data.version; reindex();
       IDB.set(cacheKey(), { data: S.data, version: S.version, at: Date.now() });
       if (isQT() && r.data.warnings && r.data.warnings.length) toast(`Sheet có ${r.data.warnings.length} dòng sai kiểu (vd ${r.data.warnings[0]})`);
@@ -172,9 +172,9 @@
      Có dữ liệu mới: đang gõ / mở hộp thoại / đang quét → dải "Có dữ liệu mới — Cập nhật" (bấm mới tải); còn lại → tải luôn.
      Lỗi mạng khi tự kiểm tra: không báo ngoại tuyến ngay (2 lần liên tiếp mới báo), thử lại sau 1 → 2 → 5 phút. */
   function pollOwner() {
-    const me = S.tabId || (S.tabId = Math.random().toString(36).slice(2)), o = LS.get('qlhh-poll', null), t = Date.now();
+    const me = S.tabId || (S.tabId = Math.random().toString(36).slice(2)), k = 'qlhh-poll:' + S.co.id, o = LS.get(k, null), t = Date.now();   // theo công ty
     if (o && o.id !== me && t - o.at < 150e3) return false;
-    LS.set('qlhh-poll', { id: me, at: t }); return true;
+    LS.set(k, { id: me, at: t }); return true;
   }
   function showNewBar() {
     if ($('#newbar') || !$('#main')) return;
@@ -192,15 +192,18 @@
     S.polling = true; S.lastPoll = t;
     try {
       const r = await call('sync.ver', {}, 1, { quiet: true, timeout: 20000 });
-      if (!r.ok) { if (r.code === 'NETWORK') { S.pollFail = (S.pollFail || 0) + 1; S.pollNext = t + [60e3, 120e3, 300e3][Math.min(S.pollFail - 1, 2)]; if (S.pollFail >= 2) setOffline(true); } return; }
+      if (!r.ok) { if (r.code === 'FORBIDDEN') return expire('Tài khoản đã bị khoá hoặc chưa được cấp quyền — đã xoá dữ liệu trên máy'); if (r.code === 'NETWORK') { S.pollFail = (S.pollFail || 0) + 1; S.pollNext = t + [60e3, 120e3, 300e3][Math.min(S.pollFail - 1, 2)]; if (S.pollFail >= 2) setOffline(true); } return; }
       S.pollFail = 0; S.pollNext = 0;
       const newDay = r.data.today && r.data.today !== S.today; if (r.data.today) S.today = r.data.today;
       const a = document.activeElement, busy = $('dialog[open]') || $('.scanov') || (a && a.matches && a.matches('#main input,#main textarea,#main select'));
-      if (Number(r.data.version) !== Number(S.version)) { if (busy) showNewBar(); else await sync(); }
+      if (Number(r.data.version) !== Number(S.version)) { tabBus({ co: S.co.id, version: r.data.version }); if (busy) showNewBar(); else await sync(); }
       else if (newDay && !busy) renderView();   // app mở qua đêm: ngày mặc định / giá "áp dụng hôm nay" sang ngày mới
     } finally { S.polling = false; }
   }
-  setInterval(poll, 60000); S._poll = poll;
+  setInterval(poll, 60000); S._poll = poll; S.lastAct = Date.now();
+  /* Tab đang hỏi báo phiên bản mới cho các tab khác cùng công ty (các tab đó tự tải, theo quy tắc "đang bận"). */
+  let BUS = null; try { BUS = new BroadcastChannel('qlhh'); BUS.onmessage = e => { const m = e.data || {}; if (S.user && S.data && m.co === S.co.id && Number(m.version) !== Number(S.version)) poll(true); }; } catch (e) { BUS = null; }
+  function tabBus(m) { try { if (BUS) BUS.postMessage(m); } catch (e) {} }
 
   // ---------------- khung ----------------
   function applyCo() {
@@ -339,7 +342,7 @@
     if (matchMedia('(max-width:899px),(orientation:landscape) and (max-height:520px)').matches) { history.pushState({ det: 1 }, ''); det.scrollTop = 0; }
   }
   function closeDetail() { S.sel = null; const det = $('#det'); if (det) { det.classList.add('closed'); det.innerHTML = detail(); } }
-  window.addEventListener('popstate', () => { if (S.sel) closeDetail(); else if (SX.sel && route() === 'sx') { SX.sel = null; renderView(); } else if (KS.sel && route() === 'kho') { KS.sel = null; renderView(); } else renderView(); });
+  window.addEventListener('popstate', () => { const dg0 = $('#dlg'); if (dg0 && dg0.open && dg0._isDirty && dg0._isDirty()) return; /* đang nhập dở: để hashchange hỏi lại, không vẽ màn khác phía sau */ if (S.sel) closeDetail(); else if (SX.sel && route() === 'sx') { SX.sel = null; renderView(); } else if (KS.sel && route() === 'kho') { KS.sel = null; renderView(); } else renderView(); });
   function detail() {
     if (!S.sel) return `<div class="empty">Chọn một mặt hàng để xem chi tiết, giá và nhà cung cấp.</div>`;
     const i = S.data.items.find(x => x.maHang === S.sel); if (!i) return '';
@@ -503,7 +506,7 @@
     const loc = (S.data.vouchers || []);
     if (!S.data.vouchersCut) return loc;   // máy đã có đủ mọi phiếu
     const c = (KS.vmc = KS.vmc || {})[KS.vm], recent = KS.vm >= addMonth(S.today, -1);
-    if (c && !c.busy && !c.err && (!recent || c.ver === S.version)) return c.rows;   // tháng cũ: giữ bản đã tải; 2 tháng gần nhất: tải lại khi dữ liệu đổi
+    if (c && !c.busy && (c.err || !recent || c.ver === S.version)) return c.rows;   // bản lỗi cũng là kết quả: chỉ gọi lại khi bấm Thử lại   // tháng cũ: giữ bản đã tải; 2 tháng gần nhất: tải lại khi dữ liệu đổi
     if (!c || !c.busy) { const th = KS.vm; KS.vmc[th] = { busy: 1, rows: c ? c.rows : [] };
       call('voucher.list', { thang: th }, 3).then(r => { KS.vmc[th] = r.ok ? { ver: S.version, rows: r.data.vouchers } : { rows: [], err: r.error || r.code }; if (route() === 'phieu' && KS.vm === th) viewVouchers(m, '#vres'); }); }
     return KS.vmc[KS.vm].rows;
@@ -1479,7 +1482,7 @@
     d.innerHTML = `<form method="dialog" novalidate><header><h2>${title}</h2><button class="btn ghost iconbtn" type="button" data-x aria-label="Đóng">${ic('x')}</button></header><div class="body">${body}<div class="dlgmsg" id="dlgMsg" role="alert"></div></div>${onSubmit ? `<footer><button class="btn" type="button" data-x>Huỷ</button><button class="btn pri" id="dlgOk" type="submit">${submitText}</button></footer>` : ''}</form>`;
     const f = $('form', d);
     d._rid = null; d._guard = null;   // 1 requestId cho cả vòng đời hộp thoại: bấm Lưu lại sau khi mất phản hồi KHÔNG tạo phiếu thứ 2
-    d._dirty = false; d._noGuard = false;
+    d._dirty = false; d._noGuard = /^(Báo cáo|Chi phí bảo hành|Tra )/.test(title) || ['Xem', 'Tra', 'Lọc'].includes(submitText);   // hộp lọc / tra cứu: không hỏi lại khi đóng
     d._isDirty = () => !d._noGuard && !!(d._guard ? d._guard() : onSubmit && d._dirty);
     const tryClose = () => { if (d._isDirty() && !confirm('Bỏ nội dung đang nhập dở?')) return; d.close(); };   // chạm ra ngoài / bấm X / Esc khi đang nhập: hỏi lại
     $$('[data-x]', d).forEach(b => b.onclick = tryClose);
@@ -1652,7 +1655,7 @@
     if (S.scanStop) S.scanStop();
     const dg = $('#dlg');
     if (dg && dg.open) {   // nút Back / vuốt lùi khi đang nhập: hỏi lại; ở lại thì trả địa chỉ cũ
-      if (dg._isDirty && dg._isDirty() && !confirm('Bỏ nội dung đang nhập dở?')) { history.replaceState(null, '', new URL(e.oldURL).hash || '#/hang'); return; }
+      if (dg._isDirty && dg._isDirty() && !confirm('Bỏ nội dung đang nhập dở?')) { history.pushState(null, '', new URL(e.oldURL).hash || '#/hang'); renderView(); return; }   // ở lại: thêm lại mục lịch sử (Back lần sau vẫn hỏi)
       dg.close();
     }
     if (S.user) { S.sel = null; if (route() !== 'kho') KS.sel = null; if (route() !== 'sx') SX.sel = null; renderView(); } });

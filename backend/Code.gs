@@ -167,7 +167,7 @@ function login(req) {
   if (!chk.ok) return chk;
   var u = findUser(chk.email, true);
   if (!u) return { ok: false, code: 'FORBIDDEN', error: 'Email ' + chk.email + ' chưa được cấp quyền hoặc đã bị khoá' };
-  var res = { ok: true, code: 'OK', data: { session: QAuth.issueSession(chk.email, now(), SESSION_TTL, p.getProperty('SESSION_KEY'), hmac), email: chk.email, vaiTro: u.vaiTro, hoTen: u.hoTen } };
+  var res = { ok: true, code: 'OK', data: { session: QAuth.issueSession(chk.email, now(), SESSION_TTL, sessKey(), hmac), email: chk.email, vaiTro: u.vaiTro, hoTen: u.hoTen } };
   cache.put('r:' + th, JSON.stringify(res), 120);
   cache.put(th, '1', Math.max(1, Math.min(21600, Number(claims.exp) - now())));
   return res;
@@ -362,9 +362,11 @@ function findRequest(rq, id) {
 }
 function bumpVersion() { var p = props(), v = String(Number(p.getProperty('dataVersion') || 1) + 1); p.setProperty('dataVersion', v); CacheService.getScriptCache().put('dataVersion', v, 21600); }
 /** Phiên bản dữ liệu: bộ đệm trước (bumpVersion ghi cả hai), hụt thì đọc ScriptProperties. */
-function dataVer() { var c = CacheService.getScriptCache(), v = c.get('dataVersion'); if (!v) { v = props().getProperty('dataVersion') || '1'; c.put('dataVersion', v, 21600); } return Number(v); }
+function dataVer() { var c = CacheService.getScriptCache(), v = c.get('dataVersion'); if (!v) { v = props().getProperty('dataVersion') || '1'; c.put('dataVersion', v, 60); } return Number(v); }   // tự nạp: hạn 60 s (lệch tối đa 1 phút); bumpVersion trong khoá ghi hạn 6 giờ
 /** Khoá ký phiên: giữ trong bộ đệm 6 giờ để mỗi lệnh không phải đọc ScriptProperties. */
-function sessKey() { var c = CacheService.getScriptCache(), k = c.get('sessKey'); if (!k) { k = props().getProperty('SESSION_KEY'); if (k) c.put('sessKey', k, 21600); } return k; }
+function sessKey() { var c = CacheService.getScriptCache(), k = c.get('sessKey'); if (!k) { k = props().getProperty('SESSION_KEY'); if (k) c.put('sessKey', k, 600); } return k; }
+/** Đổi khoá ký phiên (nghi lộ khoá): mọi phiên cũ hết hiệu lực NGAY, mọi người đăng nhập lại. Chạy hàm này trong trình soạn Apps Script — không sửa tay ScriptProperties. */
+function rotateSessionKey() { var k = Utilities.getUuid() + Utilities.getUuid(); props().setProperty('SESSION_KEY', k); CacheService.getScriptCache().remove('sessKey'); Logger.log('Đã đổi khoá phiên — mọi người đăng nhập lại'); }
 function nextId(key) { var p = props(), v = Number(p.getProperty('seq:' + key) || 0) + 1; p.setProperty('seq:' + key, String(v)); return v; }
 
 /** Tìm 1 dòng theo khoá (cột đầu) bằng TextFinder. Trả {row, obj} hoặc null. */

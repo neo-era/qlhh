@@ -55,7 +55,7 @@ function env(tokeninfo, ownerEmail = 'MaiVuLam2020@gmail.com', shared) {
     ContentService: { MimeType: { JSON: 'json' }, createTextOutput: t => ({ t, setMimeType() { return this; } }) },
     Logger: { log() {} }, console: { error() {}, log() {} }
   };
-  const src = BACKEND_FILES.map(f => fs.readFileSync(path.join(ROOT, f), 'utf8')).join('\n') + '\nreturn {setup,doPost};';
+  const src = BACKEND_FILES.map(f => fs.readFileSync(path.join(ROOT, f), 'utf8')).join('\n') + '\nreturn {setup,doPost,rotateSessionKey};';
   const names = Object.keys(G);
   const api = new Function(...names, 'module', 'Buffer', src)(...names.map(k => G[k]), undefined, undefined);
   Object.assign(api, { sheets, raw: props, cache, reads }); hold.api = api;
