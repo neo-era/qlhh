@@ -158,7 +158,7 @@ async function kcsAll(p, bad) {   // bad = {chỉ số mục: ghi chú}
   ok((await p.textContent('#dlg')).includes('Trong bảo hành'), 'phiếu BH tính Trong bảo hành');
   await p.click('#pR'); await p.waitForSelector('#rl input[data-f=maHang]');
   await p.fill('[data-r="0"][data-f="maHang"]', 'LOGO'); await p.dispatchEvent('[data-r="0"][data-f="maHang"]', 'change'); await p.waitForSelector('[data-rm]');
-  await p.click('[data-rm][value="VPC4H29999"]'); await p.click('[data-rc][value="VPC4H20513"]');
+  await p.click('[data-rm][value="VPC4H29999"]'); ok(await p.isChecked('[data-rc][value="VPC4H20513"]'), 'đợt 3: tủ chỉ có 1 LOGO! → serial cũ được chọn sẵn');
   await p.click('#dlgOk'); await p.waitForSelector('#pU', { timeout: 10000 }); await settle(p);
   ok(/VPC4H29999/.test(await p.textContent('#dlg')) && /thu hồi/.test(await p.textContent('#dlg')), 'thay LOGO!: phiếu ghi serial mới + thu hồi');
   await p.click('#pU'); await fill(p, { trangThai: 'HOAN_THANH', nguyenNhan: 'LOI_THIET_BI', ketQua: 'Thay LOGO! mới, chạy thử đạt' }); await p.click('#dlgOk'); await p.waitForSelector('#pPr'); await settle(p);

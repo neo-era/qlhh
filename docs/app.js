@@ -411,8 +411,10 @@
 
   // ======================= ĐỢT ②: KHO =======================
   const LOAI = Object.fromEntries(Object.entries(QStock.TYPES).map(([k, t]) => [k, t.ten]));
-  const TAO_DUOC = ['NHAP_MUA', 'XUAT_BAN', 'XUAT_CONG_TRINH', 'CHUYEN_KHO', 'KIEM_KE', 'KHACH_TRA', 'TRA_NCC', 'NHAP_HANG_LOI', 'TON_DAU'];   // xuất bảo hành: lập từ phiếu bảo hành
-  const NHOM_PHIEU = { nhap: ['TON_DAU', 'NHAP_MUA', 'KHACH_TRA', 'NHAP_TP', 'NHAP_LAI_SX', 'NHAP_HANG_LOI'], xuat: ['XUAT_BAN', 'XUAT_CONG_TRINH', 'XUAT_BH', 'XUAT_SX', 'TRA_NCC'], khac: ['CHUYEN_KHO', 'KIEM_KE'], dao: ['DAO'] };
+  const TAO_DUOC = ['NHAP_MUA', 'XUAT_BAN', 'XUAT_CONG_TRINH', 'CHUYEN_KHO', 'KIEM_KE', 'KHACH_TRA', 'TRA_NCC', 'NHAP_KHAC', 'XUAT_HUY', 'NHAP_HANG_LOI', 'GUI_NCC', 'NHAN_NCC', 'CHUYEN_SUA', 'TRA_KHACH_SUA', 'TON_DAU'];   // xuất bảo hành / xuất sửa chữa: lập từ phiếu bảo hành
+  const LOI_ONLY = ['NHAP_HANG_LOI', 'GUI_NCC', 'CHUYEN_SUA', 'TRA_KHACH_SUA'];   // phiếu lập từ / vào kho hàng lỗi
+  const LYDO_BAT_BUOC = ['XUAT_HUY', 'NHAP_KHAC', 'CHUYEN_SUA'];
+  const NHOM_PHIEU = { nhap: ['TON_DAU', 'NHAP_MUA', 'KHACH_TRA', 'NHAP_TP', 'NHAP_LAI_SX', 'NHAP_HANG_LOI', 'NHAP_KHAC', 'NHAN_NCC', 'CHUYEN_SUA'], xuat: ['XUAT_BAN', 'XUAT_CONG_TRINH', 'XUAT_BH', 'XUAT_SX', 'TRA_NCC', 'XUAT_HUY', 'GUI_NCC', 'TRA_KHACH_SUA', 'XUAT_SUA'], khac: ['CHUYEN_KHO', 'KIEM_KE'], dao: ['DAO'] };
   const num = n => n === '' || n === null || n === undefined ? '—' : Number(n).toLocaleString('vi-VN', { maximumFractionDigits: 3 });
   const itemOf = ma => S.data.items.find(i => i.maHang === ma) || { maHang: ma, ten: ma, dvt: '' };
   const khoName = k => k === '*' ? 'Tổng' : ((S.data.warehouses || []).find(w => w.maKho === k) || {}).ten || k;
@@ -446,7 +448,7 @@
     const list = list0.filter(i => (!KS.lowOnly || low(i)) && (!KS.kho || tonRow(i.maHang, KS.kho)));
     const nLow = d.items.filter(low).length, val = isQT() ? (d.stock || []).filter(t => t.kho === '*').reduce((a, t) => a + (Number(t.giaTri) || 0), 0) : null;
     const thisMonth = (d.vouchers || []).filter(p => String(p.ngay).slice(0, 7) === S.today.slice(0, 7)).length;
-    const act = (canEdit() ? `<button class="btn pri" id="newV">${ic('plus')}<span>Lập phiếu</span></button>` : '') + (isQT() ? `<button class="btn" id="khoAdm">${ic('layers')}<span>Kho & khoá sổ</span></button>` : '') + `<button class="btn" id="xlsT">${ic('dl')}<span>Xuất Excel</span></button>`;
+    const act = (canEdit() ? `<button class="btn pri" id="newV">${ic('plus')}<span>Lập phiếu</span></button>` : '') + (isQT() ? `<button class="btn" id="khoAdm">${ic('layers')}<span>Kho & khoá sổ</span></button>` : '') + (activeKho(true).length ? `<button class="btn" id="loiR">${ic('warn')}<span>Kho hàng lỗi</span></button>` : '') + `<button class="btn" id="xlsT">${ic('dl')}<span>Xuất Excel</span></button>`;
     paint(m, only, header('Tồn kho', act, false, canEdit() ? 'newVM' : '') +
       `<label class="msearch">${ic('search')}<span class="sr">Tìm hàng</span><input id="qkm" type="search" placeholder="Tìm mã, tên hàng…" value="${esc(KS.q)}" autocomplete="off"></label>
       <div class="kpi"><div class="k"><small>Mã có tồn</small><b>${(d.stock || []).filter(t => t.kho === '*' && Number(t.soLuong) > 0).length.toLocaleString('vi-VN')}</b></div>
@@ -477,6 +479,7 @@
     $('#lowT').onclick = () => { KS.lowOnly = !KS.lowOnly; viewStock(m); };
     $$('#newV,#newVM').forEach(b => b.onclick = () => voucherPick());
     const ka = $('#khoAdm'); if (ka) ka.onclick = khoAdmin;
+    const lr = $('#loiR'); if (lr) lr.onclick = loiReport;
     $('#xlsT').onclick = () => exportRows(`TonKho_${S.today}`, list.map(i => ({ 'Mã hàng': i.maHang, 'Tên hàng': i.ten, 'ĐVT': i.dvt, ...Object.fromEntries(ws.map(w => [w.ten, tonQ(i.maHang, w.maKho)])), 'Tồn (không gồm hàng lỗi)': tonQ(i.maHang), 'Tồn tối thiểu': i.tonToiThieu, ...(isQT() ? { 'Giá vốn BQ': i.giaVon, 'Giá trị tồn': (tonRow(i.maHang) || {}).giaTri } : {}) })));
     draw(); bindStockDetail();
   }
@@ -488,7 +491,7 @@
       <dl class="dl">${(S.data.warehouses || []).map(w => `<dt>${esc(w.ten)}</dt><dd>${num(tonQ(i.maHang, w.maKho))} ${esc(i.dvt)}${w.loai === 'HANG_LOI' ? ' <small class="mut">(hàng lỗi)</small>' : ''}</dd>`).join('')}
         <dt>Tồn tối thiểu</dt><dd>${i.tonToiThieu !== '' ? num(i.tonToiThieu) + ' ' + esc(i.dvt) : '—'}${low(i) ? ` <span class="tag stop">${ic('warn')} thiếu</span>` : ''}</dd>
         ${isQT() ? `<dt>Giá vốn BQ</dt><dd>${money(i.giaVon)}</dd><dt>Giá trị tồn</dt><dd>${money((tonRow(i.maHang) || {}).giaTri)}</dd>` : ''}</dl>
-      ${canEdit() && !S.offline ? `<div class="acts"><button class="btn pri" id="kIn">Nhập</button><button class="btn" id="kOut">Xuất</button><button class="btn" id="kKK">Kiểm kê</button></div>` : ''}
+      ${canEdit() && !S.offline ? `<div class="acts"><button class="btn pri" id="kIn">Nhập</button><button class="btn" id="kOut">Xuất</button><button class="btn" id="kKK">Kiểm kê</button><button class="btn" id="kXH">Xuất huỷ</button>${activeKho(true).some(w => tonQ(i.maHang, w.maKho) > 0) ? '<button class="btn" id="kCS">Hàng lỗi đã sửa → kho thường</button><button class="btn" id="kGN">Gửi NCC</button>' : ''}</div>` : ''}
       ${ser.length ? `<div class="hist"><h3>Serial đang trong kho (${ser.length})</h3><ul>${ser.slice(0, 50).map(x => `<li><span class="mono">${esc(x.serial)}</span><span>${esc(khoName(x.kho))}${x.trangThai === 'HANG_LOI' ? ' · lỗi' : ''}</span></li>`).join('')}</ul></div>` : ''}`;
   }
   function bindStockDetail() {
@@ -498,6 +501,10 @@
     const a = $('#kIn'); if (a) a.onclick = () => voucherForm('NHAP_MUA', { lines: [line] });
     const o = $('#kOut'); if (o) o.onclick = () => voucherForm('XUAT_CONG_TRINH', { lines: [line] });
     const k = $('#kKK'); if (k) k.onclick = () => voucherForm('KIEM_KE', { lines: [line] });
+    const loiKho = (activeKho(true).find(w => tonQ(i.maHang, w.maKho) > 0) || {}).maKho;
+    const xh = $('#kXH'); if (xh) xh.onclick = () => voucherForm('XUAT_HUY', { lines: [line] });
+    const cs = $('#kCS'); if (cs) cs.onclick = () => voucherForm('CHUYEN_SUA', { kho: loiKho, lines: [line] });
+    const gn = $('#kGN'); if (gn) gn.onclick = () => voucherForm('GUI_NCC', { kho: loiKho, lines: [line] });
   }
 
   // ---------- danh sách phiếu ----------
@@ -534,7 +541,7 @@
     $$('[data-so]').forEach(r => r.onclick = () => voucherView(r.dataset.so));
   }
   function voucherPick() {
-    const types = TAO_DUOC.filter(t => t !== 'NHAP_HANG_LOI' || activeKho(true).length);
+    const types = TAO_DUOC.filter(t => !(LOI_ONLY.includes(t) || t === 'NHAN_NCC') || activeKho(true).length);
     dialog('Lập phiếu kho', `<div class="list">${types.map(t => `<button class="it btn ghost" type="button" style="width:100%;justify-content:flex-start" data-t="${t}"><span class="mono" style="min-width:34px">${QStock.prefix(t)}</span><span style="flex:1;text-align:left">${LOAI[t]}</span></button>`).join('')}</div>`, null, d => $$('[data-t]', d).forEach(b => b.onclick = () => { d.close(); voucherForm(b.dataset.t); }));
   }
   async function voucherView(so) {
@@ -544,6 +551,9 @@
     const canRev = isQT() && !S.offline && p.loai !== 'DAO' && !p.daDao;
     const canRet = canEdit() && !S.offline && ['XUAT_BAN', 'XUAT_CONG_TRINH', 'XUAT_BH'].includes(p.loai) && !p.daDao;
     const canTn = canEdit() && !S.offline && ['NHAP_MUA', 'TON_DAU'].includes(p.loai) && !p.daDao;
+    const live = canEdit() && !S.offline && !p.daDao;
+    const canNN = live && p.loai === 'GUI_NCC', canTS = live && p.loai === 'NHAP_HANG_LOI' && !!p.maKH;
+    const leBH = live && ['XUAT_BAN', 'XUAT_CONG_TRINH', 'XUAT_BH'].includes(p.loai) && L.some(l => !isSer(itemOf(l.maHang)));
     dialog(esc(LOAI[p.loai] || p.loai) + ' ' + esc(p.soPhieu), `
       <dl class="dl"><dt>Ngày</dt><dd>${esc(vnD(p.ngay))}</dd><dt>Kho</dt><dd>${esc(khoName(p.kho))}${p.khoDen ? ' → ' + esc(khoName(p.khoDen)) : ''}</dd>
         ${p.maNCC ? `<dt>Nhà cung cấp</dt><dd>${esc(supName(p.maNCC))}</dd>` : ''}${p.maKH ? `<dt>Khách hàng</dt><dd>${esc(custName(p.maKH))}</dd>` : ''}${p.maCongTrinh ? `<dt>Công trình</dt><dd>${esc(projName(p.maCongTrinh))}</dd>` : ''}
@@ -551,14 +561,17 @@
         ${p.lyDo ? `<dt>Lý do</dt><dd>${esc(p.lyDo)}</dd>` : ''}${p.soCTGoc ? `<dt>Chứng từ gốc</dt><dd>${esc(p.soCTGoc)}${p.ngayCTGoc ? ' ngày ' + esc(vnD(p.ngayCTGoc)) : ''}</dd>` : ''}
         <dt>Người lập</dt><dd>${esc(p.nguoiTao)}</dd>${p.daDao ? '<dt>Trạng thái</dt><dd><span class="tag stop">Đã đảo</span></dd>' : ''}</dl>
       <div class="tbl" style="max-height:none"><table><thead><tr><th>#</th><th>Hàng</th><th class="n">${p.loai === 'KIEM_KE' ? 'Sổ sách → Thực tế' : 'Số lượng'}</th>${showMoney ? '<th class="n">Giá trị kho</th>' : ''}</tr></thead><tbody>
-        ${L.map(l => { const i = itemOf(l.maHang); return `<tr><td>${l.dong}</td><td><span class="mono">${esc(l.maHang)}</span> ${esc(i.ten)}${l.serials && l.serials.length ? `<br><small class="mono">${l.serials.map(esc).join(', ')}</small>` : ''}</td><td class="n">${p.loai === 'KIEM_KE' ? num(l.slSoSach) + ' → ' + num(l.slThucTe) : num(l.soLuongCT) + ' ' + esc(l.dvt)}${l.heSo && l.heSo !== 1 ? `<br><small class="mut">= ${num(l.soLuong)} ${esc(i.dvt)}</small>` : ''}</td>${showMoney ? `<td class="n">${money(l.giaTriKho)}${Number(l.chenhLechGV) ? `<br><small class="mut">chênh lệch GV ${money(l.chenhLechGV)}</small>` : ''}</td>` : ''}</tr>`; }).join('')}</tbody></table></div>
+        ${L.map(l => { const i = itemOf(l.maHang); return `<tr><td>${l.dong}</td><td><span class="mono">${esc(l.maHang)}</span> ${esc(i.ten)}${l.serials && l.serials.length ? `<br><small class="mono">${l.serials.map(esc).join(', ')}</small>` : ''}${l.serialsDoi && l.serialsDoi.length ? `<br><small>NCC đổi cho: <span class="mono">${l.serialsDoi.map(esc).join(', ')}</span></small>` : ''}</td><td class="n">${p.loai === 'KIEM_KE' ? num(l.slSoSach) + ' → ' + num(l.slThucTe) : num(l.soLuongCT) + ' ' + esc(l.dvt)}${l.heSo && l.heSo !== 1 ? `<br><small class="mut">= ${num(l.soLuong)} ${esc(i.dvt)}</small>` : ''}</td>${showMoney ? `<td class="n">${money(l.giaTriKho)}${Number(l.chenhLechGV) ? `<br><small class="mut">chênh lệch GV ${money(l.chenhLechGV)}</small>` : ''}</td>` : ''}</tr>`; }).join('')}</tbody></table></div>
       ${showMoney ? `<p style="text-align:right"><b>Tổng: ${money(p.tongTien)}</b></p>` : '<p class="mut" style="font-size:12.5px">Đơn giá, giá trị chỉ Quản trị xem được.</p>'}
-      <div class="acts" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"><button class="btn" type="button" id="vPrint">In phiếu</button>${canRet ? '<button class="btn" type="button" id="vRet">Khách trả hàng</button>' : ''}${canTn ? '<button class="btn" type="button" id="vTn">Trả nhà cung cấp</button>' : ''}${canRev ? '<button class="btn danger" type="button" id="vRev">Đảo phiếu</button>' : ''}</div>`, null, d => {
+      <div class="acts" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"><button class="btn" type="button" id="vPrint">In phiếu</button>${canRet ? '<button class="btn" type="button" id="vRet">Khách trả hàng</button>' : ''}${canTn ? '<button class="btn" type="button" id="vTn">Trả nhà cung cấp</button>' : ''}${canNN ? '<button class="btn pri" type="button" id="vNN">Nhận hàng NCC trả về</button>' : ''}${canTS ? '<button class="btn" type="button" id="vTS">Trả khách (đã sửa)</button>' : ''}${leBH ? `<button class="btn" type="button" id="vBH">${ic('shield')} Tiếp nhận bảo hành</button>` : ''}${canRev ? '<button class="btn danger" type="button" id="vRev">Đảo phiếu</button>' : ''}</div>`, null, d => {
       d.classList.add('wide');
       $('#vPrint', d).onclick = () => printVoucher(p, L);   // phiếu đảo: in theo mẫu của phiếu gốc, số âm
       const rt = $('#vRet', d); if (rt) rt.onclick = () => { d.close(); voucherForm('KHACH_TRA', { phieuGoc: p.soPhieu, kho: p.kho, maKH: p.maKH, maCongTrinh: p.maCongTrinh, lines: L.map(l => ({ maHang: l.maHang, soLuongCT: '', dongGoc: l.dong, gocSerials: l.serials })) }); };
       const tn = $('#vTn', d); if (tn) tn.onclick = () => { d.close(); voucherForm('TRA_NCC', { phieuGoc: p.soPhieu, kho: p.kho, maNCC: p.maNCC, lines: L.map(l => ({ maHang: l.maHang, soLuongCT: '', dongGoc: l.dong, gocSerials: l.serials })) }); };
       const rv = $('#vRev', d); if (rv) rv.onclick = () => { d.close(); reverseForm(p); };
+      const nn = $('#vNN', d); if (nn) nn.onclick = () => { d.close(); voucherForm('NHAN_NCC', { phieuGoc: p.soPhieu, maNCC: p.maNCC, kho: (activeKho(false)[0] || {}).maKho, lines: L.map(l => ({ maHang: l.maHang, soLuongCT: '', dongGoc: l.dong, gocSerials: l.serials })) }); };
+      const ts = $('#vTS', d); if (ts) ts.onclick = () => { d.close(); voucherForm('TRA_KHACH_SUA', { phieuGoc: p.soPhieu, kho: p.kho, maKH: p.maKH, maCongTrinh: p.maCongTrinh, lyDo: 'Trả hàng đã sửa', lines: L.map(l => ({ maHang: l.maHang, soLuongCT: '', dongGoc: l.dong, gocSerials: l.serials })) }); };
+      const bh = $('#vBH', d); if (bh) bh.onclick = () => { d.close(); ticketFormLe(p, L); };
     });
   }
   function reverseForm(p) {
@@ -651,24 +664,30 @@
     return (dup.length ? 'Trùng trong danh sách: ' + [...new Set(dup)].join(', ') + '. ' : '') + (has.length ? 'Đã có trên hệ thống: ' + has.join(', ') : '');
   }
   function voucherForm(loai, pre = {}) {
-    const d = S.data, t = QStock.TYPES[loai], priced = t.cost === 'PRICE', kk = loai === 'KIEM_KE', out = t.dir < 0 || loai === 'CHUYEN_KHO';
-    const loiType = loai === 'NHAP_HANG_LOI', khos = pre.sx ? activeKho(false).filter(w => w.maKho === pre.kho) : loiType ? activeKho(true) : loai === 'TRA_NCC' ? activeKho() : activeKho(false);
+    const d = S.data, t = QStock.TYPES[loai], priced = t.cost === 'PRICE', kk = loai === 'KIEM_KE', out = t.dir < 0 || loai === 'CHUYEN_KHO' || loai === 'CHUYEN_SUA', nccIn = loai === 'NHAN_NCC';
+    const khos = pre.sx ? activeKho(false).filter(w => w.maKho === pre.kho) : LOI_ONLY.includes(loai) ? activeKho(true) : ['TRA_NCC', 'XUAT_HUY', 'NHAN_NCC'].includes(loai) ? activeKho() : activeKho(false);
+    const danhGia = loai === 'NHAN_NCC' || loai === 'CHUYEN_SUA', nhapK = t.dir > 0 || loai === 'CHUYEN_SUA';
     const opt = (rows, k, n, empty) => [['', empty], ...rows.filter(x => x.trangThai !== 'NGUNG').map(x => [x[k], x[n] + ' (' + x[k] + ')'])];
     const lines = (pre.lines && pre.lines.length ? pre.lines : [{}]).map(l => ({ ...l }));
-    const custProj = loai === 'XUAT_BAN' || loai === 'XUAT_BH' || loai === 'KHACH_TRA';
+    const custProj = loai === 'XUAT_BAN' || loai === 'XUAT_BH' || loai === 'KHACH_TRA' || loai === 'TRA_KHACH_SUA';   // trả khách hàng đã sửa: máy chủ lấy khách theo phiếu nhận lỗi
     const body = `
       <div class="grid2"><div>${fld('ngay', 'Ngày phiếu', pre.ngay || S.today, { req: 1, type: 'date', max: S.today })}</div>
-        <div>${fld('kho', loai === 'CHUYEN_KHO' ? 'Từ kho' : 'Kho', pre.kho || (khos[0] || {}).maKho || '', { opts: khos.map(w => [w.maKho, w.ten]) })}</div>
+        <div>${fld('kho', loai === 'CHUYEN_KHO' ? 'Từ kho' : loai === 'CHUYEN_SUA' ? 'Từ kho hàng lỗi' : nccIn ? 'Nhận về kho' : 'Kho', pre.kho || (khos[0] || {}).maKho || '', { opts: khos.map(w => [w.maKho, w.ten + (w.loai === 'HANG_LOI' ? ' (hàng lỗi)' : '')]) })}</div>
         ${loai === 'CHUYEN_KHO' ? `<div>${fld('khoDen', 'Đến kho', '', { opts: [['', '— Chọn kho đến —'], ...activeKho().map(w => [w.maKho, w.ten])] })}</div>` : ''}
-        ${loai === 'NHAP_MUA' || loai === 'TRA_NCC' ? `<div>${fld('maNCC', 'Nhà cung cấp', pre.maNCC || '', { opts: opt(d.suppliers, 'maNCC', 'ten', '— Chọn NCC —') })}</div>` : ''}
+        ${loai === 'CHUYEN_SUA' ? `<div>${fld('khoDen', 'Về kho thường', pre.khoDen || (activeKho(false)[0] || {}).maKho || '', { opts: activeKho(false).map(w => [w.maKho, w.ten]) })}</div>` : ''}
+        ${['NHAP_MUA', 'TRA_NCC', 'GUI_NCC', 'NHAN_NCC'].includes(loai) ? `<div>${fld('maNCC', 'Nhà cung cấp', pre.maNCC || '', { opts: opt(d.suppliers, 'maNCC', 'ten', '— Chọn NCC —') })}</div>` : ''}
         ${custProj ? `<div>${fld('maKH', 'Khách hàng', pre.maKH || '', { opts: opt(d.customers || [], 'maKH', 'ten', '— Chọn khách —') })}</div>` : ''}
         ${custProj || loai === 'XUAT_CONG_TRINH' ? `<div>${fld('maCongTrinh', 'Công trình', pre.maCongTrinh || '', { opts: opt(d.projects || [], 'maCongTrinh', 'ten', '— Chọn công trình —') })}</div>` : ''}
         ${loai === 'KHACH_TRA' ? `<div>${fld('phieuGoc', 'Phiếu xuất gốc', pre.phieuGoc || '', { ro: !!pre.phieuGoc })}</div>` : ''}
+        ${loai === 'NHAN_NCC' ? `<div>${fld('phieuGoc', 'Phiếu gửi NCC gốc', pre.phieuGoc || '', { ro: !!pre.phieuGoc, list: 'dlGocG' })}<datalist id="dlGocG">${(d.vouchers || []).filter(x => x.loai === 'GUI_NCC' && !x.daDao).slice(-200).reverse().map(x => `<option value="${esc(x.soPhieu)}">${esc(vnD(x.ngay))} · ${esc(supName(x.maNCC))}</option>`).join('')}</datalist></div>` : ''}
+        ${loai === 'TRA_KHACH_SUA' ? `<div>${fld('phieuGoc', 'Phiếu nhận hàng lỗi của khách', pre.phieuGoc || '', { ro: !!pre.phieuGoc, list: 'dlGocL' })}<datalist id="dlGocL">${(d.vouchers || []).filter(x => x.loai === 'NHAP_HANG_LOI' && x.maKH && !x.daDao).slice(-200).reverse().map(x => `<option value="${esc(x.soPhieu)}">${esc(vnD(x.ngay))} · ${esc(custName(x.maKH))}</option>`).join('')}</datalist></div>` : ''}
         ${loai === 'TRA_NCC' ? `<div>${fld('phieuGoc', 'Phiếu nhập gốc (bắt buộc nếu trả từ kho thường)', pre.phieuGoc || '', { ro: !!pre.phieuGoc, list: 'dlGocN' })}<datalist id="dlGocN">${(d.vouchers || []).filter(x => ['NHAP_MUA', 'TON_DAU'].includes(x.loai) && !x.daDao).slice(-200).reverse().map(x => `<option value="${esc(x.soPhieu)}">${esc(vnD(x.ngay))} · ${esc(supName(x.maNCC))}</option>`).join('')}</datalist></div>` : ''}
         <div>${fld('nguoiGiaoNhan', t.dir > 0 ? 'Người giao hàng' : 'Người nhận hàng', '')}</div>
         <div>${fld('soCTGoc', 'Số chứng từ gốc (HĐ, hợp đồng…)', '')}</div><div>${fld('ngayCTGoc', 'Ngày chứng từ gốc', '', { type: 'date', max: S.today })}</div></div>
-      ${fld('lyDo', kk ? 'Ghi chú kiểm kê' : 'Lý do ' + (t.dir > 0 ? 'nhập' : 'xuất'), pre.lyDo || '')}
-      <h3 style="font-size:14px;margin:16px 0 6px">Dòng hàng</h3>
+      ${fld('lyDo', kk ? 'Ghi chú kiểm kê' : loai === 'XUAT_HUY' ? 'Lý do huỷ (số biên bản huỷ / mất)' : loai === 'CHUYEN_SUA' ? 'Nội dung đã sửa' : 'Lý do ' + (nhapK ? 'nhập' : 'xuất'), pre.lyDo || '', { req: LYDO_BAT_BUOC.includes(loai) })}
+      ${danhGia ? '<p class="mut" style="font-size:12.5px;margin:4px 0 0">Đơn giá đánh giá: giá trị thu hồi ước tính hoặc phí sửa đã trả (được để 0). Nhận về kho hàng lỗi luôn tính giá 0.</p>' : ''}
+      ${loai === 'XUAT_HUY' ? '<p class="mut" style="font-size:12.5px;margin:4px 0 0">Giá trị huỷ tính theo giá vốn bình quân tại ngày phiếu (kho hàng lỗi: 0).</p>' : ''}
+      <h3 style="font-size:14px;margin:16px 0 6px">Dòng hàng</h3>${nccIn ? '<p class="mut" style="font-size:12.5px;margin:0 0 6px">Hàng có serial: tích serial NCC sửa xong trả lại; NCC đổi hàng mới thì gõ serial mới cạnh serial đã gửi.</p>' : ''}
       <datalist id="dlItems">${d.items.filter(i => i.trangThai !== 'NGUNG').map(i => `<option value="${esc(i.maHang)}">${esc(i.ten)}</option>`).join('')}</datalist>
       <div id="vLines"></div><button class="btn" type="button" id="addLine">${ic('plus')} Thêm dòng</button>
       ${priced ? `<p style="text-align:right;margin:10px 0 0"><b>Tổng tiền: <span id="vSum">0 ₫</span></b>${isQT() ? '' : '<br><small class="mut">Sau khi lưu, đơn giá chỉ Quản trị xem lại được.</small>'}</p>` : ''}
@@ -686,10 +705,12 @@
             ${kk ? `<div><label class="f" for="l_tt_${i}">SL thực tế</label><input class="in" id="l_tt_${i}" data-i="${i}" data-f="slThucTe" inputmode="decimal" value="${esc(l.slThucTe ?? '')}"></div>`
               : `<div><label class="f" for="l_dvt_${i}">ĐVT</label><select class="in" id="l_dvt_${i}" data-i="${i}" data-f="dvt">${units.map(([k, n]) => `<option value="${esc(k)}" ${k === (l.dvt || (it && it.dvt)) ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></div>
                  <div><label class="f" for="l_sl_${i}">Số lượng</label><input class="in" id="l_sl_${i}" data-i="${i}" data-f="soLuongCT" inputmode="decimal" value="${esc(l.soLuongCT ?? '')}"></div>`}
-            ${priced ? `<div><label class="f" for="l_gia_${i}">Đơn giá (₫)</label><input class="in" id="l_gia_${i}" data-i="${i}" data-f="gia" inputmode="numeric" value="${esc(l.gia ?? '')}"></div>` : ''}
+            ${priced ? `<div><label class="f" for="l_gia_${i}">${danhGia ? 'Đơn giá đánh giá (₫)' : 'Đơn giá (₫)'}</label><input class="in" id="l_gia_${i}" data-i="${i}" data-f="gia" inputmode="numeric" value="${esc(l.gia ?? '')}"></div>` : ''}
             <div style="align-self:end"><button class="btn ghost iconbtn" type="button" data-del="${i}" aria-label="Xoá dòng ${i + 1}" ${lines.length < 2 ? 'disabled' : ''}>${ic('x')}</button></div>
           </div>
-          ${ser ? (pick.length || gocS.length
+          ${ser && nccIn ? `<div class="serhead"><span class="f" style="margin:0">Serial nhận về · <b id="l_cnt_${i}">${(l.serials || []).length}</b> / ${gocS.length} đã gửi</span></div>
+              <div class="serpick ncc" id="l_sp_${i}">${gocS.map(z => { const nw = (l.doiMap || {})[z] || ''; return `<div class="nccrow"><label class="chk" style="margin:0;min-height:48px"><input type="checkbox" data-nr="${i}" data-s="${esc(z)}" ${(l.serials || []).includes(z) ? 'checked' : ''} ${nw ? 'disabled' : ''}> <span class="mono">${esc(z)}</span> sửa xong</label><input class="in mono" data-nd="${i}" data-g="${esc(z)}" placeholder="hoặc serial mới NCC đổi" aria-label="Serial mới NCC đổi cho ${esc(z)}" value="${esc(nw)}" autocomplete="off" autocapitalize="characters" spellcheck="false"></div>`; }).join('') || '<div class="err">Phiếu gốc không có serial mã này.</div>'}</div>`
+          : ser ? (pick.length || gocS.length
             ? (() => { const all = gocS.length ? gocS.map(z => ({ serial: z })) : pick, sell = loai === 'XUAT_BAN' || loai === 'XUAT_CONG_TRINH';
                 return `<div class="serhead"><span class="f" style="margin:0">Chọn serial · <b id="l_cnt_${i}">${(l.serials || []).length}</b><span id="l_tot_${i}">${l.soLuongCT ? ' / ' + esc(l.soLuongCT) : ''}</span> đã chọn</span>
                   ${all.length > 6 ? `<input class="in serf" id="l_sf_${i}" data-sf="${i}" type="search" placeholder="Lọc serial…" aria-label="Lọc serial dòng ${i + 1}" autocomplete="off">` : ''}
@@ -714,7 +735,11 @@
       const pickSync = i => { const l = lines[i]; l.serials = $$(`#l_sp_${i} input:checked`, box).map(c => c.dataset.s);
         if (l.serials.length && (!l.soLuongCT || out)) { l.soLuongCT = String(l.serials.length); const q = $('#l_sl_' + i, box); if (q) q.value = l.soLuongCT; }   // bỏ chọn hết: giữ số lượng đã nhập
         serCount(i); sum(dlg); };
-      $$('[data-s]', box).forEach(c => c.onchange = () => pickSync(+c.dataset.i));   // không vẽ lại cả khối dòng hàng
+      $$('[data-s]', box).forEach(c => { if (!c.dataset.nr) c.onchange = () => pickSync(+c.dataset.i); });   // không vẽ lại cả khối dòng hàng
+      const nccSync = i => { const l = lines[i], dm = {}; $$(`[data-nd="${i}"]`, box).forEach(x => { const v = x.value.trim().toUpperCase(); if (v) dm[x.dataset.g] = v; const c = $(`[data-nr="${i}"][data-s="${CSS.escape(x.dataset.g)}"]`, box); if (c) { c.disabled = !!v; if (v) c.checked = false; } });
+        l.doiMap = dm; l.serialsDoi = Object.keys(dm); l.serials = $$(`[data-nr="${i}"]:checked`, box).map(c => c.dataset.s).concat(Object.values(dm));
+        l.soLuongCT = l.serials.length ? String(l.serials.length) : ''; const q = $('#l_sl_' + i, box); if (q) q.value = l.soLuongCT; const c = $('#l_cnt_' + i, box); if (c) c.textContent = l.serials.length; sum(dlg); };
+      $$('[data-nr]', box).forEach(c => c.onchange = () => nccSync(+c.dataset.nr)); $$('[data-nd]', box).forEach(x => x.oninput = () => nccSync(+x.dataset.nd));
       $$('[data-sf]', box).forEach(f => f.oninput = () => { const q = QSearch.norm(f.value); $$(`#l_sp_${f.dataset.sf} [data-sv]`, box).forEach(x => x.hidden = !!q && !x.dataset.sv.includes(q)); });
       $$('[data-first]', box).forEach(b => b.onclick = () => { const i = +b.dataset.first, n = Number(lines[i].soLuongCT) || 0;
         if (!(n > 0)) { const q = $('#l_sl_' + i, box); toast('Nhập số lượng trước'); if (q) q.focus(); return; }
@@ -734,7 +759,7 @@
     dialog(pre.sx ? 'Xuất linh kiện — lệnh ' + esc(pre.sx) : LOAI[loai] + ' — phiếu mới', body, async (v, dlg) => {
       const clean = lines.filter(l => String(l.maHang || '').trim() && !(l.dongGoc && (l.soLuongCT === '' || l.soLuongCT === undefined) && !(l.serials || []).length));   // dòng lấy từ phiếu gốc mà để trống SL = không trả dòng đó
       if (!clean.length) { dlgMsg(dlg, 'Phiếu chưa có dòng hàng'); return false; }
-      const vh = { ...v, loai, phieuGoc: v.phieuGoc || pre.phieuGoc || '', lines: clean.map(l => ({ maHang: String(l.maHang).trim().toUpperCase(), dvt: l.dvt, soLuongCT: l.soLuongCT === '' ? '' : Number(String(l.soLuongCT).replace(',', '.')), gia: l.gia === undefined ? undefined : Number(l.gia), slThucTe: l.slThucTe === undefined ? undefined : Number(String(l.slThucTe).replace(',', '.')), dongGoc: l.dongGoc, serials: l.serials || [] })) };
+      const vh = { ...v, loai, phieuGoc: v.phieuGoc || pre.phieuGoc || '', lines: clean.map(l => ({ maHang: String(l.maHang).trim().toUpperCase(), dvt: l.dvt, soLuongCT: l.soLuongCT === '' ? '' : Number(String(l.soLuongCT).replace(',', '.')), gia: l.gia === undefined ? undefined : Number(l.gia), slThucTe: l.slThucTe === undefined ? undefined : Number(String(l.slThucTe).replace(',', '.')), dongGoc: l.dongGoc, serials: l.serials || [], serialsDoi: l.serialsDoi && l.serialsDoi.length ? l.serialsDoi : undefined })) };
       const r = QValidate.voucherHead(vh); if (!r.ok) { showErrors(dlg, r.errors); dlgMsg(dlg, Object.values(r.errors)[0]); return false; }
       if (pre.sx) { SX.stale = true; return submitV(dlg, 'lsx.xuatSX', { soLSX: pre.sx, ngay: vh.ngay, lyDo: vh.lyDo, nguoiGiaoNhan: vh.nguoiGiaoNhan, lines: vh.lines }, so => 'Đã xuất linh kiện, phiếu ' + so); }
       return submitV(dlg, 'voucher.create', { voucher: vh }, so => 'Đã lưu phiếu ' + so);
@@ -766,7 +791,7 @@
       if (!g) return toast('Không đọc được phiếu gốc ' + p.phieuGoc);
       base = { ...p, loai: g.loai, maNCC: g.maNCC, maKH: g.maKH, maCongTrinh: g.maCongTrinh, khoDen: g.khoDen, soLSX: g.soLSX, ngayGoc: g.ngay }; sign = -1;
     }
-    const t = QStock.TYPES[base.loai] || {}, kk = base.loai === 'KIEM_KE', ck = base.loai === 'CHUYEN_KHO', nhapKho = t.dir > 0, priced = t.cost === 'PRICE';
+    const t = QStock.TYPES[base.loai] || {}, kk = base.loai === 'KIEM_KE', ck = base.loai === 'CHUYEN_KHO', cs = base.loai === 'CHUYEN_SUA', nhapKho = t.dir > 0 || cs, priced = t.cost === 'PRICE';
     const title = (kk ? 'BIÊN BẢN KIỂM KÊ VẬT TƯ, HÀNG HÓA' : ck ? 'PHIẾU ĐIỀU CHUYỂN KHO (NỘI BỘ)' : nhapKho ? 'PHIẾU NHẬP KHO' : 'PHIẾU XUẤT KHO') + (sign < 0 ? ' (ĐẢO)' : '');
     const mau = kk ? 'Mẫu số 05 - VT' : nhapKho ? 'Mẫu số 01 - VT' : 'Mẫu số 02 - VT';
     const showMoney = isQT(), sg = n => n === '' || n === undefined || n === null ? '' : sign * Number(n);
@@ -790,7 +815,7 @@
       ${kk ? `<p>- Thời điểm kiểm kê: ${ngay.toLowerCase()} · Kho: ${esc(khoName(base.kho))}<br>- Ban kiểm kê: ……………………………………………………………<br>- ${esc(p.lyDo || 'Đã kiểm kê các mặt hàng dưới đây')}</p>`
         : `<p>- Họ và tên người ${nhapKho ? 'giao' : 'nhận'}: ${esc(p.nguoiGiaoNhan || '……………………')}${partner ? `<br>- Đơn vị: ${esc(partner.ten)}${partner.mst ? ' · MST ' + esc(partner.mst) : ''}${partner.dc ? '<br>- Địa chỉ: ' + esc(partner.dc) : ''}` : ''}
           <br>- Lý do ${nhapKho ? 'nhập' : 'xuất'} kho: ${esc(sign < 0 ? LOAI[base.loai] + ' (đảo)' : (p.lyDo || LOAI[base.loai]))}${base.maCongTrinh && !sxP ? ' — công trình ' + esc(projName(base.maCongTrinh)) : ''}
-          ${base.soLSX ? '<br>- Lệnh sản xuất: <b>' + esc(base.soLSX) + '</b> (bộ phận sản xuất)' : ''}<br>- Theo chứng từ số: ${esc((sign < 0 ? '' : p.soCTGoc) || '……')} ngày ${esc((sign < 0 ? '' : p.ngayCTGoc) || '……')}<br>- ${ck ? 'Từ kho: ' + esc(khoName(base.kho)) + ' → đến kho: ' + esc(khoName(base.khoDen)) : (nhapKho ? 'Nhập' : 'Xuất') + ' tại kho: ' + esc(khoName(base.kho))}</p>`}
+          ${base.soLSX ? '<br>- Lệnh sản xuất: <b>' + esc(base.soLSX) + '</b> (bộ phận sản xuất)' : ''}<br>- Theo chứng từ số: ${esc((sign < 0 ? '' : p.soCTGoc) || '……')} ngày ${esc((sign < 0 ? '' : p.ngayCTGoc) || '……')}<br>- ${ck || cs ? 'Từ kho: ' + esc(khoName(base.kho)) + ' → đến kho: ' + esc(khoName(base.khoDen)) : (nhapKho ? 'Nhập' : 'Xuất') + ' tại kho: ' + esc(khoName(base.kho))}</p>`}
       <table class="pv-t"><thead>${kk ? '<tr><th rowspan="2">STT</th><th rowspan="2">Tên vật tư, hàng hóa</th><th rowspan="2">Mã số</th><th rowspan="2">ĐVT</th><th rowspan="2">Đơn giá</th><th colspan="2">Số lượng</th><th colspan="2">Chênh lệch</th><th rowspan="2">Giá trị chênh lệch</th></tr><tr><th>Theo sổ sách</th><th>Theo kiểm kê</th><th>Thừa</th><th>Thiếu</th></tr>'
         : `<tr><th rowspan="2">STT</th><th rowspan="2">Tên, nhãn hiệu, quy cách vật tư, hàng hóa</th><th rowspan="2">Mã số</th><th rowspan="2">ĐVT</th><th colspan="2">Số lượng</th><th rowspan="2">Đơn giá</th><th rowspan="2">Thành tiền</th></tr><tr><th>Theo chứng từ</th><th>Thực ${nhapKho ? 'nhập' : 'xuất'}</th></tr>`}</thead>
         <tbody>${rows}<tr><td></td><td><b>Cộng</b></td><td></td><td></td><td></td><td></td><td></td>${kk ? '<td></td><td></td>' : ''}<td class="n"><b>${showMoney ? num(tot) : ''}</b></td></tr></tbody></table>
@@ -877,14 +902,37 @@
       const r = await call('report.nxt', { from: RP.from, to: RP.to }, 3); b.classList.remove('busy');
       if (!r.ok) return toast('Lỗi: ' + (r.error || r.code)); RP.rows = r.data.rows; viewReport(m);
     };
-    $('#rXls').onclick = () => exportRows(`NXT_${RP.from}_${RP.to}`, RP.rows.map(r => ({ 'Mã hàng': r.maHang, 'Tên hàng': r.ten, 'ĐVT': r.dvt, 'Tồn đầu SL': r.dauQ, 'Tồn đầu GT': r.dauV, 'Nhập SL': r.nhapQ, 'Nhập GT': r.nhapV, 'Xuất SL': r.xuatQ, 'Xuất GT': r.xuatV, 'Tồn cuối SL': r.cuoiQ, 'Tồn cuối GT': r.cuoiV, 'Điều chỉnh giá vốn (632)': r.dcV })));
+    $('#rXls').onclick = () => { const ks = [...new Set(RP.rows.flatMap(r => Object.keys(r.theoLoai || {})))].sort(), ten = k => LOAI[k] || { KIEM_KE_THUA: 'Kiểm kê thừa', KIEM_KE_THIEU: 'Kiểm kê thiếu' }[k] || k;
+      exportRows(`NXT_${RP.from}_${RP.to}`, RP.rows.map(r => ({ 'Mã hàng': r.maHang, 'Tên hàng': r.ten, 'ĐVT': r.dvt, 'Tồn đầu SL': r.dauQ, 'Tồn đầu GT': r.dauV, 'Nhập SL': r.nhapQ, 'Nhập GT': r.nhapV, 'Xuất SL': r.xuatQ, 'Xuất GT': r.xuatV, 'Tồn cuối SL': r.cuoiQ, 'Tồn cuối GT': r.cuoiV, 'Điều chỉnh giá vốn (632)': r.dcV,
+        ...Object.fromEntries(ks.flatMap(k => { const x = (r.theoLoai || {})[k] || { q: 0, v: 0 }; return [[ten(k) + ' SL', x.q], [ten(k) + ' GT', x.v]]; })) }))); };
   }
+  /* Cột "trong đó" theo loại phiếu đợt 3 (chỉ hiện khi kỳ có phát sinh): nhập khác, hàng sửa / NCC trả về kho thường, xuất huỷ. */
+  const NXT_EXTRA = [['nk', 'Nhập khác GT', ['NHAP_KHAC']], ['sua', 'Hàng sửa / NCC trả về GT', ['CHUYEN_SUA', 'NHAN_NCC']], ['huy', 'Xuất huỷ GT', ['XUAT_HUY']]];
+  const tlV = (r, ks) => ks.reduce((a, k) => a + (((r.theoLoai || {})[k] || {}).v || 0), 0);
   function reportTable() {
     const R = RP.rows, s = k => R.reduce((a, r) => a + r[k], 0);
     if (!R.length) return '<div class="empty">Không có phát sinh trong kỳ.</div>';
-    return `<table><thead><tr><th>Mã</th><th>Tên hàng</th><th>ĐVT</th><th class="n">Đầu kỳ SL</th><th class="n">Đầu kỳ GT</th><th class="n">Nhập SL</th><th class="n">Nhập GT</th><th class="n">Xuất SL</th><th class="n">Xuất GT</th><th class="n">Cuối kỳ SL</th><th class="n">Cuối kỳ GT</th><th class="n" title="Chênh lệch khi trả NCC/đảo theo giá gốc — hạch toán TK 632">Điều chỉnh GV</th></tr></thead><tbody>
-      ${R.map(r => `<tr><td class="mono">${esc(r.maHang)}</td><td>${esc(r.ten)}</td><td>${esc(r.dvt)}</td><td class="n">${num(r.dauQ)}</td><td class="n">${num(r.dauV)}</td><td class="n">${num(r.nhapQ)}</td><td class="n">${num(r.nhapV)}</td><td class="n">${num(r.xuatQ)}</td><td class="n">${num(r.xuatV)}</td><td class="n">${num(r.cuoiQ)}</td><td class="n">${num(r.cuoiV)}</td><td class="n">${r.dcV ? num(r.dcV) : ''}</td></tr>`).join('')}
-      <tr><td></td><td><b>Cộng giá trị</b></td><td></td><td></td><td class="n"><b>${num(s('dauV'))}</b></td><td></td><td class="n"><b>${num(s('nhapV'))}</b></td><td></td><td class="n"><b>${num(s('xuatV'))}</b></td><td></td><td class="n"><b>${num(s('cuoiV'))}</b></td><td class="n"><b>${s('dcV') ? num(s('dcV')) : ''}</b></td></tr></tbody></table>`;
+    const ex = NXT_EXTRA.filter(([, , ks]) => R.some(r => ks.some(k => (r.theoLoai || {})[k])));
+    return `<table><thead><tr><th>Mã</th><th>Tên hàng</th><th>ĐVT</th><th class="n">Đầu kỳ SL</th><th class="n">Đầu kỳ GT</th><th class="n">Nhập SL</th><th class="n">Nhập GT</th>${ex.filter(e => e[0] !== 'huy').map(e => `<th class="n" title="Trong đó">${e[1]}</th>`).join('')}<th class="n">Xuất SL</th><th class="n">Xuất GT</th>${ex.filter(e => e[0] === 'huy').map(e => `<th class="n" title="Trong đó">${e[1]}</th>`).join('')}<th class="n">Cuối kỳ SL</th><th class="n">Cuối kỳ GT</th><th class="n" title="Chênh lệch khi trả NCC/đảo theo giá gốc — hạch toán TK 632">Điều chỉnh GV</th></tr></thead><tbody>
+      ${R.map(r => `<tr><td class="mono">${esc(r.maHang)}</td><td>${esc(r.ten)}</td><td>${esc(r.dvt)}</td><td class="n">${num(r.dauQ)}</td><td class="n">${num(r.dauV)}</td><td class="n">${num(r.nhapQ)}</td><td class="n">${num(r.nhapV)}</td>${ex.filter(e => e[0] !== 'huy').map(e => `<td class="n">${tlV(r, e[2]) ? num(tlV(r, e[2])) : ''}</td>`).join('')}<td class="n">${num(r.xuatQ)}</td><td class="n">${num(r.xuatV)}</td>${ex.filter(e => e[0] === 'huy').map(e => `<td class="n">${tlV(r, e[2]) ? num(tlV(r, e[2])) : ''}</td>`).join('')}<td class="n">${num(r.cuoiQ)}</td><td class="n">${num(r.cuoiV)}</td><td class="n">${r.dcV ? num(r.dcV) : ''}</td></tr>`).join('')}
+      <tr><td></td><td><b>Cộng giá trị</b></td><td></td><td></td><td class="n"><b>${num(s('dauV'))}</b></td><td></td><td class="n"><b>${num(s('nhapV'))}</b></td>${ex.filter(e => e[0] !== 'huy').map(e => `<td class="n"><b>${num(R.reduce((a, r) => a + tlV(r, e[2]), 0))}</b></td>`).join('')}<td></td><td class="n"><b>${num(s('xuatV'))}</b></td>${ex.filter(e => e[0] === 'huy').map(e => `<td class="n"><b>${num(R.reduce((a, r) => a + tlV(r, e[2]), 0))}</b></td>`).join('')}<td></td><td class="n"><b>${num(s('cuoiV'))}</b></td><td class="n"><b>${s('dcV') ? num(s('dcV')) : ''}</b></td></tr></tbody></table>`;
+  }
+  /** Báo cáo kho hàng lỗi (mọi vai trò, không có giá): tồn kho lỗi + serial, hàng đang gửi NCC; lối tắt lập phiếu đường ra. */
+  async function loiReport() {
+    const r = await load('report.loi', {}, 'Đang đọc kho hàng lỗi…'); if (!r.ok) return toast('Không đọc được: ' + (r.error || r.code));
+    const R = r.data.rows, ed = canEdit() && !S.offline, many = activeKho(true).length > 1;
+    dialog('Báo cáo kho hàng lỗi', R.length ? `<p class="mut" style="font-size:12.5px;margin-top:0">Kho hàng lỗi không tính giá vốn (giá trị 0) — chỉ theo dõi số lượng. Hàng của khách gửi sửa: trả lại bằng phiếu "Trả khách hàng đã sửa" từ phiếu nhận hàng lỗi.</p>
+      <div class="tbl" style="max-height:none"><table><thead><tr><th>Mã</th><th>Tên hàng</th><th class="n">Tồn kho lỗi</th><th>Serial trong kho lỗi</th><th>Đang gửi NCC</th>${ed ? '<th>Lập phiếu</th>' : ''}</tr></thead><tbody>
+      ${R.map(x => { const tk = Object.entries(x.ton); return `<tr><td class="mono">${esc(x.maHang)}</td><td>${esc(x.ten)}</td><td class="n">${tk.length ? tk.map(([k, q]) => num(q) + ' ' + esc(x.dvt) + (many ? ' <small class="mut">' + esc(khoName(k)) + '</small>' : '')).join('<br>') : '—'}</td>
+        <td><small class="mono">${x.serials.map(z => esc(z.serial)).join(', ')}</small></td>
+        <td>${x.dangGui.map(g => `<button class="linkbtn mono" type="button" data-vso="${esc(g.soPhieu)}">${esc(g.soPhieu)}</button> ${esc(vnD(g.ngay))} · ${esc(supName(g.maNCC))} · còn <b>${num(g.con)}</b>/${num(g.gui)}${g.serials.length ? '<br><small class="mono">' + g.serials.map(esc).join(', ') + '</small>' : ''}`).join('<br>')}</td>
+        ${ed ? `<td style="white-space:nowrap">${tk.length ? `<button class="btn ghost" type="button" data-lt="CHUYEN_SUA" data-m="${esc(x.maHang)}" data-k="${esc(tk[0][0])}">Về kho thường</button><button class="btn ghost" type="button" data-lt="GUI_NCC" data-m="${esc(x.maHang)}" data-k="${esc(tk[0][0])}">Gửi NCC</button><button class="btn ghost" type="button" data-lt="XUAT_HUY" data-m="${esc(x.maHang)}" data-k="${esc(tk[0][0])}">Huỷ</button>` : ''}</td>` : ''}</tr>`; }).join('')}</tbody></table></div>
+      <button class="btn" type="button" id="loiX">${ic('dl')} Xuất Excel</button>` : '<div class="empty">Kho hàng lỗi trống và không có hàng đang gửi NCC.</div>', null, d => {
+      d.classList.add('wide');
+      $$('[data-vso]', d).forEach(b => b.onclick = () => { d.close(); voucherView(b.dataset.vso); });
+      $$('[data-lt]', d).forEach(b => b.onclick = () => { d.close(); voucherForm(b.dataset.lt, { kho: b.dataset.k, lines: [{ maHang: b.dataset.m }] }); });
+      const xb = $('#loiX', d); if (xb) xb.onclick = () => exportRows(`KhoHangLoi_${S.today}`, R.map(x => ({ 'Mã hàng': x.maHang, 'Tên hàng': x.ten, 'ĐVT': x.dvt, 'Tồn kho lỗi': Object.values(x.ton).reduce((a, q) => a + q, 0), 'Serial': x.serials.map(z => z.serial).join(', '), 'Đang gửi NCC': x.dangGui.map(g => `${g.soPhieu} (${supName(g.maNCC)}) còn ${g.con}/${g.gui}`).join('; ') })));
+    });
   }
   async function exportRows(name, rows) {
     name = `QLHH_${S.co.id}_${name}`;
@@ -901,7 +949,10 @@
   const optsOf = (rows, k, n, empty) => [['', empty], ...(rows || []).filter(x => x.trangThai !== 'NGUNG').map(x => [x[k], x[n] + ' (' + x[k] + ')'])];
   const tplName = l => ((S.data.templates || []).find(t => t.maMau === l.maMau) || {}).ten || l.maMau;
   const cabsOf = so => (S.data.cabinets || []).filter(c => c.soLSX === so && c.trangThai !== 'HUY');
-  const kcsTag = c => !Number(c.lanKiemCuoi) ? '<span class="tag">Chưa kiểm</span>' : c.kcsDat ? `<span class="tag ok">${ic('check')} Đạt</span>` : `<span class="tag bad">${ic('x')} Không đạt</span>`;
+  /** Sự kiện khách trả gần nhất còn hiệu lực của hồ sơ tủ (cột lichSu). */
+  const retEv = c => { try { return JSON.parse((c && c.lichSu) || '[]').filter(e => e.loai === 'KHACH_TRA' && !e.huy).slice(-1)[0] || null; } catch (e) { return null; } };
+  const kcsLai = c => { const ev = retEv(c); return !!ev && !(c.kcsDat === true || c.kcsDat === 'true') && Number(c.lanKiemCuoi || 0) === Number(ev.lanKiemCuoi || 0); };
+  const kcsTag = c => kcsLai(c) ? `<span class="tag warn">${ic('warn')} Cần KCS lại</span>` : !Number(c.lanKiemCuoi) ? '<span class="tag">Chưa kiểm</span>' : c.kcsDat ? `<span class="tag ok">${ic('check')} Đạt</span>` : `<span class="tag bad">${ic('x')} Không đạt</span>`;
   const isSer = it => it && (it.quanLySerial === true || it.quanLySerial === 'true');
   const tuLink = ser => `${location.origin}${location.pathname}#/t/${S.co.id}/${encodeURIComponent(ser)}`;
   async function qrSvg(text, px = 4) {
@@ -1161,7 +1212,8 @@
         <tr><td>Đơn vị sản xuất</td><td>${esc((co.tenDay || co.ten).toUpperCase())}</td></tr><tr><td>Khách hàng</td><td>${esc(cust.ten || '')}</td></tr>
         <tr><td>Địa chỉ khách hàng</td><td>${esc(cust.diaChi || '')}</td></tr><tr><td>Công trình</td><td>${esc(p.maCongTrinh ? projName(p.maCongTrinh) : '')}</td></tr>
         <tr><td>Địa điểm xây dựng</td><td>${esc(p.diaDiem || '')}</td></tr><tr><td>Căn cứ chế tạo</td><td>${esc(p.canCuCheTao || '')}</td></tr>
-        ${p.soPhieuXuat || p.soHoaDon ? `<tr><td>Phiếu xuất kho / Hoá đơn</td><td>${esc([p.soPhieuXuat, p.soHoaDon].filter(Boolean).join(' / '))}</td></tr>` : ''}</tbody></table>
+        ${p.soPhieuXuat || p.soHoaDon ? `<tr><td>Phiếu xuất kho / Hoá đơn</td><td>${esc([p.soPhieuXuat, p.soHoaDon].filter(Boolean).join(' / '))}</td></tr>` : ''}
+        ${JSON.parse(p.traLai || '[]').length ? `<tr><td>Tủ khách đã trả lại</td><td>${JSON.parse(p.traLai).map(z => esc(z.serial) + ' (phiếu ' + esc(z.soPhieu) + ' ngày ' + esc(vnD(z.ngay)) + ')').join('; ')} — không còn hiệu lực theo phiếu này</td></tr>` : ''}</tbody></table>
       <h2>II. THÔNG TIN SẢN PHẨM</h2><table class="pv-k"><tbody>
         <tr><td>Tên sản phẩm</td><td>${esc(t.moTa || t.ten)}</td></tr><tr><td>Số lượng</td><td>${pad2(n)} (${esc(words)}) tủ</td></tr>
         ${t.kichThuoc ? `<tr><td>Kích thước vỏ tủ</td><td>${esc(t.kichThuoc)} mm (Cao × Rộng × Sâu)</td></tr>` : ''}${t.vatLieu ? `<tr><td>Vật liệu, màu sắc</td><td>${esc(t.vatLieu)}</td></tr>` : ''}
@@ -1200,14 +1252,19 @@
       ${bhCanAct(x) ? `<div class="acts" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"><button class="btn" type="button" id="tB">${ic('shield')} Tiếp nhận bảo hành</button></div>` : ''}`, null, d => { const b = $('#toCha', d); if (b) b.onclick = () => { d.close(); tuView(x.cha.serial); }; bhBind(d, x, sr.serial); });
     const qr = await qrSvg(tuLink(h.serial), 4).catch(() => '');
     const live = canEdit() && !S.offline && sr.trangThai === 'TRONG_KHO' && !h.soPXX && h.trangThai !== 'HUY';
+    const evs = (() => { try { return JSON.parse(h.lichSu || '[]'); } catch (e) { return []; } })(), ev = kcsLai(h) && sr.trangThai === 'TRONG_KHO' ? retEv(h) : null;
+    const openT = (x.pbh || []).filter(t => ['TIEP_NHAN', 'DANG_XU_LY'].includes(t.trangThai)).slice(-1)[0], canThay = canEdit() && !S.offline && !!openT && sr.trangThai === 'DA_BAN';
     dialog('Hồ sơ tủ ' + esc(h.serial), `<div class="tuhead"><div class="tuqr">${qr}</div><div><div class="mono"><b>${esc(h.serial)}</b></div><b>${esc(x.item.ten || h.maHang)}</b><br>
         ${h.trangThai === 'HUY' ? '<span class="tag stop">Hồ sơ đã huỷ</span>' : kcsTag(h)} <span class="tag">${ST[sr.trangThai] || esc(sr.trangThai || '')}${sr.kho ? ' · ' + esc(khoName(sr.kho)) : ''}</span></div></div>
+      ${ev ? `<p class="warnbar" role="status">${ic('warn')} Khách trả tủ ngày ${esc(vnD(ev.ngay))} (phiếu ${esc(ev.soPhieu)}) — <b>cần kiểm tra xuất xưởng lại</b> trước khi bán hoặc phát hành phiếu xuất xưởng mới.</p>` : ''}
       <dl class="dl"><dt>Lệnh sản xuất</dt><dd><button class="linkbtn mono" type="button" id="toL">${esc(h.soLSX)}</button></dd><dt>Nhập kho</dt><dd>${esc(vnD(h.ngayNhap))} · <button class="linkbtn mono" type="button" data-vso="${esc(h.soPhieuNhap)}">${esc(h.soPhieuNhap)}</button></dd>${h.phieuXuat ? `<dt>Xuất kho</dt><dd>${esc(vnD(h.ngayXuat))} · <button class="linkbtn mono" type="button" data-vso="${esc(h.phieuXuat)}">${esc(h.phieuXuat)}</button></dd>` : ''}
         <dt>Mẫu</dt><dd>${esc(h.maMau)} bản ${esc(h.phienBan)}${h.kichThuoc ? ' · ' + esc(h.kichThuoc) + ' mm' : ''}</dd>
         ${x.pxx ? `<dt>Phiếu xuất xưởng</dt><dd><button class="linkbtn mono" type="button" id="tP2">${esc(x.pxx.soPXX)}</button> · ${esc(vnD(x.pxx.ngay))}${x.pxx.maKH ? ' · ' + esc(custName(x.pxx.maKH)) : ''}</dd>` : ''}
         ${x.lsx && x.lsx.maKH ? `<dt>Khách theo lệnh</dt><dd>${esc(custName(x.lsx.maKH))}${x.lsx.maCongTrinh ? ' · ' + esc(projName(x.lsx.maCongTrinh)) : ''}</dd>` : ''}
         ${x.giaThanh !== undefined && isQT() ? `<dt>Giá thành</dt><dd>${money(x.giaThanh)} <small class="mut">(khi bán, giá vốn theo bình quân của mã thành phẩm)</small></dd>` : ''}</dl>
-      <h3 class="h3">Linh kiện có serial trong tủ</h3>${(x.con || []).length ? `<ul class="plain">${x.con.map(c => `<li><span class="mono">${esc(c.serial)}</span> — ${esc(itemOf(c.maHang).ten)}</li>`).join('')}</ul>` : '<p class="mut">Không có.</p>'}
+      <h3 class="h3">Linh kiện có serial trong tủ</h3>${(x.con || []).length ? `<ul class="plain conlist">${x.con.map(c => `<li><span><span class="mono">${esc(c.serial)}</span> — ${esc(itemOf(c.maHang).ten)}</span>${canThay ? `<button class="btn ghost" type="button" data-thay="${esc(c.maHang)}" data-ts="${esc(c.serial)}">${ic('tool')} Thay ${esc(itemOf(c.maHang).ten)}</button>` : ''}</li>`).join('')}</ul>` : '<p class="mut">Không có.</p>'}
+      ${canThay ? `<p style="margin:6px 0 0"><button class="btn ghost" type="button" id="tThayK">${ic('tool')} Thay linh kiện khác (phiếu ${esc(openT.soPBH)})</button></p>` : ''}
+      ${evs.length ? `<h3 class="h3">Lịch sử giao – trả (${evs.length})</h3><ol class="kcsum">${evs.map(e => `<li>Xuất ${esc(vnD(e.ngayXuat))} · <button class="linkbtn mono" type="button" data-vso="${esc(e.phieuXuat)}">${esc(e.phieuXuat)}</button>${e.maKH ? ' · ' + esc(custName(e.maKH)) : ''}${e.ngayBanGiao ? ' · bàn giao ' + esc(vnD(e.ngayBanGiao)) + (e.hanBH ? ', hạn BH ' + esc(vnD(e.hanBH)) : '') : ''}${e.soPXX ? ' · PXX ' + esc(e.soPXX) : ''} → khách trả ${esc(vnD(e.ngay))} · <button class="linkbtn mono" type="button" data-vso="${esc(e.soPhieu)}">${esc(e.soPhieu)}</button>${(e.pbh || []).length ? ' · đóng ' + e.pbh.map(z => esc(z.soPBH)).join(', ') : ''}${e.huy ? ' <span class="tag">phiếu trả đã đảo</span>' : ''}</li>`).join('')}</ol>` : ''}
       ${bhBlock(x)}<h3 class="h3">Kiểm tra xuất xưởng (${(x.kcs || []).length} lần)</h3>${(x.kcs || []).length ? x.kcs.slice().reverse().map(k => `<details ${k === x.kcs[x.kcs.length - 1] ? 'open' : ''}><summary>Lần ${k.lanKiem} · ${esc(vnD(k.ngay))} · ${k.dat ? '<b class="ok-ink">Đạt</b>' : '<b class="bad-ink">Không đạt</b>'} · ${esc(k.nguoiKiem)}</summary><ol class="kcsum">${k.ketQua.map(q => `<li>${esc(q.noiDung)} — ${q.ketQua === 'DAT' ? '✓' : `<b class="bad-ink">✗ ${esc(q.ghiChu)}</b>`}</li>`).join('')}</ol></details>`).join('') : '<p class="mut">Chưa kiểm.</p>'}
       <div class="acts stickacts" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">${live ? `<button class="btn pri" type="button" id="tK">${ic('check')} Kiểm tra xuất xưởng</button>` : ''}${x.pxx ? `<button class="btn" type="button" id="tP">In PXX</button>${isQT() && !S.offline && x.pxx.trangThai === 'PHAT_HANH' ? '<button class="btn danger" type="button" id="tPH">Huỷ PXX</button>' : ''}` : ''}${bhCanAct(x) ? `<button class="btn pri" type="button" id="tL">${ic('pin')} ${(x.baoHanh || {}).ngayBanGiao ? 'Di dời' : 'Ghi bàn giao'}</button><button class="btn" type="button" id="tB">${ic('shield')} Tiếp nhận bảo hành</button>` : ''}<button class="btn" type="button" id="tTem">In tem QR</button></div>`, null, d => {
       d.classList.add('wide'); bhBind(d, x, h.serial);
@@ -1217,6 +1274,8 @@
       $$('[data-vso]', d).forEach(b => b.onclick = () => { d.close(); voucherView(b.dataset.vso); });   // hồ sơ tủ → phiếu nhập / xuất
       const ph = $('#tPH', d); if (ph) ph.onclick = () => { d.close(); pxxCancelForm(x.pxx); };
       $('#tTem', d).onclick = () => printTem(h.serial, x.item.ten || h.maHang, qr);
+      $$('[data-thay]', d).forEach(b => b.onclick = () => { d.close(); replaceForm(openT, { maHang: b.dataset.thay, cu: [b.dataset.ts] }); });
+      const tk = $('#tThayK', d); if (tk) tk.onclick = () => { d.close(); replaceForm(openT); };
     });
   }
   function printTem(ser, ten, qr) {   // tem dán tủ: QR ≥ 25 mm + số xê-ri
@@ -1229,7 +1288,10 @@
 
   // ---------------- lắp đặt & bảo hành (BH-1) ----------------
   const BH_TT = { CON_BH: 'Còn bảo hành', SAP_HET: 'Sắp hết bảo hành', HET_BH: 'Hết bảo hành', KHONG_BH: 'Không bảo hành', CHUA_BAN_GIAO: 'Chưa bàn giao' };
-  const PBH_TT = { TIEP_NHAN: 'Tiếp nhận', DANG_XU_LY: 'Đang xử lý', HOAN_THANH: 'Hoàn thành', TU_CHOI: 'Từ chối' };
+  const PBH_TT = { TIEP_NHAN: 'Tiếp nhận', DANG_XU_LY: 'Đang xử lý', HOAN_THANH: 'Hoàn thành', TU_CHOI: 'Từ chối', DONG_KHACH_TRA: 'Đóng — khách trả tủ' };
+  const HINH = { BAO_HANH: 'Bảo hành', THIEN_CHI: 'Bảo hành thiện chí', THU_TIEN: 'Sửa có thu tiền' };
+  const pbhCls = t => t.trangThai === 'HOAN_THANH' ? 'ok' : t.trangThai === 'TU_CHOI' ? 'bad' : t.trangThai === 'DONG_KHACH_TRA' ? '' : 'warn';
+  const pbhObj = t => t.serialTu || t.serial ? `<span class="mono">${esc(t.serialTu || t.serial)}</span>` : `${esc(itemOf(t.maHang).ten || t.maHang)} × ${num(t.soLuong)}`;
   const NN = { LOI_THIET_BI: 'Lỗi thiết bị (nhà sản xuất)', LOI_LAP_RAP: 'Lỗi lắp ráp tại xưởng', LOI_LAP_DAT: 'Lỗi lắp đặt tại công trình', SET_DANH: 'Sét đánh', QUA_AP: 'Quá áp lưới điện', TAC_DONG: 'Tác động cơ học / ngập nước', TU_Y_SUA: 'Tự ý sửa chữa, đổi đấu nối', KHAC: 'Khác' };
   const TT_BH = { TRONG_BH: 'Trong bảo hành', HET_BH: 'Hết bảo hành', CHUA_BAN_GIAO: 'Chưa ghi bàn giao', KHONG_BH: 'Không bảo hành' };
   const BH = { tab: 'tu', f: '', q: '' };
@@ -1246,7 +1308,7 @@
       <dt>Bàn giao</dt><dd>${b.ngayBanGiao ? `${vnD(b.ngayBanGiao)} · bảo hành ${esc(b.thangBH)} tháng` : `<i>Chưa ghi bàn giao</i>${b.ngayXuat ? ' · xuất kho ' + vnD(b.ngayXuat) : ''}${(b.tinhTrang || {}).canhBao ? ' <b class="bad-ink">— đã quá 30 ngày</b>' : ''}`}</dd>
       ${v ? `<dt>Vị trí hiện tại</dt><dd>${v.tenTaiCT ? '<b>' + esc(v.tenTaiCT) + '</b> · ' : ''}${esc(v.diaChi)}${v.maCongTrinh ? '<br><small class="mut">' + esc(projName(v.maCongTrinh)) + (v.maKH ? ' · ' + esc(custName(v.maKH)) : '') + '</small>' : ''}${mu ? `<br><a class="linkbtn" href="${mu}" target="_blank" rel="noopener">${ic('pin')} Xem bản đồ (${v.viDo}, ${v.kinhDo})</a>` : ''}</dd>` : ''}</dl>
       ${(x.lapDat || []).length > (isQT() ? 0 : 1) ? `<details><summary>Lịch sử vị trí (${x.lapDat.length} lần)</summary><ol class="kcsum">${x.lapDat.map(l => `<li>${vnD(l.ngay)} · ${l.loai === 'BAN_GIAO' ? 'Bàn giao' : 'Di dời'} · ${esc(l.diaChi)}${l.soBBBG ? ' · ' + esc(l.soBBBG) : ''}${isQT() && !S.offline ? ` <button class="linkbtn" type="button" data-ldv="${esc(l.id)}">Huỷ dòng</button>` : ''}</li>`).join('')}</ol></details>` : ''}
-      ${(x.pbh || []).length ? `<h3 class="h3">Phiếu bảo hành (${x.pbh.length})</h3><div class="list">${x.pbh.slice().reverse().map(t => `<div class="it" data-pbh="${esc(t.soPBH)}" role="button" tabindex="0"><div><span class="mono">${esc(t.soPBH)}</span> · ${vnD(t.ngay)} <span class="tag ${t.trangThai === 'HOAN_THANH' ? 'ok' : t.trangThai === 'TU_CHOI' ? 'bad' : 'warn'}">${PBH_TT[t.trangThai]}</span><br><small class="mut">${esc(t.moTaLoi)}</small></div></div>`).join('')}</div>` : ''}`;
+      ${(x.pbh || []).length ? `<h3 class="h3">Phiếu bảo hành (${x.pbh.length})</h3><div class="list">${x.pbh.slice().reverse().map(t => `<div class="it" data-pbh="${esc(t.soPBH)}" role="button" tabindex="0"><div><span class="mono">${esc(t.soPBH)}</span> · ${vnD(t.ngay)} <span class="tag ${pbhCls(t)}">${PBH_TT[t.trangThai] || esc(t.trangThai)}</span><br><small class="mut">${esc(t.moTaLoi)}</small></div></div>`).join('')}</div>` : ''}`;
   }
   function bhBind(d, x, ser) {
     const l = $('#tL', d); if (l) l.onclick = () => { d.close(); installForm(x); };
@@ -1283,75 +1345,132 @@
   }
   function ticketView(so) {
     const t = (S.data.pbh || []).find(z => z.soPBH === so); if (!t) return toast('Không có phiếu ' + so);
-    const open = ['TIEP_NHAN', 'DANG_XU_LY'].includes(t.trangThai), live = canEdit() && !S.offline && open, tt = JSON.parse(t.thayThe || '[]');
-    dialog('Phiếu bảo hành ' + esc(t.soPBH), `<dl class="dl"><dt>Trạng thái</dt><dd><span class="tag ${t.trangThai === 'HOAN_THANH' ? 'ok' : t.trangThai === 'TU_CHOI' ? 'bad' : 'warn'}">${PBH_TT[t.trangThai]}</span> ${TT_BH[t.tinhTrangBH] ? `<span class="tag ${t.tinhTrangBH === 'TRONG_BH' ? 'ok' : ''}">${TT_BH[t.tinhTrangBH]}${t.hanBH ? ' · hạn ' + vnD(t.hanBH) : ''}</span>` : ''}</dd>
-        <dt>Tủ</dt><dd><button class="linkbtn mono" type="button" id="pT">${esc(t.serialTu || t.serial)}</button>${t.serialTu && t.serial !== t.serialTu ? ` · báo theo linh kiện <span class="mono">${esc(t.serial)}</span>` : ''}</dd>
+    const open = ['TIEP_NHAN', 'DANG_XU_LY'].includes(t.trangThai), live = canEdit() && !S.offline && open, tt = JSON.parse(t.thayThe || '[]'), hv = JSON.parse(t.huyThay || '[]');
+    const mien = QBH.mienPhi(t.tinhTrangBH, t.nguyenNhan), cabT = !!t.serialTu;
+    const lan = [...new Set(tt.map(z => z.soPhieuXuat).filter(Boolean))].concat(String(t.soPhieuXuat || '').split(/\s*,\s*/).filter(z => z && !tt.some(y => y.soPhieuXuat === z)));
+    dialog('Phiếu bảo hành ' + esc(t.soPBH), `<dl class="dl"><dt>Trạng thái</dt><dd><span class="tag ${pbhCls(t)}">${PBH_TT[t.trangThai] || esc(t.trangThai)}</span> ${TT_BH[t.tinhTrangBH] ? `<span class="tag ${t.tinhTrangBH === 'TRONG_BH' ? 'ok' : ''}">${TT_BH[t.tinhTrangBH]}${t.hanBH ? ' · hạn ' + vnD(t.hanBH) : ''}</span>` : ''}</dd>
+        ${t.serialTu || t.serial ? `<dt>${cabT ? 'Tủ' : 'Serial'}</dt><dd><button class="linkbtn mono" type="button" id="pT">${esc(t.serialTu || t.serial)}</button>${t.serialTu && t.serial !== t.serialTu ? ` · báo theo linh kiện <span class="mono">${esc(t.serial)}</span>` : ''}</dd>`
+          : `<dt>Hàng</dt><dd>${esc(itemOf(t.maHang).ten || t.maHang)} × ${num(t.soLuong)} ${esc(itemOf(t.maHang).dvt)} · phiếu xuất <button class="linkbtn mono" type="button" id="pPX">${esc(t.phieuGoc)}</button>${t.maKH ? ' · ' + esc(custName(t.maKH)) : ''}</dd>`}
         <dt>Tiếp nhận</dt><dd>${vnD(t.ngay)}${t.nguoiBao ? ' · ' + esc(t.nguoiBao) : ''}</dd><dt>Hiện tượng</dt><dd>${esc(t.moTaLoi)}</dd>
         ${t.nguyenNhan ? `<dt>Nguyên nhân</dt><dd>${esc(NN[t.nguyenNhan] || t.nguyenNhan)}${QBH.NGOAI_BH.includes(t.nguyenNhan) ? ' <span class="tag bad">ngoài bảo hành</span>' : ''}</dd>` : ''}
+        ${t.hinhThuc ? `<dt>Hình thức</dt><dd>${esc(HINH[t.hinhThuc] || t.hinhThuc)}${Number(t.phiSua) ? ' · phí sửa thu khách <b>' + money(t.phiSua) + '</b>' : ''}</dd>` : ''}
         ${t.thienChi ? `<dt>Bảo hành thiện chí</dt><dd>${esc(t.thienChi)}</dd>` : ''}${t.ketQua ? `<dt>Kết quả</dt><dd>${esc(t.ketQua)}</dd>` : ''}${t.ngayDong ? `<dt>Đóng phiếu</dt><dd>${vnD(t.ngayDong)}</dd>` : ''}
-        ${tt.length ? `<dt>Đã thay</dt><dd><ul class="plain">${tt.map(z => `<li>${vnD(z.ngay)} · ${esc(itemOf(z.maHang).ten || z.maHang)} × ${num(z.soLuong)}${z.serialMoi.length ? ' · mới <span class="mono">' + z.serialMoi.map(esc).join(', ') + '</span>' : ''}${z.serialCu.length ? ' · thu hồi <span class="mono">' + z.serialCu.map(esc).join(', ') + '</span>' : ''}</li>`).join('')}</ul><small class="mut">${esc([t.soPhieuXuat, t.soPhieuLoi].filter(Boolean).join(' · '))}</small></dd>` : ''}</dl>
-      <div class="acts" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">${live && t.serialTu ? `<button class="btn" type="button" id="pR">${ic('tool')} Thay linh kiện</button>` : ''}${live ? `<button class="btn pri" type="button" id="pU">Cập nhật xử lý</button>` : ''}<button class="btn" type="button" id="pPr">In phiếu</button></div>`, null, d => {
-      $('#pT', d).onclick = () => { d.close(); tuView(t.serialTu || t.serial); };
+        ${tt.length ? `<dt>Đã thay</dt><dd><ul class="plain">${tt.map(z => `<li>${esc(vnD(z.ngay))} · ${esc(itemOf(z.maHang).ten || z.maHang)} × ${num(z.soLuong)}${z.serialMoi.length ? ' · mới <span class="mono">' + z.serialMoi.map(esc).join(', ') + '</span>' : ''}${z.serialCu.length ? ' · thu hồi <span class="mono">' + z.serialCu.map(esc).join(', ') + '</span>' : ''}${z.hinhThuc === 'THU_TIEN' ? ' · <i>thu tiền</i>' : ''}</li>`).join('')}</ul><small class="mut">${esc([t.soPhieuXuat, t.soPhieuLoi].filter(Boolean).join(' · '))}</small></dd>` : ''}
+        ${hv.length ? `<dt>Lần thay đã huỷ</dt><dd><ul class="plain">${hv.map(z => `<li><span class="mono">${esc(z.soPhieuXuat)}</span>${z.soPhieuLoi ? ' + <span class="mono">' + esc(z.soPhieuLoi) + '</span>' : ''} · huỷ ${esc(vnD(z.ngay))} (đảo ${esc([z.daoXuat, z.daoLoi].filter(Boolean).join(', '))}) · ${esc(z.lyDo)}</li>`).join('')}</ul></dd>` : ''}</dl>
+      ${!mien && live ? `<p class="mut" style="font-size:12.5px">Ngoài bảo hành: chọn <b>Sửa có thu tiền</b> khi thay linh kiện, hoặc lập phiếu xuất bán linh kiện rời cho khách.</p>` : ''}
+      <div class="acts" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">${live ? `<button class="btn" type="button" id="pR">${ic('tool')} ${cabT ? 'Thay linh kiện' : 'Đổi hàng / thay'}</button>` : ''}${live && !mien ? '<button class="btn" type="button" id="pXB">Lập phiếu xuất bán</button>' : ''}${live ? `<button class="btn pri" type="button" id="pU">Cập nhật xử lý</button>` : ''}<button class="btn" type="button" id="pPr">In phiếu</button>
+        ${isQT() && !S.offline && lan.length ? lan.map(z => `<button class="btn danger" type="button" data-hv="${esc(z)}">Huỷ lần thay ${esc(z)}</button>`).join('') : ''}</div>`, null, d => {
+      const pt = $('#pT', d); if (pt) pt.onclick = () => { d.close(); tuView(t.serialTu || t.serial); };
+      const px = $('#pPX', d); if (px) px.onclick = () => { d.close(); voucherView(t.phieuGoc); };
       const r = $('#pR', d); if (r) r.onclick = () => { d.close(); replaceForm(t); };
+      const xb = $('#pXB', d); if (xb) xb.onclick = async () => { d.close(); const k = await ticketCust(t); voucherForm('XUAT_BAN', { maKH: k.maKH, maCongTrinh: k.maCongTrinh, lyDo: 'Bán linh kiện thay cho ' + (t.serialTu ? 'tủ ' + t.serialTu : t.serial || t.maHang) + ' — phiếu BH ' + t.soPBH, lines: [{}] }); };
       const u = $('#pU', d); if (u) u.onclick = () => { d.close(); ticketUpdate(t); };
       $('#pPr', d).onclick = () => printPBH(t);
+      $$('[data-hv]', d).forEach(b => b.onclick = () => { d.close(); replaceVoidForm(t, b.dataset.hv); });
     });
+  }
+  /** Khách + công trình của phiếu BH (vị trí lắp hiện tại của tủ / phiếu xuất của hàng) — điền sẵn phiếu xuất bán linh kiện. */
+  async function ticketCust(t) {
+    if (t.serialTu || t.serial) { const g = await load('serial.get', { serial: t.serialTu || t.serial }, 'Đang đọc hồ sơ…'); if (g.ok) { const v = (g.data.baoHanh || {}).viTri || {}, l = g.data.lsx || {}; return v.maKH ? { maKH: v.maKH, maCongTrinh: v.maCongTrinh } : { maKH: l.maKH || '', maCongTrinh: l.maCongTrinh || '' }; } }
+    const p = (S.data.vouchers || []).find(z => z.soPhieu === t.phieuGoc) || {}; return { maKH: t.maKH || p.maKH || '', maCongTrinh: p.maCongTrinh || '' };
+  }
+  function replaceVoidForm(t, so) {
+    dialog('Huỷ lần thay ' + esc(so), `<p>Đảo phiếu xuất <b class="mono">${esc(so)}</b> (linh kiện mới về kho) và phiếu thu hồi cùng lần thay (linh kiện cũ lắp lại vào tủ). Dùng khi ghi nhầm; phiếu bảo hành giữ lịch sử lần huỷ.</p>
+      ${fld('ngay', 'Ngày phiếu đảo', S.today, { type: 'date', max: S.today })}${fld('lyDo', 'Lý do huỷ (ít nhất 10 ký tự)', '', { req: 1, type: 'textarea' })}`,
+      async (v, dlg) => { if (v.lyDo.trim().length < 10) { showErrors(dlg, { lyDo: 'Ghi rõ lý do (≥ 10 ký tự)' }); return false; }
+        const r = await submitSX(dlg, 'bh.replaceVoid', { soPBH: t.soPBH, soPhieuXuat: so, lyDo: v.lyDo, ngay: v.ngay }, z => `Đã huỷ lần thay ${so} · đảo ${[z.daoXuat, z.daoLoi].filter(Boolean).join(', ')}`); if (r) setTimeout(() => ticketView(t.soPBH), 0); return !!r; }, null, 'Huỷ lần thay');
   }
   function ticketUpdate(t) {
     const next = { TIEP_NHAN: ['DANG_XU_LY', 'HOAN_THANH', 'TU_CHOI'], DANG_XU_LY: ['HOAN_THANH', 'TU_CHOI'] }[t.trangThai] || [];
     dialog('Cập nhật ' + esc(t.soPBH), `${fld('trangThai', 'Chuyển sang', next[0], { opts: next.map(k => [k, PBH_TT[k]]) })}${fld('nguyenNhan', 'Nguyên nhân', t.nguyenNhan, { opts: [['', '— Chưa xác định —'], ...Object.entries(NN)] })}
-      ${fld('ketQua', 'Kết quả xử lý / lý do từ chối', t.ketQua, { type: 'textarea' })}<p class="mut" style="font-size:12.5px">Sét đánh, quá áp, tác động cơ học, tự ý sửa chữa thuộc điều kiện loại trừ bảo hành ghi trên phiếu xuất xưởng.</p>`,
+      ${fld('ketQua', 'Kết quả xử lý / lý do từ chối', t.ketQua, { type: 'textarea' })}${fld('phiSua', 'Phí sửa chữa thu khách (₫, để trống nếu miễn phí)', t.phiSua === '' || t.phiSua === undefined ? '' : String(t.phiSua), { im: 'numeric' })}<p class="mut" style="font-size:12.5px">Sét đánh, quá áp, tác động cơ học, tự ý sửa chữa thuộc điều kiện loại trừ bảo hành ghi trên phiếu xuất xưởng. Phí sửa là căn cứ xuất hoá đơn dịch vụ.</p>`,
       async (v, dlg) => { const c = QBH.validateUpdate(v, t.trangThai); if (!c.ok) { showErrors(dlg, c.errors); dlgMsg(dlg, Object.values(c.errors)[0]); return false; }
-        const r = await submitSX(dlg, 'bh.update', { soPBH: t.soPBH, ...v }, z => `${t.soPBH}: ${PBH_TT[z.trangThai]}`); if (r) setTimeout(() => ticketView(t.soPBH), 0); return !!r; }, null, 'Lưu');
+        const ps = String(v.phiSua || '').replace(/[.\s,₫]/g, ''); if (ps && !/^\d+$/.test(ps)) { showErrors(dlg, { phiSua: 'Số tiền VND' }); return false; }
+        const r = await submitSX(dlg, 'bh.update', { soPBH: t.soPBH, trangThai: v.trangThai, ketQua: v.ketQua, nguyenNhan: v.nguyenNhan, phiSua: ps === '' ? undefined : Number(ps) }, z => `${t.soPBH}: ${PBH_TT[z.trangThai]}`); if (r) setTimeout(() => ticketView(t.soPBH), 0); return !!r; }, null, 'Lưu');
   }
-  async function replaceForm(t) {
-    const g = await load('serial.get', { serial: t.serialTu }, 'Đang đọc hồ sơ tủ…'); if (!g.ok) return toast('Không đọc được hồ sơ tủ: ' + (g.error || g.code));
-    const con = g.data.con || [], items = S.data.items.filter(i => i.trangThai !== 'NGUNG'), lines = [{}];
-    const kho0 = (activeKho(false)[0] || {}).maKho;
-    const mien = QBH.mienPhi(t.tinhTrangBH, t.nguyenNhan);
-    if (!mien && !isQT()) return dialog('Ngoài bảo hành', `<p>Phiếu ${esc(t.soPBH)}: ${esc(TT_BH[t.tinhTrangBH] || '')}${t.nguyenNhan ? ' · ' + esc(NN[t.nguyenNhan] || t.nguyenNhan) : ''}.</p><p>Không thay miễn phí. Lập <b>phiếu xuất bán</b> linh kiện có giá cho khách, hoặc đề nghị Quản trị duyệt bảo hành thiện chí.</p>`, null);
-    const d = dialog('Thay linh kiện — ' + esc(t.soPBH), `${mien ? '<p>Linh kiện mới xuất từ kho (phiếu Xuất bảo hành, tính chi phí bảo hành). Linh kiện có serial thu hồi về kho hàng lỗi.</p>' : `<div class="banner" role="alert">${ic('warn')} Ngoài bảo hành (${esc(TT_BH[t.tinhTrangBH] || '')}${t.nguyenNhan ? ' · ' + esc(NN[t.nguyenNhan] || t.nguyenNhan) : ''}) — chỉ thay miễn phí khi Quản trị duyệt <b>thiện chí</b>.</div>${fld('thienChi', 'Lý do bảo hành thiện chí', '', { req: 1 })}`}
-      <p class="mut" style="font-size:12.5px">Linh kiện có serial: tủ đang có serial cùng mã thì phải chọn serial cũ thu hồi.</p>
+  /** Tiếp nhận bảo hành hàng KHÔNG serial (đèn…) theo phiếu xuất. */
+  function ticketFormLe(p, L) {
+    const le = L.filter(l => !isSer(itemOf(l.maHang))); if (!le.length) return toast('Phiếu không có hàng không serial');
+    dialog('Tiếp nhận bảo hành — phiếu ' + esc(p.soPhieu), `<p class="mut" style="font-size:12.5px">Hàng không quản lý serial: hạn bảo hành tính từ ngày xuất ${esc(vnD(p.ngay))} theo số tháng bảo hành của mã hàng.</p>
+      <div class="grid2"><div>${fld('maHang', 'Hàng', le[0].maHang, { opts: le.map(l => [l.maHang, itemOf(l.maHang).ten + ' — đã xuất ' + num(l.soLuong) + ' ' + itemOf(l.maHang).dvt]) })}</div><div>${fld('soLuong', 'Số lượng lỗi', '1', { im: 'decimal', req: 1 })}</div>
+        <div>${fld('ngay', 'Ngày tiếp nhận', S.today, { type: 'date', max: S.today })}</div><div>${fld('nguoiBao', 'Người báo (tên, điện thoại)', '')}</div></div>
+      ${fld('moTaLoi', 'Hiện tượng lỗi', '', { req: 1, type: 'textarea' })}${fld('ghiChu', 'Ghi chú', '')}`,
+      async (v, dlg) => { const c = QBH.validateTicket(v, { today: S.today }); if (!c.ok) { showErrors(dlg, c.errors); return false; }
+        const q = Number(String(v.soLuong).replace(',', '.')); if (!(q > 0)) { showErrors(dlg, { soLuong: 'Số lượng > 0' }); return false; }
+        const r = await submitSX(dlg, 'bh.create', { hangLe: { phieuXuat: p.soPhieu, maHang: v.maHang, soLuong: q }, phieu: { ngay: v.ngay, moTaLoi: v.moTaLoi, nguoiBao: v.nguoiBao, ghiChu: v.ghiChu } }, z => `Đã lập phiếu ${z.soPBH} · ${TT_BH[z.tinhTrangBH] || z.tinhTrangBH}${z.hanBH ? ' (hạn ' + vnD(z.hanBH) + ')' : ''}`);
+        if (r) setTimeout(() => ticketView(r.soPBH), 0); return !!r; }, null, 'Lập phiếu');
+  }
+  function ticketLePick() {
+    const ps = (S.data.vouchers || []).filter(x => ['XUAT_BAN', 'XUAT_CONG_TRINH', 'XUAT_BH'].includes(x.loai) && !x.daDao).slice(-300).reverse();
+    dialog('Tra phiếu xuất để bảo hành hàng không serial', `${fld('so', 'Số phiếu xuất (bán / công trình)', '', { req: 1, list: 'dlPX' })}<datalist id="dlPX">${ps.map(x => `<option value="${esc(x.soPhieu)}">${esc(vnD(x.ngay))} · ${esc(custName(x.maKH) || projName(x.maCongTrinh) || '')}</option>`).join('')}</datalist>`,
+      async (v, dlg) => { const so = v.so.trim().toUpperCase(); if (!so) { showErrors(dlg, { so: 'Nhập số phiếu' }); return false; }
+        const r = await load('voucher.get', { soPhieu: so }, 'Đang mở phiếu…'); if (!r.ok) { showErrors(dlg, { so: 'Không có phiếu ' + so }); return false; }
+        dlg.close(); ticketFormLe(r.data.phieu, r.data.lines); return false; }, null, 'Tra');
+  }
+  /** Thay linh kiện (tủ) / đổi hàng (serial bán rời, hàng không serial). pre = {maHang, cu: [serial cũ]} khi bấm "Thay [linh kiện]" ở hồ sơ tủ. */
+  async function replaceForm(t, pre = {}) {
+    const cabT = !!t.serialTu, leT = !t.serialTu && !t.serial;
+    let con = [];
+    if (cabT) { const g = await load('serial.get', { serial: t.serialTu }, 'Đang đọc hồ sơ tủ…'); if (!g.ok) return toast('Không đọc được hồ sơ tủ: ' + (g.error || g.code)); con = g.data.con || []; }
+    const items = S.data.items.filter(i => i.trangThai !== 'NGUNG'), kho0 = (activeKho(false)[0] || {}).maKho, mien = QBH.mienPhi(t.tinhTrangBH, t.nguyenNhan);
+    const lines = pre.maHang ? [{ maHang: pre.maHang, cu: pre.cu || [], moi: [], soLuong: String((pre.cu || []).length || '') }] : leT ? [{ maHang: t.maHang, soLuong: String(t.soLuong || ''), soLuongCu: String(t.soLuong || '') }] : !cabT ? [{ maHang: t.maHang, soLuong: '1' }] : [{}];
+    const hinhO = [['THU_TIEN', 'Sửa có thu tiền (khách trả phí)'], ...(isQT() ? [['THIEN_CHI', 'Bảo hành thiện chí (Quản trị duyệt)']] : [])];
+    const ttl = cabT ? 'Thay linh kiện' : 'Đổi hàng';
+    dialog(ttl + ' — ' + esc(t.soPBH), `${mien ? `<p>${cabT ? 'Linh kiện mới xuất từ kho (phiếu Xuất bảo hành, tính chi phí bảo hành). Linh kiện có serial thu hồi về kho hàng lỗi.' : 'Hàng mới xuất từ kho (phiếu Xuất bảo hành); hàng hỏng thu hồi về kho hàng lỗi (giá 0).'}</p>`
+        : `<div class="banner" role="alert">${ic('warn')} Ngoài bảo hành (${esc(TT_BH[t.tinhTrangBH] || '')}${t.nguyenNhan ? ' · ' + esc(NN[t.nguyenNhan] || t.nguyenNhan) : ''}) — không thay miễn phí.</div>
+          ${fld('hinhThuc', 'Hình thức', 'THU_TIEN', { opts: hinhO })}<div id="hTT">${fld('phiSua', 'Phí sửa chữa thu khách (₫)', '', { im: 'numeric' })}<small class="mut">Linh kiện xuất theo phiếu Xuất sửa chữa (giá vốn); phí sửa là căn cứ xuất hoá đơn dịch vụ.</small></div><div id="hTC" hidden>${fld('thienChi', 'Lý do bảo hành thiện chí', '', { req: 1 })}</div>`}
+      ${cabT ? '<p class="mut" style="font-size:12.5px">Linh kiện có serial: tủ đang có serial cùng mã thì phải chọn serial cũ thu hồi.</p>' : leT ? `<p class="mut" style="font-size:12.5px">Hàng: ${esc(itemOf(t.maHang).ten || t.maHang)} × ${num(t.soLuong)} (phiếu xuất ${esc(t.phieuGoc)}). "Thu hồi" = số hàng hỏng nhận về kho lỗi (để 0 nếu khách không trả lại).</p>` : `<p class="mut" style="font-size:12.5px">Serial ${esc(t.serial)} thu hồi về kho hàng lỗi khi đổi cùng mã.</p>`}
+      ${con.length ? `<div class="chips" role="group" aria-label="Chọn nhanh linh kiện trong tủ">${con.map(c => `<button class="chip" type="button" data-pk="${esc(c.maHang)}" data-ps="${esc(c.serial)}">${ic('tool')} Thay ${esc(itemOf(c.maHang).ten)} (${esc(c.serial)})</button>`).join('')}</div>` : ''}
       <div class="grid2"><div>${fld('ngay', 'Ngày thay', S.today, { type: 'date', max: S.today })}</div><div>${fld('kho', 'Lấy từ kho', kho0, { opts: activeKho(false).map(w => [w.maKho, w.ten]) })}</div></div>
-      <datalist id="dlRI">${items.map(i => `<option value="${esc(i.maHang)}">${esc(i.ten)}</option>`).join('')}</datalist><div id="rl"></div><button class="btn" type="button" id="rAdd">${ic('plus')} Thêm linh kiện</button>`,
+      <datalist id="dlRI">${items.map(i => `<option value="${esc(i.maHang)}">${esc(i.ten)}</option>`).join('')}</datalist><div id="rl"></div><button class="btn" type="button" id="rAdd">${ic('plus')} Thêm dòng</button>`,
       async (v, dlg) => {
-        const L = lines.filter(l => l.maHang).map(l => ({ maHang: l.maHang.toUpperCase(), soLuong: Number(String(l.soLuong || '').replace(',', '.')), serialMoi: l.moi || [], serialCu: l.cu || [] }));
-        if (!L.length) { dlgMsg(dlg, 'Chọn linh kiện thay'); return false; }
-        if (!mien && !String(v.thienChi || '').trim()) { showErrors(dlg, { thienChi: 'Nhập lý do' }); return false; }
-        const r = await submitSX(dlg, 'bh.replace', { soPBH: t.soPBH, ngay: v.ngay, kho: v.kho, lines: L, thienChi: v.thienChi }, z => `Đã thay · ${z.soPhieuXuat}${z.soPhieuLoi ? ' · thu hồi ' + z.soPhieuLoi : ''}`);
+        const L = lines.filter(l => l.maHang).map(l => ({ maHang: l.maHang.toUpperCase(), soLuong: Number(String(l.soLuong || '').replace(',', '.')), serialMoi: l.moi || [], serialCu: l.cu || [], soLuongCu: leT && l.soLuongCu !== undefined && l.soLuongCu !== '' ? Number(String(l.soLuongCu).replace(',', '.')) : undefined }));
+        if (!L.length) { dlgMsg(dlg, 'Chọn hàng / linh kiện thay'); return false; }
+        const hinh = mien ? '' : v.hinhThuc, ps = String(v.phiSua || '').replace(/[.\s,₫]/g, '');
+        if (hinh === 'THIEN_CHI' && !String(v.thienChi || '').trim()) { showErrors(dlg, { thienChi: 'Nhập lý do' }); return false; }
+        if (hinh === 'THU_TIEN' && ps && !/^\d+$/.test(ps)) { showErrors(dlg, { phiSua: 'Số tiền VND' }); return false; }
+        const r = await submitSX(dlg, 'bh.replace', { soPBH: t.soPBH, ngay: v.ngay, kho: v.kho, lines: L, thienChi: hinh === 'THIEN_CHI' ? v.thienChi : '', hinhThuc: hinh === 'THU_TIEN' ? 'THU_TIEN' : '', phiSua: hinh === 'THU_TIEN' && ps ? Number(ps) : undefined },
+          z => `Đã ${cabT ? 'thay' : 'đổi'} · ${z.soPhieuXuat}${z.soPhieuLoi ? ' · thu hồi ' + z.soPhieuLoi : ''}`);
         if (r) setTimeout(() => ticketView(t.soPBH), 0); return !!r;
       }, dlg => {
         dlg.classList.add('wide');
+        const hs = $('#f_hinhThuc', dlg); if (hs) hs.onchange = () => { $('#hTT', dlg).hidden = hs.value !== 'THU_TIEN'; $('#hTC', dlg).hidden = hs.value !== 'THIEN_CHI'; };
+        const autoCu = l => { const it = itemOf(String(l.maHang || '').toUpperCase()), cu = con.filter(c => c.maHang === it.maHang); if (cabT && isSer(it) && !(l.cu || []).length && cu.length && (cu.length === 1 || cu.length === Number(l.soLuong))) l.cu = cu.slice(0, Math.max(1, Number(l.soLuong) || 1)).map(c => c.serial); };   // tủ chỉ có đúng số serial cùng mã → chọn sẵn serial cũ
         const draw = () => { const kho = $('#f_kho', dlg).value;
           $('#rl', dlg).innerHTML = lines.map((l, i) => { const it = l.maHang ? itemOf(l.maHang.toUpperCase()) : {}, ser = isSer(it);
-            const moi = ser ? (S.data.serials || []).filter(z => z.maHang === it.maHang && z.kho === kho && z.trangThai === 'TRONG_KHO') : [], cu = ser ? con.filter(c => c.maHang === it.maHang) : [];
-            return `<div class="card" style="padding:10px;margin:0 0 8px"><div class="trow"><input class="in mono" list="dlRI" data-r="${i}" data-f="maHang" value="${esc(l.maHang || '')}" placeholder="Mã linh kiện" aria-label="Mã linh kiện ${i + 1}"><input class="in num" data-r="${i}" data-f="soLuong" value="${esc(l.soLuong || '')}" inputmode="decimal" placeholder="SL" aria-label="Số lượng ${i + 1}" ${ser ? 'readonly' : ''}><span class="mut tname">${esc(it.ten || '')}</span><button class="btn ghost iconbtn" type="button" data-rd="${i}" aria-label="Xoá dòng ${i + 1}">${ic('x')}</button></div>
+            const moi = ser ? (S.data.serials || []).filter(z => z.maHang === it.maHang && z.kho === kho && z.trangThai === 'TRONG_KHO') : [], cu = ser && cabT ? con.filter(c => c.maHang === it.maHang) : [];
+            return `<div class="card" style="padding:10px;margin:0 0 8px"><div class="trow"><input class="in mono" list="dlRI" data-r="${i}" data-f="maHang" value="${esc(l.maHang || '')}" placeholder="Mã hàng" aria-label="Mã hàng ${i + 1}"><input class="in num" data-r="${i}" data-f="soLuong" value="${esc(l.soLuong || '')}" inputmode="decimal" placeholder="SL" aria-label="Số lượng ${i + 1}" ${ser ? 'readonly' : ''}>${leT ? `<input class="in num" data-r="${i}" data-f="soLuongCu" value="${esc(l.soLuongCu ?? '')}" inputmode="decimal" placeholder="Thu hồi" aria-label="Số thu hồi dòng ${i + 1}" title="Số hàng hỏng thu hồi về kho lỗi">` : ''}<span class="mut tname">${esc(it.ten || '')}</span><button class="btn ghost iconbtn" type="button" data-rd="${i}" aria-label="Xoá dòng ${i + 1}">${ic('x')}</button></div>
               ${ser ? `<small>Serial mới (trong kho ${esc(khoName(kho))}):</small><div class="sers">${moi.length ? moi.map(z => `<label><input type="checkbox" data-rm="${i}" value="${esc(z.serial)}" ${(l.moi || []).includes(z.serial) ? 'checked' : ''}> ${esc(z.serial)}</label>`).join('') : '<span class="bad-ink">Không còn serial trong kho này</span>'}</div>
-                <small>Serial cũ thu hồi (đang trong tủ):</small><div class="sers">${cu.length ? cu.map(z => `<label><input type="checkbox" data-rc="${i}" value="${esc(z.serial)}" ${(l.cu || []).includes(z.serial) ? 'checked' : ''}> ${esc(z.serial)}</label>`).join('') : '<span class="mut">Tủ không có serial mã này</span>'}</div>` : ''}</div>`; }).join('');
+                ${cabT ? `<small>Serial cũ thu hồi (đang trong tủ):</small><div class="sers">${cu.length ? cu.map(z => `<label><input type="checkbox" data-rc="${i}" value="${esc(z.serial)}" ${(l.cu || []).includes(z.serial) ? 'checked' : ''}> ${esc(z.serial)}</label>`).join('') : '<span class="mut">Tủ không có serial mã này</span>'}</div>` : ''}` : ''}</div>`; }).join('');
           $$('[data-r]', dlg).forEach(x => x.oninput = () => { lines[+x.dataset.r][x.dataset.f] = x.value; });
-          $$('[data-r][data-f=maHang]', dlg).forEach(x => x.onchange = () => { lines[+x.dataset.r].moi = []; lines[+x.dataset.r].cu = []; setTimeout(draw, 0); });
+          $$('[data-r][data-f=maHang]', dlg).forEach(x => x.onchange = () => { const l = lines[+x.dataset.r]; l.moi = []; l.cu = []; autoCu(l); setTimeout(draw, 0); });
           $$('[data-rd]', dlg).forEach(b => b.onclick = () => { lines.splice(+b.dataset.rd, 1); if (!lines.length) lines.push({}); draw(); });
           $$('[data-rm]', dlg).forEach(c => c.onchange = () => { const l = lines[+c.dataset.rm]; l.moi = $$(`[data-rm="${c.dataset.rm}"]:checked`, dlg).map(z => z.value); l.soLuong = String(l.moi.length); $(`[data-r="${c.dataset.rm}"][data-f=soLuong]`, dlg).value = l.soLuong; });
           $$('[data-rc]', dlg).forEach(c => c.onchange = () => { lines[+c.dataset.rc].cu = $$(`[data-rc="${c.dataset.rc}"]:checked`, dlg).map(z => z.value); });
         };
+        $$('[data-pk]', dlg).forEach(b => b.onclick = () => { const e = lines.find(l => !l.maHang); const l = e || {}; if (!e) lines.push(l); Object.assign(l, { maHang: b.dataset.pk, cu: [b.dataset.ps], moi: [], soLuong: '1' }); draw(); });
+        lines.forEach(autoCu);
         $('#f_kho', dlg).onchange = () => { lines.forEach(l => l.moi = []); draw(); }; $('#rAdd', dlg).onclick = () => { lines.push({}); draw(); }; draw();
-      }, 'Ghi thay thế');
+      }, cabT ? 'Ghi thay thế' : 'Ghi đổi hàng');
   }
   async function printPBH(t) {
     const co = S.co, tt = JSON.parse(t.thayThe || '[]'), dd = (t.ngayDong || t.ngay).split('-');
-    const g = await load('serial.get', { serial: t.serialTu || t.serial }, 'Đang chuẩn bị bản in…');
-    if (!g.ok) return toast('Chưa in được: không đọc được hồ sơ tủ (' + (g.error || g.code) + ') — thử lại khi có mạng');   // không in phiếu thiếu khách / vị trí
-    const bh = g.data.baoHanh || {}, v = bh.viTri || {};
+    let v = {};
+    if (t.serialTu || t.serial) {
+      const g = await load('serial.get', { serial: t.serialTu || t.serial }, 'Đang chuẩn bị bản in…');
+      if (!g.ok) return toast('Chưa in được: không đọc được hồ sơ tủ (' + (g.error || g.code) + ') — thử lại khi có mạng');   // không in phiếu thiếu khách / vị trí
+      v = (g.data.baoHanh || {}).viTri || {};
+    } else { const px = (S.data.vouchers || []).find(z => z.soPhieu === t.phieuGoc) || {}; v = { maKH: t.maKH || px.maKH, maCongTrinh: px.maCongTrinh }; }
     const kh = (S.data.customers || []).find(z => z.maKH === v.maKH) || {};
     const host = document.createElement('div'); host.id = 'printArea';
     host.innerHTML = `<div class="pv pxx"><div class="c"><b>${esc((co.tenDay || co.ten).toUpperCase())}</b><br>Địa chỉ: ${esc(co.diaChi || '')}${co.mst ? ' – MST: ' + esc(co.mst) : ''}</div>
       <h1>PHIẾU BẢO HÀNH</h1><p class="c">Số: <b>${esc(t.soPBH)}</b><br><i>${esc(co.noiLap || 'TP. Hồ Chí Minh')}, ngày ${dd[2]} tháng ${dd[1]} năm ${dd[0]}</i></p>
       <table class="pv-k"><tbody><tr><td>Khách hàng</td><td>${esc(kh.ten || '')}${kh.diaChi ? '<br>' + esc(kh.diaChi) : ''}</td></tr>${v.maCongTrinh ? `<tr><td>Công trình</td><td>${esc(projName(v.maCongTrinh))}</td></tr>` : ''}
-        ${v.diaChi ? `<tr><td>Vị trí lắp</td><td>${v.tenTaiCT ? esc(v.tenTaiCT) + ' — ' : ''}${esc(v.diaChi)}</td></tr>` : ''}<tr><td>Tủ (số xê-ri)</td><td>${esc(t.serialTu || t.serial)}</td></tr>${t.serialTu && t.serial !== t.serialTu ? `<tr><td>Linh kiện báo lỗi</td><td>${esc(t.serial)}</td></tr>` : ''}
+        ${v.diaChi ? `<tr><td>Vị trí lắp</td><td>${v.tenTaiCT ? esc(v.tenTaiCT) + ' — ' : ''}${esc(v.diaChi)}</td></tr>` : ''}${t.serialTu || t.serial ? `<tr><td>${t.serialTu ? 'Tủ (số xê-ri)' : 'Số serial'}</td><td>${esc(t.serialTu || t.serial)}</td></tr>` : `<tr><td>Hàng bảo hành</td><td>${esc(itemOf(t.maHang).ten || t.maHang)} × ${num(t.soLuong)} ${esc(itemOf(t.maHang).dvt)} — phiếu xuất ${esc(t.phieuGoc)}</td></tr>`}${t.serialTu && t.serial !== t.serialTu ? `<tr><td>Linh kiện báo lỗi</td><td>${esc(t.serial)}</td></tr>` : ''}
         <tr><td>Ngày tiếp nhận</td><td>${vnD(t.ngay)}${t.nguoiBao ? ' — ' + esc(t.nguoiBao) : ''}</td></tr><tr><td>Tình trạng bảo hành</td><td>${esc(TT_BH[t.tinhTrangBH] || '')}${t.hanBH ? ' (hạn đến hết ' + vnD(t.hanBH) + ')' : ''}</td></tr>
         <tr><td>Hiện tượng lỗi</td><td>${esc(t.moTaLoi)}</td></tr><tr><td>Nguyên nhân</td><td>${esc(NN[t.nguyenNhan] || '')}</td></tr><tr><td>Kết quả xử lý</td><td>${esc(t.ketQua || '')}</td></tr></tbody></table>
       ${tt.length ? `<h2>Linh kiện thay thế</h2><table class="pv-t"><thead><tr><th>STT</th><th>Linh kiện</th><th>SL</th><th>Serial mới</th><th>Serial thu hồi</th></tr></thead><tbody>${tt.map((z, i) => `<tr><td class="c">${i + 1}</td><td>${esc(itemOf(z.maHang).ten || z.maHang)}</td><td class="c">${num(z.soLuong)}</td><td>${z.serialMoi.map(esc).join(', ')}</td><td>${z.serialCu.map(esc).join(', ')}</td></tr>`).join('')}</tbody></table>` : ''}
-      <p>Trạng thái phiếu: <b>${PBH_TT[t.trangThai]}</b>${t.thienChi ? ' · Bảo hành thiện chí: ' + esc(t.thienChi) : ''}</p>
+      <p>Trạng thái phiếu: <b>${PBH_TT[t.trangThai] || esc(t.trangThai)}</b>${t.hinhThuc ? ' · Hình thức: ' + esc(HINH[t.hinhThuc] || t.hinhThuc) : ''}${t.thienChi ? ' · Bảo hành thiện chí: ' + esc(t.thienChi) : ''}${Number(t.phiSua) ? ' · Phí sửa chữa: <b>' + money(t.phiSua) + '</b>' : ''}</p>
       <div class="pv-sign pxx-sign"><div><b>ĐẠI DIỆN KHÁCH HÀNG</b><br><i>(Ký, ghi rõ họ tên)</i></div><div><b>NGƯỜI XỬ LÝ</b><br><i>(Ký, ghi rõ họ tên)</i></div><div><b>ĐƠN VỊ BẢO HÀNH</b><br><i>(Ký, đóng dấu)</i></div></div>
       <p class="pv-foot">In từ QLHH v${VER}</p></div>`;
     document.body.appendChild(host); document.body.classList.add('printing');
@@ -1362,10 +1481,10 @@
     const m0 = S.today.slice(0, 8) + '01';
     dialog('Chi phí bảo hành', `<div class="grid2"><div>${fld('from', 'Từ ngày', m0, { type: 'date' })}</div><div>${fld('to', 'Đến ngày', S.today, { type: 'date' })}</div></div><div id="bhR"></div>`,
       async (v, dlg) => { const r = await call('report.bh', { from: v.from, to: v.to }, 3); if (!r.ok) { dlgMsg(dlg, r.error || r.code); return false; }
-        const x = r.data; $('#bhR', dlg).innerHTML = `<p>Chi phí linh kiện xuất bảo hành: <b>${money(x.tong)}</b> · tủ còn hạn bảo hành đến ${vnD(x.to)}: <b>${num(x.tuConBH)}</b> (cơ sở trích dự phòng TK 352)</p>
-          ${x.rows.length ? `<div class="tbl"><table><thead><tr><th>Phiếu xuất</th><th>Ngày</th><th>Phiếu BH</th><th>Tủ</th><th>Tình trạng</th><th class="n">Giá trị</th></tr></thead><tbody>${x.rows.map(z => `<tr><td class="mono">${esc(z.soPhieu)}</td><td>${vnD(z.ngay)}</td><td class="mono">${esc(z.soPBH)}</td><td class="mono">${esc(z.serialTu)}</td><td>${esc(TT_BH[z.tinhTrangBH] || '')}${z.thienChi ? ' · thiện chí' : ''}${z.nguyenNhan ? ' · ' + esc(NN[z.nguyenNhan] || z.nguyenNhan) : ''}</td><td class="n">${num(z.giaTri)}</td></tr>`).join('')}</tbody></table></div>
+        const x = r.data; $('#bhR', dlg).innerHTML = `<p>Chi phí linh kiện xuất bảo hành: <b>${money(x.tong)}</b> · tủ còn hạn bảo hành đến ${vnD(x.to)}: <b>${num(x.tuConBH)}</b> (cơ sở trích dự phòng TK 352)<br>Sửa có thu tiền: giá vốn linh kiện <b>${money(x.tongSua || 0)}</b> (TK 632) · phí sửa thu khách (phiếu hoàn thành trong kỳ) <b>${money(x.phiSua || 0)}</b> (TK 511)</p>
+          ${x.rows.length ? `<div class="tbl"><table><thead><tr><th>Phiếu xuất</th><th>Ngày</th><th>Phiếu BH</th><th>Tủ / hàng</th><th>Hình thức</th><th>Tình trạng</th><th class="n">Giá trị</th></tr></thead><tbody>${x.rows.map(z => `<tr><td class="mono">${esc(z.soPhieu)}</td><td>${vnD(z.ngay)}</td><td class="mono">${esc(z.soPBH)}</td><td class="mono">${esc(z.serialTu || z.serial || (z.maHang ? z.maHang + ' × ' + z.soLuong : ''))}</td><td>${z.loai === 'THU_TIEN' ? 'Sửa thu tiền' : z.thienChi ? 'Thiện chí' : 'Bảo hành'}</td><td>${esc(TT_BH[z.tinhTrangBH] || '')}${z.nguyenNhan ? ' · ' + esc(NN[z.nguyenNhan] || z.nguyenNhan) : ''}</td><td class="n">${num(z.giaTri)}</td></tr>`).join('')}</tbody></table></div>
           <button class="btn" type="button" id="bhX">${ic('dl')} Xuất Excel</button>` : '<div class="empty">Không có phiếu xuất bảo hành trong kỳ.</div>'}`;
-        const xb = $('#bhX', dlg); if (xb) xb.onclick = () => exportRows(`ChiPhiBH_${v.from}_${v.to}`, x.rows.map(z => ({ 'Phiếu xuất': z.soPhieu, 'Ngày': z.ngay, 'Phiếu BH': z.soPBH, 'Tủ': z.serialTu, 'Tình trạng BH': TT_BH[z.tinhTrangBH] || '', 'Nguyên nhân': NN[z.nguyenNhan] || '', 'Thiện chí': z.thienChi, 'Giá trị': z.giaTri })));
+        const xb = $('#bhX', dlg); if (xb) xb.onclick = () => exportRows(`ChiPhiBH_${v.from}_${v.to}`, x.rows.map(z => ({ 'Phiếu xuất': z.soPhieu, 'Ngày': z.ngay, 'Phiếu BH': z.soPBH, 'Tủ / hàng': z.serialTu || z.serial || z.maHang, 'Hình thức': z.loai === 'THU_TIEN' ? 'Sửa thu tiền' : z.thienChi ? 'Thiện chí' : 'Bảo hành', 'Tình trạng BH': TT_BH[z.tinhTrangBH] || '', 'Nguyên nhân': NN[z.nguyenNhan] || '', 'Thiện chí': z.thienChi, 'Giá trị': z.giaTri })));
         return false; }, dlg => dlg.classList.add('wide'), 'Xem báo cáo');
   }
   function viewBH(m, only) {
@@ -1391,17 +1510,17 @@
           + (list.length > 400 ? `<div class="empty">Đang hiện 400/${list.length} tủ — gõ tìm hoặc lọc để thu hẹp.</div>` : '')
           : `<div class="empty">${tus.length ? 'Không có tủ khớp.' : 'Chưa có tủ nào xuất khỏi kho. Tủ bán / xuất công trình sẽ hiện ở đây để ghi bàn giao và theo dõi bảo hành.'}</div>`}</div>`;
     } else {
-      const list = pb.filter(t => (!BH.f || (BH.f === 'MO' ? ['TIEP_NHAN', 'DANG_XU_LY'].includes(t.trangThai) : ['HOAN_THANH', 'TU_CHOI'].includes(t.trangThai))) && (!nq || QSearch.norm([t.soPBH, t.serial, t.serialTu, t.moTaLoi, t.nguoiBao].join(' ')).includes(nq)));
+      const list = pb.filter(t => (!BH.f || (BH.f === 'MO' ? ['TIEP_NHAN', 'DANG_XU_LY'].includes(t.trangThai) : ['HOAN_THANH', 'TU_CHOI', 'DONG_KHACH_TRA'].includes(t.trangThai))) && (!nq || QSearch.norm([t.soPBH, t.serial, t.serialTu, t.maHang, itemOf(t.maHang).ten, t.phieuGoc, t.moTaLoi, t.nguoiBao].join(' ')).includes(nq)));
       body = `<div class="chips" role="group" aria-label="Lọc phiếu">${FP.map(([k, t]) => `<button class="chip" type="button" data-f="${k}" aria-pressed="${BH.f === k}">${t}</button>`).join('')}</div>
-        <div class="card list">${list.length ? list.map(t => `<div class="it" data-pbh="${esc(t.soPBH)}" role="button" tabindex="0"><div><span class="mono">${esc(t.soPBH)}</span> · <span class="mono">${esc(t.serialTu || t.serial)}</span> <span class="tag ${t.trangThai === 'HOAN_THANH' ? 'ok' : t.trangThai === 'TU_CHOI' ? 'bad' : 'warn'}">${PBH_TT[t.trangThai]}</span><br><small class="mut">${vnD(t.ngay)} · ${esc(TT_BH[t.tinhTrangBH] || '')} · ${esc(t.moTaLoi)}</small></div></div>`).join('') : '<div class="empty">Chưa có phiếu bảo hành. Lập phiếu từ hồ sơ tủ (tra xê-ri / quét QR) → <b>Tiếp nhận bảo hành</b>.</div>'}</div>`;
+        <div class="card list">${list.length ? list.map(t => `<div class="it" data-pbh="${esc(t.soPBH)}" role="button" tabindex="0"><div><span class="mono">${esc(t.soPBH)}</span> · ${pbhObj(t)} <span class="tag ${pbhCls(t)}">${PBH_TT[t.trangThai] || esc(t.trangThai)}</span><br><small class="mut">${vnD(t.ngay)} · ${esc(TT_BH[t.tinhTrangBH] || '')} · ${esc(t.moTaLoi)}</small></div></div>`).join('') : '<div class="empty">Chưa có phiếu bảo hành. Lập phiếu từ hồ sơ tủ (tra xê-ri / quét QR) → <b>Tiếp nhận bảo hành</b>.</div>'}</div>`;
     }
     paint(m, only, header('Lắp đặt & bảo hành') + `
-      <div class="sxbar"><button class="btn ${BH.tab === 'tu' ? 'pri' : ''}" type="button" data-tab="tu">${ic('box')} Tủ đã giao (${tus.length})</button><button class="btn ${BH.tab === 'pbh' ? 'pri' : ''}" type="button" data-tab="pbh">${ic('shield')} Phiếu bảo hành (${pb.filter(t => ['TIEP_NHAN', 'DANG_XU_LY'].includes(t.trangThai)).length} đang mở)</button><button class="btn" type="button" id="bSer">${ic('search')} Tra xê-ri</button>${hasCam() ? `<button class="btn" type="button" data-scantu>${ic('search')} Quét QR tủ</button>` : ''}${isQT() ? `<button class="btn" type="button" id="bRep">${ic('chart')} Chi phí BH</button>` : ''}</div>
+      <div class="sxbar"><button class="btn ${BH.tab === 'tu' ? 'pri' : ''}" type="button" data-tab="tu">${ic('box')} Tủ đã giao (${tus.length})</button><button class="btn ${BH.tab === 'pbh' ? 'pri' : ''}" type="button" data-tab="pbh">${ic('shield')} Phiếu bảo hành (${pb.filter(t => ['TIEP_NHAN', 'DANG_XU_LY'].includes(t.trangThai)).length} đang mở)</button><button class="btn" type="button" id="bSer">${ic('search')} Tra xê-ri</button>${hasCam() ? `<button class="btn" type="button" data-scantu>${ic('search')} Quét QR tủ</button>` : ''}${canEdit() && !S.offline ? `<button class="btn" type="button" id="bLe">${ic('shield')} BH hàng không serial</button>` : ''}${isQT() ? `<button class="btn" type="button" id="bRep">${ic('chart')} Chi phí BH</button>` : ''}</div>
       <label class="search" style="margin-bottom:10px">${ic('search')}<span class="sr">Tìm</span><input id="qbh" type="search" placeholder="${BH.tab === 'tu' ? 'Xê-ri, địa chỉ, công trình, khách…' : 'Số phiếu, xê-ri, hiện tượng…'}" value="${esc(BH.q)}" autocomplete="off"></label><div id="bhbody">${body}</div>`);
     onSearch('#qbh', v => { BH.q = v; }, () => viewBH(m, '#bhbody'), 300);
     $$('[data-tab]').forEach(b => b.onclick = () => { BH.tab = b.dataset.tab; BH.f = ''; viewBH(m); });
     $$('.chip[data-f]').forEach(b => b.onclick = () => { BH.f = b.dataset.f; viewBH(m); });
-    $('#bSer').onclick = serialSearch; $$('[data-scantu]', m).forEach(b => b.onclick = scanTu); const br = $('#bRep'); if (br) br.onclick = bhReport;
+    $('#bSer').onclick = serialSearch; $$('[data-scantu]', m).forEach(b => b.onclick = scanTu); const br = $('#bRep'); if (br) br.onclick = bhReport; const bl = $('#bLe'); if (bl) bl.onclick = ticketLePick;
     $$('[data-tu]', m).forEach(r => r.onclick = e => { if (e.target.closest('a')) return; tuView(r.dataset.tu); });
     $$('[data-pbh]', m).forEach(r => r.onclick = () => ticketView(r.dataset.pbh));
   }
