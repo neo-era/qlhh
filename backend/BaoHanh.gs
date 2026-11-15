@@ -115,7 +115,7 @@ function bhTicket(so) {
 }
 function bhUpdate(u, req, logs) {
   var t = bhTicket(req.soPBH);
-  if (t.trangThai === up(req.trangThai) && String(t.nguoiXuLy).toLowerCase() === u.email && prevLog(req)) return { soPBH: t.soPBH, trangThai: t.trangThai, lapLai: true };   // gửi lại sau khi đã ghi
+  if (t.trangThai === up(req.trangThai) && String(t.nguoiXuLy).toLowerCase() === u.email && (!req.ketQua || txt(req.ketQua, 1000) === t.ketQua) && (!req.nguyenNhan || up(req.nguyenNhan) === t.nguyenNhan)) return { soPBH: t.soPBH, trangThai: t.trangThai, lapLai: true };   // gửi lại sau khi đã ghi
   var v = need(QBH.validateUpdate({ trangThai: req.trangThai, ketQua: req.ketQua, nguyenNhan: req.nguyenNhan || t.nguyenNhan }, t.trangThai)), x = strip(t);
   if (v.trangThai === 'TU_CHOI' && t.soPhieuXuat) throw fail('VALIDATION', 'Phiếu đã xuất linh kiện (' + t.soPhieuXuat + ') — không từ chối được; đóng Hoàn thành và ghi nguyên nhân', { trangThai: 'Đã thay linh kiện' });
   x.trangThai = v.trangThai; if (v.nguyenNhan) x.nguyenNhan = v.nguyenNhan; if (v.ketQua) x.ketQua = v.ketQua; x.nguoiXuLy = u.email;

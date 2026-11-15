@@ -315,8 +315,8 @@ test('khoá sổ đọc nhanh nhưng đổi là có hiệu lực ngay', () => {
   V(nhap('2026-10-01', [{ maHang: 'CB40', soLuongCT: 5, gia: 1 }]));
   assert.equal(a.post({ action: 'period.lock', session: s, requestId: rid(), ngay: '2026-10-05' }).ok, true);
   assert.equal(V(nhap('2026-10-05', [{ maHang: 'CB40', soLuongCT: 1, gia: 1 }])).code, 'PERIOD_LOCKED');
-  assert.equal(a.post({ action: 'period.lock', session: s, requestId: rid(), ngay: '' }).ok, false, 'mở khoá phải ghi lý do');
-  assert.equal(a.post({ action: 'period.lock', session: s, requestId: rid(), ngay: '', lyDo: 'Bổ sung phiếu nhập 05/10' }).ok, true);
+  assert.equal(a.post({ action: 'period.lock', session: s, requestId: rid(), ngay: '2026-10-04' }).ok, false, 'lùi khoá phải ghi lý do');
+  assert.equal(a.post({ action: 'period.lock', session: s, requestId: rid(), ngay: '2026-10-04', lyDo: 'Bổ sung phiếu nhập 05/10' }).ok, true);
   assert.equal(V(nhap('2026-10-05', [{ maHang: 'CB40', soLuongCT: 1, gia: 1 }])).ok, true);
 });
 test('bộ đệm luôn trùng nội dung sheet thật sau chuỗi thao tác hỗn hợp (ghi thẳng TonKho/HangHoa đúng kiểu)', () => {

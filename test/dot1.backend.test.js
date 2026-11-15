@@ -180,8 +180,8 @@ test('A3 khoá sổ chỉ tiến; lùi / mở khoá phải ghi lý do; khoá th�
   assert.ok(snap.find(r => r[1] === 'VO' && r[2] === 'KHO'), 'số lượng theo kho');
   assert.equal(P('period.lock', { ngay: '2026-11-03' }).ok, false, 'lùi ngày khoá cần lý do');
   assert.equal(P('period.lock', { ngay: '' }).ok, false, 'mở khoá cần lý do');
-  assert.equal(P('period.lock', { ngay: '', lyDo: 'Sửa phiếu nhập ngày 02/11 theo hoá đơn' }).ok, true);
-  const log = a.sheets.NhatKy.d.find(r => r[2] === 'period.unlock'); assert.ok(log && /hoá đơn/.test(log[6]), 'nhật ký ghi lý do');
+  assert.equal(P('period.lock', { ngay: '2026-10-31', lyDo: 'Sửa phiếu nhập ngày 02/11 theo hoá đơn' }).ok, true);
+  const log = a.sheets.NhatKy.d.find(r => r[2] === 'period.reopen'); assert.ok(log && /hoá đơn/.test(log[6]), 'nhật ký ghi lý do');
   W('period.lock', { ngay: '2026-11-06' });
 });
 test('A3 "Tính lại tồn" ra số dư kỳ đã khoá khác lúc khoá (sửa tay loại kho): không ghi đè, báo rõ', () => {
@@ -224,4 +224,110 @@ test('C7 lệnh lỗi sau khi đã ghi một phần vẫn tăng phiên bản d�
   x.buy('2026-11-11', 1); const v0 = Number(a.raw.dataVersion); once(a.sheets.NhatKy, 'appendRow');
   assert.equal(x.P('voucher.create', { voucher: { loai: 'XUAT_BAN', ngay: '2026-11-12', kho: 'KHO', maKH: 'TN', maCongTrinh: 'PDG', lines: [{ maHang: 'DEN', soLuongCT: 1 }] } }, x.nv).ok, false);
   assert.ok(Number(a.raw.dataVersion) > v0);
+});
+
+// ================= vòng 1: góp ý chuyên gia kỹ thuật + kế toán =================
+const rev = sh => { sh.d = [sh.d[0], ...sh.d.slice(1).reverse()]; };
+const st = (a, re) => a.sheets.Serial.d.slice(1).filter(r => re.test(r[2])).map(r => r[2] + ':' + r[4]).join(' ');
+test('setup bật bảo vệ cảnh báo trên các sheet', () => {
+  const x = plant(); assert.equal(x.a.sheets.Phieu.prot && x.a.sheets.Phieu.prot.warn, true);
+});
+test('V1 tech B-1: sửa tay TonKho → không nhảy số phiếu, không để dòng mồ côi', () => {
+  const x = plant(), { a, W } = x; x.buy('2026-11-01', 1); x.pull(); rev(a.sheets.TonKho);
+  const r = W('voucher.create', { voucher: { loai: 'NHAP_MUA', ngay: '2026-11-12', kho: 'KHO', maNCC: 'NCC1', lines: [{ maHang: 'VO', soLuongCT: 1, gia: 100 }] } }, x.nv);
+  assert.equal(r.soPhieu, 'PN-2026-00002', 'không bỏ số');
+  assert.deepEqual([...new Set(a.sheets.ChiTietPhieu.d.slice(1).map(z => z[0]))].sort(), ['PN-2026-00001', 'PN-2026-00002']);
+});
+test('V1 tech A-1: sửa tay TonKho → nhập có serial → khoá sổ / tính lại: serial hợp lệ vẫn trong kho', () => {
+  const x = plant(), { a, W } = x; x.buy('2026-11-01', 1); x.pull(); rev(a.sheets.TonKho);
+  W('voucher.create', { voucher: { loai: 'NHAP_MUA', ngay: '2026-11-02', kho: 'KHO', maNCC: 'NCC1', lines: [{ maHang: 'LOGO', soLuongCT: 2, gia: 4150000, serials: ['LGX', 'LGY'] }] } }, x.nv);
+  W('period.lock', { ngay: '2026-11-03' }); W('stock.rebuild', {});
+  assert.equal(st(a, /^LG[XY]$/), 'LGX:TRONG_KHO LGY:TRONG_KHO');
+});
+test('V1 tech A-1/kế toán B10: phiếu chết trước khi ghi đầu phiếu → đầu phiếu "bỏ số" LOI_GHI; gửi lại dùng lại serial; quét đầy đủ không trả nhầm', () => {
+  const x = plant(), { a, P, W } = x; x.buy('2026-11-01', 1);
+  once(a.sheets.Phieu, 'appendRow'); const id = rid(), b = { voucher: { loai: 'NHAP_MUA', ngay: '2026-11-02', kho: 'KHO', maNCC: 'NCC1', lines: [{ maHang: 'LOGO', soLuongCT: 1, gia: 1, serials: ['LGZ'] }] } };
+  assert.equal(a.post({ action: 'voucher.create', session: x.nv, requestId: id, ...b }).ok, false);
+  const r2 = a.post({ action: 'voucher.create', session: x.nv, requestId: id, ...b }); assert.equal(r2.ok, true, JSON.stringify(r2));
+  const tomb = a.sheets.Phieu.d.find(z => z[col('Phieu', 'trangThai')] === 'LOI_GHI'); assert.ok(tomb, 'có đầu phiếu bỏ số'); assert.match(tomb[col('Phieu', 'lyDo')], /bỏ số/);
+  W('stock.rebuild', {}); assert.equal(st(a, /^LGZ$/), 'LGZ:TRONG_KHO');
+  assert.equal(P('voucher.create', { voucher: { loai: 'XUAT_BAN', ngay: '2026-11-12', kho: 'KHO', maKH: 'TN', maCongTrinh: 'PDG', lines: [{ maHang: 'LOGO', soLuongCT: 1, serials: ['LGZ'] }] } }, x.nv).ok, true);
+});
+test('V1 tech B-3: sửa tay LenhSX → xuất linh kiện / KCS vẫn cập nhật trạng thái lệnh', () => {
+  const x = plant(), { a, W } = x; x.buy('2026-11-01', 2); x.tpl();
+  const so = W('lsx.create', { lsx: { maMau: 'TU-2N', soLuong: 2, ngay: '2026-11-02', kho: 'KHO' } }, x.nv).soLSX;
+  W('lsx.create', { lsx: { maMau: 'TU-2N', soLuong: 1, ngay: '2026-11-02', kho: 'KHO' } }, x.nv);
+  x.pull(); rev(a.sheets.LenhSX);
+  assert.equal(x.issue(so, '2026-11-05', 2, ['LG11010', 'LG11011']).ok, true);
+  assert.equal(a.sheets.LenhSX.d.find(z => z[0] === so)[col('LenhSX', 'trangThai')], 'DANG_LAP');
+  const y = built(); y.pull(); rev(y.a.sheets.LenhSX); y.W('kcs.add', { serial: y.tp.serials[0], ngay: '2026-11-10', ketQua: y.pass() }, y.nv);
+  y.pull(); rev(y.a.sheets.LenhSX); y.W('kcs.add', { serial: y.tp.serials[1], ngay: '2026-11-10', ketQua: y.pass() }, y.nv);
+  assert.equal(y.a.sheets.LenhSX.d.find(z => z[0] === y.so)[col('LenhSX', 'trangThai')], 'HOAN_TAT');
+});
+test('V1 tech B-3: đảo phiếu xuất tủ chết khi đồng bộ hồ sơ tủ → gửi lại làm nốt (tủ không còn ghi lần xuất)', () => {
+  const x = built(), { a, W, pass } = x; x.tp.serials.forEach(s => W('kcs.add', { serial: s, ngay: '2026-11-10', ketQua: pass() }, x.nv));
+  const ser = x.tp.serials[0], px = W('voucher.create', { voucher: { loai: 'XUAT_BAN', ngay: '2026-11-12', kho: 'KHO', maKH: 'TN', maCongTrinh: 'PDG', lines: [{ maHang: 'TU-DKCS-2N', soLuongCT: 1, serials: [ser] }] } }, x.nv).soPhieu;
+  const hs = a.sheets.HoSoTu, og = hs.getRange, ph = a.sheets.Phieu, oa = ph.appendRow; let armed = false, hit = false;
+  ph.appendRow = function (r) { oa.call(this, r); if (r[2] === 'DAO') armed = true; };
+  hs.getRange = function (...q) { const g = og.apply(this, q); if (armed && typeof q[0] === 'number') { const sv = g.setValues; g.setValues = v => { if (armed) { armed = false; hit = true; boom(); } return sv(v); }; } return g; };   // chết khi đồng bộ lần xuất của tủ (sau đầu phiếu đảo)
+  const id = rid(), b = { phieuGoc: px, lyDo: 'nhầm', ngay: '2026-11-13' };
+  assert.equal(a.post({ action: 'voucher.reverse', session: x.s, requestId: id, ...b }).ok, false); assert.ok(hit);
+  assert.equal(a.post({ action: 'voucher.reverse', session: x.s, requestId: id, ...b }).ok, true);
+  const c = a.sheets.HoSoTu.d.find(r => r[0] === ser); assert.equal(c[col('HoSoTu', 'phieuXuat')], '');
+});
+test('V1 tech B-4: bh.update chết khi ghi nhật ký → gửi lại báo thành công', () => {
+  const x = built(), { a, W, pass } = x; x.tp.serials.forEach(s => W('kcs.add', { serial: s, ngay: '2026-11-10', ketQua: pass() }, x.nv));
+  W('voucher.create', { voucher: { loai: 'XUAT_BAN', ngay: '2026-11-12', kho: 'KHO', maKH: 'TN', maCongTrinh: 'PDG', lines: [{ maHang: 'TU-DKCS-2N', soLuongCT: 1, serials: [x.tp.serials[0]] }] } }, x.nv);
+  const bh = W('bh.create', { serial: x.tp.serials[0], phieu: { ngay: '2026-11-14', nguoiBao: 'A', moTaLoi: 'hỏng' } }, x.nv);
+  once(a.sheets.NhatKy, 'appendRow'); const id = rid(), b = { soPBH: bh.soPBH, trangThai: 'DANG_XU_LY', nguyenNhan: 'LOI_THIET_BI' };
+  assert.equal(a.post({ action: 'bh.update', session: x.nv, requestId: id, ...b }).ok, false);
+  const r2 = a.post({ action: 'bh.update', session: x.nv, requestId: id, ...b }); assert.equal(r2.ok, true, JSON.stringify(r2));
+});
+test('V1 kế toán A1: ghi chi phí chết sau khi tính giá thành, không gửi lại → lệnh ghi sau trả giá thành về đúng; khoá sổ chứng từ khớp số chốt', () => {
+  const x = built(), { a, P, W } = x; const v0 = x.ton('TU-DKCS-2N').giaTri;
+  once(a.sheets.ChiPhiLSX, 'appendRow');
+  assert.equal(P('lsx.chiPhi', { soLSX: x.so, chiPhi: { ngay: '2026-11-06', loai: 'SX_CHUNG', soTien: 1000000 } }).ok, false);
+  assert.equal(x.ton('TU-DKCS-2N').giaTri, v0 + 1000000, 'đã tính lại dở');
+  P('customer.upsert', { customer: { maKH: 'KH9', ten: 'Khách 9' } });
+  assert.equal(x.ton('TU-DKCS-2N').giaTri, v0, 'trả về như cũ');
+  const nt = a.sheets.ChiTietPhieu.d.find(z => z[0] === x.tp.soPhieu); assert.equal(nt[col('ChiTietPhieu', 'giaTriKho')], v0);
+  W('period.lock', { ngay: '2026-11-10' }); assert.equal(W('stock.rebuild', {}).chanKyKhoa, undefined);
+});
+test('V1 kế toán B1–B4: lịch sử khoá; khoá lại cùng ngày số khác cần lý do; không mở trống khi đã chốt; lùi khoá thì chốt lại và không chặn oan', () => {
+  const x = plant(), { a, W, P } = x; x.buy('2026-11-01', 2);
+  W('voucher.create', { voucher: { loai: 'XUAT_BAN', ngay: '2026-11-03', kho: 'KHO', maKH: 'TN', maCongTrinh: 'PDG', lines: [{ maHang: 'DEN', soLuongCT: 2 }] } }, x.nv);
+  W('period.lock', { ngay: '2026-11-05' });
+  assert.equal(P('period.lock', { ngay: '', lyDo: 'mở để sửa phiếu tháng' }).ok, false, 'không mở trống khi đã chốt');
+  assert.equal(P('period.lock', { ngay: '2026-10-31', lyDo: 'ngắn' }).ok, false, 'lý do quá ngắn');
+  W('period.lock', { ngay: '2026-10-31', lyDo: 'Sửa phiếu xuất 03/11 theo yêu cầu kế toán trưởng' });
+  assert.ok(a.sheets.NhatKy.d.some(r => r[2] === 'period.reopen'));
+  assert.equal(x.P('voucher.create', { voucher: { loai: 'XUAT_BAN', ngay: '2026-11-04', kho: 'KHO', maKH: 'TN', maCongTrinh: 'PDG', lines: [{ maHang: 'DEN', soLuongCT: 1 }] } }, x.nv).code, 'PERIOD_LOCKED', 'đang mở lại: nhập liệu không ghi lùi');
+  W('voucher.create', { voucher: { loai: 'XUAT_BAN', ngay: '2026-11-04', kho: 'KHO', maKH: 'TN', maCongTrinh: 'PDG', lines: [{ maHang: 'DEN', soLuongCT: 1 }] } });   // QT điều chỉnh
+  const re = P('period.lock', { ngay: '2026-11-05' }); assert.equal(re.ok, false, 'số khác lần chốt trước → cần lý do'); assert.ok(Array.isArray(re.fields) && re.fields.length);
+  W('period.lock', { ngay: '2026-11-05', lyDo: 'Đã xuất thêm 1 đèn ngày 04/11 theo hoá đơn' });
+  W('period.lock', { ngay: '2026-11-10' });
+  W('period.lock', { ngay: '2026-11-05', lyDo: 'Mở lại tuần 2 để kiểm tra' });
+  assert.equal(W('stock.rebuild', {}).chanKyKhoa, undefined, 'không chặn oan');
+  const ls = a.sheets.LichSuKhoaSo.d.slice(1).map(r => r[col('LichSuKhoaSo', 'loai')]); assert.deepEqual(ls, ['KHOA', 'LUI', 'KHOA', 'KHOA', 'LUI']);
+});
+test('V1 kế toán B1: khoá sổ chết khi ghi nhật ký → gửi lại bổ sung nhật ký', () => {
+  const x = plant(), { a } = x; x.buy('2026-11-01', 1);
+  once(a.sheets.NhatKy, 'appendRow'); const id = rid();
+  assert.equal(a.post({ action: 'period.lock', session: x.s, requestId: id, ngay: '2026-11-05' }).ok, false);
+  purge(a, /^req:/); assert.equal(a.post({ action: 'period.lock', session: x.s, requestId: id, ngay: '2026-11-05' }).ok, true);
+  assert.ok(a.sheets.NhatKy.d.some(r => r[2] === 'period.lock'));
+});
+test('V1 kế toán B5/B6: sửa tay chi phí lệnh dở dang hoặc dòng phiếu kỳ khoá → "Tính lại tồn" chặn', () => {
+  const x = plant(), { a, W } = x; x.buy('2026-11-01', 2); x.tpl();
+  const so = W('lsx.create', { lsx: { maMau: 'TU-2N', soLuong: 2, ngay: '2026-11-02', kho: 'KHO' } }, x.nv).soLSX;
+  x.issue(so, '2026-11-05', 2, ['LG11010', 'LG11011']);
+  W('lsx.chiPhi', { soLSX: so, chiPhi: { ngay: '2026-11-05', loai: 'NC_TRUC_TIEP', soTien: 3000000 } });
+  W('period.lock', { ngay: '2026-11-08' });
+  assert.ok(a.sheets.SoDuKhoaSo.d.some(r => r[1] === so && r[2] === '154'), 'chốt dở dang theo lệnh');
+  const cp = a.sheets.ChiPhiLSX; cp.d.find(r => r[1] === so)[col('ChiPhiLSX', 'soTien')] = 9000000; a.raw['ver:ChiPhiLSX'] = 'x1';
+  let r = W('stock.rebuild', {}); assert.equal(r.chanKyKhoa, true); assert.ok(r.lechSoDu.some(z => z.kho === '154'));
+  cp.d.find(r => r[1] === so)[col('ChiPhiLSX', 'soTien')] = 3000000; a.raw['ver:ChiPhiLSX'] = 'x2';
+  assert.equal(W('stock.rebuild', {}).chanKyKhoa, undefined);
+  const pn = a.sheets.ChiTietPhieu.d.find(z => z[0] === 'PN-2026-00001' && z[2] === 'VO'); pn[col('ChiTietPhieu', 'thanhTien')] = 1;
+  r = W('stock.rebuild', {}); assert.equal(r.chanKyKhoa, true); assert.ok(r.lechSoDu.some(z => z.kho === 'Dòng phiếu'));
 });

@@ -18,6 +18,7 @@ function env(tokeninfo, ownerEmail = 'MaiVuLam2020@gmail.com', shared) {
       getLastRow() { return this.d.length; },
       getLastColumn() { return this.d.reduce((m, r) => Math.max(m, r.length), 0); },
       setFrozenRows() {}, clear() { this.d = []; }, getName() { return n; },
+      prot: null, getProtections() { return this.prot ? [this.prot] : []; }, protect() { const me = this; return me.prot = { warn: false, desc: '', setDescription(x) { this.desc = x; return this; }, setWarningOnly(x) { this.warn = x; return this; } }; },
       getDataRange() { const me = this; reads[n] = (reads[n] || 0) + 1; return { getValues: () => me.d.map(r => r.slice()) }; },
       getRange(r, c, nr, nc) {
         const me = this;
@@ -36,7 +37,7 @@ function env(tokeninfo, ownerEmail = 'MaiVuLam2020@gmail.com', shared) {
   };
   const b64 = x => Buffer.from(typeof x === 'string' ? Buffer.from(x, 'utf8') : Buffer.from(x.map(b => b & 255))).toString('base64').replace(/\+/g, '-').replace(/\//g, '_');
   const G = {
-    SpreadsheetApp: { getActive: () => ({ getSheetByName: n => sheets[n] || null, insertSheet: mk }), flush() {} },
+    SpreadsheetApp: { getActive: () => ({ getSheetByName: n => sheets[n] || null, insertSheet: mk }), flush() {}, ProtectionType: { SHEET: 'SHEET', RANGE: 'RANGE' } },
     Session: { getEffectiveUser: () => ({ getEmail: () => ownerEmail }) },
     PropertiesService: { getScriptProperties: () => ({ getProperty: k => (k in props ? props[k] : null), setProperty: (k, v) => props[k] = String(v), getProperties: () => ({ ...props }), setProperties: o => { for (const k in o) props[k] = String(o[k]); }, deleteProperty: k => { delete props[k]; } }) },
     Utilities: {

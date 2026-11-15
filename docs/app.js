@@ -380,7 +380,7 @@
       <div class="chips" role="group" aria-label="Lọc kho">${[['', 'Tất cả kho'], ...ws.map(w => [w.maKho, w.ten])].map(([k, t]) => `<button class="chip" type="button" data-k="${esc(k)}" aria-pressed="${KS.kho === k}">${esc(t)}</button>`).join('')}
         <button class="chip" type="button" id="lowT" aria-pressed="${KS.lowOnly}">⚠ Dưới tồn tối thiểu (${nLow})</button></div>
       ${(d.vouchers || []).length ? '' : `<div class="banner" role="status" style="background:var(--acc-soft)">Chưa có phiếu kho. ${canEdit() ? 'Bắt đầu bằng phiếu <b>Tồn đầu kỳ</b> (hàng đang có) hoặc <b>Nhập mua</b>.' : ''}</div>`}
-      ${d.config && d.config.ngayKhoaSo ? `<p class="mut" style="margin:0 0 10px">Đã khoá sổ đến hết ngày <b>${esc(d.config.ngayKhoaSo)}</b>.</p>` : ''}
+      ${d.config && d.config.ngayKhoaSo ? `<p class="mut" style="margin:0 0 10px">Đã khoá sổ đến hết ngày <b>${esc(vnD(d.config.ngayKhoaSo))}</b>.</p>` : ''}${d.config && d.config.ngayKhoaMax && d.config.ngayKhoaMax > (d.config.ngayKhoaSo || '') ? `<p class="warnbar" role="status">Sổ đang được mở lại từ ${esc(vnD(d.config.ngayKhoaSo ? addDay(d.config.ngayKhoaSo) : ''))} đến ${esc(vnD(d.config.ngayKhoaMax))} để Quản trị điều chỉnh — chỉ Quản trị ghi phiếu trong khoảng này. Điều chỉnh xong nhớ khoá lại.</p>` : ''}
       <div class="layout"><div class="card"><div class="tbl" id="stockRes"></div></div><section class="card det ${KS.sel ? '' : 'closed'}" id="kdet" aria-label="Chi tiết tồn">${stockDetail()}</section></div>`;
     const draw = () => {
       const box = $('#stockRes'), mob = isMobile(), rows = list.slice(0, 300);
@@ -573,7 +573,7 @@
       let g = (S.data.vouchers || []).find(x => x.soPhieu === p.phieuGoc);
       if (!g) { const r = await call('voucher.get', { soPhieu: p.phieuGoc }, 2); g = r.ok ? r.data.phieu : null; }
       if (!g) return toast('Không đọc được phiếu gốc ' + p.phieuGoc);
-      base = { ...p, loai: g.loai, maNCC: g.maNCC, maKH: g.maKH, maCongTrinh: g.maCongTrinh, khoDen: g.khoDen, soLSX: g.soLSX }; sign = -1;
+      base = { ...p, loai: g.loai, maNCC: g.maNCC, maKH: g.maKH, maCongTrinh: g.maCongTrinh, khoDen: g.khoDen, soLSX: g.soLSX, ngayGoc: g.ngay }; sign = -1;
     }
     const t = QStock.TYPES[base.loai] || {}, kk = base.loai === 'KIEM_KE', ck = base.loai === 'CHUYEN_KHO', nhapKho = t.dir > 0, priced = t.cost === 'PRICE';
     const title = (kk ? 'BIÊN BẢN KIỂM KÊ VẬT TƯ, HÀNG HÓA' : ck ? 'PHIẾU ĐIỀU CHUYỂN KHO (NỘI BỘ)' : nhapKho ? 'PHIẾU NHẬP KHO' : 'PHIẾU XUẤT KHO') + (sign < 0 ? ' (ĐẢO)' : '');
@@ -595,7 +595,7 @@
     const co = S.co, host = document.createElement('div'); host.id = 'printArea';
     host.innerHTML = `<div class="pv"><div class="pv-h"><div><b>${esc(co.tenDay || co.ten)}</b><br>${esc(co.diaChi || '')}${co.mst ? '<br>MST: ' + esc(co.mst) : ''}<br>Bộ phận: Kho</div><div class="pv-r"><b>${mau}</b></div></div>
       <h1>${title}</h1><p class="c">${ngay}<br>Số: <b>${esc(p.soPhieu)}</b></p>
-      ${sign < 0 ? `<p><b>Đảo chứng từ số ${esc(p.phieuGoc)} ngày ${esc(p.ngayCTGoc || '')}</b> — lý do: ${esc(p.lyDo || '')}</p>` : ''}
+      ${sign < 0 ? `<p><b>Đảo chứng từ số ${esc(p.phieuGoc)} ngày ${esc(vnD(p.ngayCTGoc || base.ngayGoc || ''))}</b> — lý do: ${esc(p.lyDo || '')}${p.hieuLuc === 'GOC' ? `<br><b>Hạch toán vào ngày ${esc(vnD(p.ngayCTGoc || base.ngayGoc || ''))} (ngày phiếu gốc)</b>` : ''}</p>` : ''}
       ${kk ? `<p>- Thời điểm kiểm kê: ${ngay.toLowerCase()} · Kho: ${esc(khoName(base.kho))}<br>- Ban kiểm kê: ……………………………………………………………<br>- ${esc(p.lyDo || 'Đã kiểm kê các mặt hàng dưới đây')}</p>`
         : `<p>- Họ và tên người ${nhapKho ? 'giao' : 'nhận'}: ${esc(p.nguoiGiaoNhan || '……………………')}${partner ? `<br>- Đơn vị: ${esc(partner.ten)}${partner.mst ? ' · MST ' + esc(partner.mst) : ''}${partner.dc ? '<br>- Địa chỉ: ' + esc(partner.dc) : ''}` : ''}
           <br>- Lý do ${nhapKho ? 'nhập' : 'xuất'} kho: ${esc(sign < 0 ? LOAI[base.loai] + ' (đảo)' : (p.lyDo || LOAI[base.loai]))}${base.maCongTrinh && !sxP ? ' — công trình ' + esc(projName(base.maCongTrinh)) : ''}
@@ -620,10 +620,13 @@
       $$('[data-w]', dlg).forEach(r => r.onclick = () => { dlg.close(); warehouseForm(d.warehouses.find(w => w.maKho === r.dataset.w)); });
       $('#wAdd', dlg).onclick = () => { dlg.close(); warehouseForm(); };
       $('#lockB', dlg).onclick = () => { dlg.close(); const cur = (d.config || {}).ngayKhoaSo || '';
-        dialog('Khoá sổ', `<p>Không lập, đảo phiếu có ngày đến hết ngày khoá; giá vốn kỳ đã khoá không bị tính lại. Khi khoá, hệ thống lưu số dư chốt của từng mã hàng.</p>${cur ? `<p class="mut">Đang khoá đến hết ngày <b>${esc(vnD(cur))}</b>. Lùi ngày hoặc để trống (mở khoá) phải ghi lý do.</p>` : ''}${fld('ngay', 'Khoá sổ đến hết ngày', cur, { type: 'date' })}${fld('lyDo', 'Lý do (khi lùi ngày / mở khoá)', '')}`,
-          async (v, x) => submit(x, 'period.lock', { ngay: v.ngay, lyDo: v.lyDo }, v.ngay ? 'Đã khoá sổ đến ' + vnD(v.ngay) : 'Đã mở khoá sổ'), null, 'Lưu'); };
+        dialog('Khoá sổ', `<p>Không lập, đảo phiếu có ngày đến hết ngày khoá; giá vốn kỳ đã khoá không bị tính lại. Khi khoá, hệ thống tính lại các phiếu kỳ còn mở rồi lưu số dư chốt (từng mã hàng, dở dang từng lệnh sản xuất).</p>${cur ? `<p class="mut">Đang khoá đến hết ngày <b>${esc(vnD(cur))}</b>. Khoá chỉ đi tiến; lùi ngày khoá phải ghi lý do (ít nhất 10 ký tự, ghi rõ ai yêu cầu) và được lưu lịch sử.</p>` : ''}${fld('ngay', 'Khoá sổ đến hết ngày', cur, { type: 'date' })}${fld('lyDo', 'Lý do (khi lùi ngày khoá / số dư khác lần chốt trước)', '')}`,
+          async (v, x) => { if (S.offline) { dlgMsg(x, 'Đang ngoại tuyến — chưa lưu được'); return false; } const r = await write('period.lock', { ngay: v.ngay, lyDo: v.lyDo, requestId: x._rid || (x._rid = rid()) }); if (!r.ok) { if (r.fields && !Array.isArray(r.fields)) showErrors(x, r.fields); dlgMsg(x, 'Chưa lưu: ' + (r.error || r.code)); return false; }
+            const z = r.data; toast((z.ngayKhoaSo ? 'Đã khoá sổ đến ' + vnD(z.ngayKhoaSo) : 'Đã mở khoá sổ') + (z.tinhLai ? ' · tính lại ' + z.tinhLai + ' dòng kỳ mở' : '') + (z.dangMoLai ? ' · kỳ đến ' + vnD(z.dangMoLai) + ' vẫn đang mở lại' : ''));
+            if (z.daoGoc && z.daoGoc.length) setTimeout(() => dialog('Lưu ý phiếu đảo', `<p>${z.daoGoc.length} phiếu đảo ghi ngày sau kỳ khoá nhưng hạch toán vào ngày phiếu gốc (trong kỳ). Kế toán ghi âm vào đúng kỳ của phiếu gốc:</p><ul>${z.daoGoc.map(d => `<li>${esc(d.soPhieu)} (${esc(vnD(d.ngay))}) đảo ${esc(d.phieuGoc)} — hạch toán ngày ${esc(vnD(d.ngayGoc))}</li>`).join('')}</ul>`, async () => true, null, 'Đã hiểu'), 50);
+            sync(); return true; }, null, 'Lưu'); };
       $('#rbB', dlg).onclick = async e => { const b = e.currentTarget; b.classList.add('busy'); const r = await write('stock.rebuild', {}); b.classList.remove('busy'); if (!r.ok) return toast('Lỗi: ' + (r.error || r.code));
-        if (r.data.chanKyKhoa) { const l = r.data.lechSoDu; return dialog('Chưa tính lại', `<p>Kỳ đã khoá sổ đến <b>${esc(vnD(r.data.ngayKhoaSo))}</b> tính lại ra <b>${l.length}</b> số dư khác lúc khoá (thường do sửa tay trên Google Sheet). Hệ thống không ghi gì.</p><div class="tbl"><table><tr><th>Mã</th><th>Kho</th><th>Lúc khoá</th><th>Tính lại</th></tr>${l.map(z => `<tr><td>${esc(z.maHang)}</td><td>${esc(z.kho === '*' ? 'Tổng' : z.kho)}</td><td>${esc(String(z.luocKhoa.soLuong))}${z.kho === '*' ? ' · ' + esc(money(z.luocKhoa.giaTri)) : ''}</td><td>${esc(String(z.tinhLai.soLuong))}${z.kho === '*' ? ' · ' + esc(money(z.tinhLai.giaTri)) : ''}</td></tr>`).join('')}</table></div><p class="mut">Kiểm tra lại sheet; nếu số mới đúng thì mở khoá sổ (ghi lý do), tính lại, rồi khoá lại.</p>`, null, null, 'Đóng'); }
+        if (r.data.chanKyKhoa) { const l = r.data.lechSoDu; return dialog('Chưa tính lại', `<p>Kỳ đã khoá sổ đến <b>${esc(vnD(r.data.ngayKhoaSo))}</b> tính lại ra <b>${l.length}</b> số dư khác lúc khoá (thường do sửa tay trên Google Sheet). Hệ thống không ghi gì.</p><div class="tbl"><table><tr><th>Mã</th><th>Kho</th><th>Lúc khoá</th><th>Tính lại</th></tr>${l.map(z => `<tr><td>${esc(z.maHang)}</td><td>${esc(z.kho === '*' ? 'Tổng' : z.kho)}</td><td>${esc(String(z.luocKhoa.soLuong))}${z.kho === '*' ? ' · ' + esc(money(z.luocKhoa.giaTri)) : ''}</td><td>${esc(String(z.tinhLai.soLuong))}${z.kho === '*' ? ' · ' + esc(money(z.tinhLai.giaTri)) : ''}</td></tr>`).join('')}</table></div><p class="mut">Đối chiếu với sổ kế toán và lịch sử sửa của Google Sheet. Nếu số tính lại là đúng: lùi ngày khoá về trước ngày có chênh lệch (ghi lý do), tính lại, rồi khoá lại.</p>`, async () => true, null, 'Đóng'); }
         toast(`Đã tính lại ${r.data.ma} mã · sửa ${r.data.tinhLai} dòng${r.data.loiTonAm.length ? ' · ⚠ ' + r.data.loiTonAm.length + ' chỗ tồn âm' : ''}${r.data.lechKyKhoa.length ? ' · ⚠ ' + r.data.lechKyKhoa.length + ' dòng kỳ đã khoá khác' : ''}`); sync(); };
       $('#nxtB', dlg).onclick = () => { dlg.close(); location.hash = '#/baocao'; };
     });
@@ -1036,7 +1039,8 @@
   const NN = { LOI_THIET_BI: 'Lỗi thiết bị (nhà sản xuất)', LOI_LAP_RAP: 'Lỗi lắp ráp tại xưởng', LOI_LAP_DAT: 'Lỗi lắp đặt tại công trình', SET_DANH: 'Sét đánh', QUA_AP: 'Quá áp lưới điện', TAC_DONG: 'Tác động cơ học / ngập nước', TU_Y_SUA: 'Tự ý sửa chữa, đổi đấu nối', KHAC: 'Khác' };
   const TT_BH = { TRONG_BH: 'Trong bảo hành', HET_BH: 'Hết bảo hành', CHUA_BAN_GIAO: 'Chưa ghi bàn giao', KHONG_BH: 'Không bảo hành' };
   const BH = { tab: 'tu', f: '', q: '' };
-  const vnD = d => d ? d.split('-').reverse().join('/') : '';
+  const vnD = d => d ? String(d).split('-').reverse().join('/') : '';
+  const addDay = d => new Date(Date.parse(d + 'T00:00:00Z') + 864e5).toISOString().slice(0, 10);
   const mapUrl = v => v && v.viDo !== '' && v.viDo != null ? `https://www.google.com/maps?q=${v.viDo},${v.kinhDo}` : '';
   function bhTag(t) { t = t || {}; const c = { CON_BH: 'ok', SAP_HET: 'warn', HET_BH: 'bad', KHONG_BH: '', CHUA_BAN_GIAO: t.canhBao ? 'warn' : '' }[t.ma] || '';
     return `<span class="tag ${c}">${t.canhBao ? ic('warn') + ' ' : ''}${BH_TT[t.ma] || '—'}${t.ma === 'CON_BH' || t.ma === 'SAP_HET' ? ' · còn ' + t.conNgay + ' ngày' : t.ma === 'HET_BH' ? ' · quá ' + t.quaNgay + ' ngày' : ''}</span>`; }

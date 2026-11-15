@@ -74,9 +74,9 @@ function setParents(pairs) {
 /** Kết chuyển huỷ lệnh (KC_HUY) tự cân: sau mỗi lần tính lại làm đổi giá linh kiện của lệnh đã huỷ → sửa số KC để dở dang về 0. */
 function syncKcHuy(lsxState) {
   if (!lsxState) return; var huy = {}; readTable('LenhSX').rows.forEach(function (l) { if (l.trangThai === 'HUY') huy[l.soLSX] = 1; });
-  var cps = readTable('ChiPhiLSX').rows, ch = [];
+  var cps = readTable('ChiPhiLSX').rows, ch = [], lk = cfg('ngayKhoaSo');
   Object.keys(lsxState).forEach(function (so) {
-    if (!huy[so]) return; var st = lsxState[so], kc = cps.filter(function (c) { return c.soLSX === so && c.loai === 'KC_HUY'; })[0]; if (!kc) return;
+    if (!huy[so]) return; var st = lsxState[so], kc = cps.filter(function (c) { return c.soLSX === so && c.loai === 'KC_HUY'; })[0]; if (!kc || (lk && kc.ngay <= lk)) return;   // bút toán kỳ đã khoá không tự sửa
     var cp = cps.reduce(function (a, c) { return c.soLSX === so && c.loai !== 'KC_HUY' ? a + (Number(c.soTien) || 0) : a; }, 0), want = -(st.xv + cp - st.nv - st.tv);
     if (Number(kc.soTien) !== want) { KCLOG.push({ action: 'lsx.ketChuyenDoi', doiTuong: 'ChiPhiLSX', id: kc.id, truoc: { soLSX: so, soTien: Number(kc.soTien) }, sau: { soTien: want, lyDo: 'Giá linh kiện của lệnh đã huỷ được tính lại — điều chỉnh bút toán kết chuyển' } }); kc.soTien = want; ch.push(kc); }
   });
@@ -139,16 +139,15 @@ function sxPrep(u, req, v) { var c = voucherPrep(u, { requestId: req.requestId, 
 
 function lsxXuat(u, req, logs) {
   var d = sxDone(u, req); if (d) return d;
-  var pv = prevHeads(req, 'XUAT_SX')[0]; if (pv) return sxMark(u, req, { soPhieu: pv.soPhieu, tinhLai: 0, lapLai: true });
+  var pv = prevHeads(req, 'XUAT_SX')[0]; if (pv) { lsxRefresh(pv.soLSX); return sxMark(u, req, { soPhieu: pv.soPhieu, tinhLai: 0, lapLai: true }); }
   cleanupOrphans(logs);
   var l = getLSX(req.soLSX); lsxOpen(l);
   if (!Array.isArray(req.lines)) throw fail('VALIDATION', 'Chưa có dòng linh kiện', { lines: 'Bắt buộc' });
   var ctx = sxPrep(u, req, { loai: 'XUAT_SX', ngay: String(req.ngay || today()), kho: l.kho, lyDo: txt(req.lyDo, 300) || 'Xuất linh kiện cho sản xuất', nguoiGiaoNhan: txt(req.nguoiGiaoNhan, 100),
     soCTGoc: l.soLSX, ngayCTGoc: l.ngay, lines: req.lines, soLSX: l.soLSX });
   var r = commitVoucher(u, req, logs, ctx);
-  sxMark(u, req, { soPhieu: r.soPhieu, tinhLai: r.tinhLai });
   lsxRefresh(l.soLSX);
-  return { soPhieu: r.soPhieu, tinhLai: r.tinhLai };
+  return sxMark(u, req, { soPhieu: r.soPhieu, tinhLai: r.tinhLai });   // dấu "xong" sau mọi bước
 }
 
 function lsxChiPhi(u, req, logs) {
@@ -172,8 +171,11 @@ function cpWrite(u, req, l, c) {
   if (nq >= Number(l.soLuong) && c.ngay > last) throw fail('VALIDATION', 'Lệnh đã nhập đủ tủ ngày ' + last + ' — chi phí phải ghi đến ngày đó', { ngay: 'Không sau ' + last });
   var oldO = JSON.parse(JSON.stringify(o)); o.lsx[l.soLSX].chiPhi.push({ ngay: c.ngay, soTien: c.soTien, loai: c.loai });
   var mas = lsxMas(l.soLSX), x = mas.length ? recalcStrict(mas, o, oldO) : null;
-  var id = 'CP' + pad(nextId('CPLSX'), 6), n = x ? recalcApply(x) : 0;   // tính lại giá thành TRƯỚC, dòng chi phí ghi CUỐI: có dòng = đã tính xong; chết giữa chừng thì gửi lại tính ra đúng như vậy
+  var id = 'CP' + pad(nextId('CPLSX'), 6), pk = 'CP~' + String(req.requestId).slice(0, 40);
+  markPending(pk, { loai: 'CHI_PHI', soLSX: l.soLSX, rid: String(req.requestId) });   // chết sau khi tính lại mà chưa ghi dòng chi phí → lệnh ghi sau tính lại về như cũ
+  var n = x ? recalcApply(x) : 0;   // tính lại giá thành TRƯỚC, dòng chi phí ghi CUỐI: có dòng = đã tính xong; chết giữa chừng thì gửi lại tính ra đúng như vậy
   appendBlock('ChiPhiLSX', [{ id: id, soLSX: l.soLSX, ngay: c.ngay, loai: c.loai, soTien: c.soTien, soCTGoc: c.soCTGoc, ngayCTGoc: c.ngayCTGoc, ghiChu: c.ghiChu, nguoiTao: u.email, thoiGian: nowIso(), requestId: String(req.requestId) }]);
+  clearPending(pk);
   return { id: id, tinhLai: n };
 }
 /** Huỷ 1 dòng chi phí ghi sai (QT): ghi dòng âm cùng ngày, cùng loại; tính lại giá thành. */
@@ -194,7 +196,7 @@ function lsxChiPhiHuy(u, req, logs) {
 function lsxNhap(u, req, logs) {
   var d = sxDone(u, req); if (d) return d;
   var pv = prevHeads(req, 'NHAP_TP')[0];
-  if (pv) { var pl = readTable('ChiTietPhieu').rows.filter(function (x) { return x.soPhieu === pv.soPhieu; })[0]; return sxMark(u, req, { soPhieu: pv.soPhieu, serials: parseSerials(pl && pl.serials), tinhLai: 0, lapLai: true }); }
+  if (pv) { var pl = readTable('ChiTietPhieu').rows.filter(function (x) { return x.soPhieu === pv.soPhieu; })[0]; lsxRefresh(pv.soLSX); return sxMark(u, req, { soPhieu: pv.soPhieu, serials: parseSerials(pl && pl.serials), tinhLai: 0, lapLai: true }); }
   cleanupOrphans(logs);
   var l = getLSX(req.soLSX); lsxOpen(l);
   var k = req.soLuong, ngay = chkDate(String(req.ngay || today()));
@@ -225,8 +227,8 @@ function lsxNhap(u, req, logs) {
     props().setProperty('seq:' + ctr, String(cur));
   } });
   var res = { soPhieu: r.soPhieu, serials: sers, tinhLai: r.tinhLai };
-  sxMark(u, req, res); lsxRefresh(l.soLSX);
-  return res;
+  lsxRefresh(l.soLSX);
+  return sxMark(u, req, res);
 }
 
 /** Huỷ lệnh (chưa nhập TP): nhập lại linh kiện còn dùng được theo giá xuất gốc; phần còn lại của dở dang kết chuyển chi phí (KC_HUY, tự cân khi giá linh kiện được tính lại). */
@@ -292,7 +294,8 @@ function kcsAdd(u, req, logs) {
   var pv = prevRow('KiemTraXX', req)[0];
   if (pv) {   // gửi lại: dòng kiểm đã ghi → bảo đảm hồ sơ tủ đã nhận kết quả (lệnh trước có thể chết trước bước này)
     var h0 = cabHeads(), c0 = readTable('HoSoTu').rows.filter(function (x) { return x.serial === pv.serial && cabOK(x, h0); })[0];
-    if (c0 && Number(c0.lanKiemCuoi || 0) < Number(pv.lanKiem)) { var y0 = strip(c0); y0.kcsDat = pv.dat; y0.lanKiemCuoi = pv.lanKiem; putRow('HoSoTu', y0, c0._row); lsxRefresh(c0.soLSX); }
+    if (c0 && Number(c0.lanKiemCuoi || 0) < Number(pv.lanKiem)) { var y0 = strip(c0); y0.kcsDat = pv.dat; y0.lanKiemCuoi = pv.lanKiem; putRow('HoSoTu', y0, c0._row); }
+    if (c0) lsxRefresh(c0.soLSX);
     return sxMark(u, req, { lanKiem: pv.lanKiem, dat: pv.dat, lapLai: true });
   }
   var ser = QSerial.norm(req.serial), heads = cabHeads(), c = readTable('HoSoTu').rows.filter(function (x) { return x.serial === ser && cabOK(x, heads); })[0];
@@ -309,8 +312,8 @@ function kcsAdd(u, req, logs) {
   appendBlock('KiemTraXX', [{ id: 'KT' + pad(nextId('KCS'), 6), serial: ser, lanKiem: lan, ngay: ngay, nguoiKiem: u.email, dat: k.dat, soDat: k.soDat, tongMuc: items.length, thoiGian: nowIso(), requestId: String(req.requestId),
     ketQua: JSON.stringify(items.map(function (it, i) { return { stt: it.stt, noiDung: it.noiDung, yeuCau: it.yeuCau, ketQua: res[i].ketQua, ghiChu: res[i].ghiChu }; })) }]);
   var x = strip(c); x.kcsDat = k.dat; x.lanKiemCuoi = lan; putRow('HoSoTu', x, c._row);
-  sxMark(u, req, { lanKiem: lan, dat: k.dat });
   lsxRefresh(c.soLSX);
+  sxMark(u, req, { lanKiem: lan, dat: k.dat });
   logs.push({ action: 'kcs.add', doiTuong: 'KiemTraXX', id: ser, truoc: null, sau: { lanKiem: lan, dat: k.dat, soDat: k.soDat } });
   return { lanKiem: lan, dat: k.dat };
 }

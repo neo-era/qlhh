@@ -265,3 +265,5 @@ dialog.kcsd .body{display:flex;flex-direction:column}
 .list .it>div:first-child{min-width:0;overflow-wrap:anywhere}
 @media (max-width:899px){.sxbar .btn{flex:1 1 auto;min-width:0;padding-left:10px;padding-right:10px;font-size:13.5px}.list .it .tag{white-space:normal}}
 @media (orientation:landscape) and (max-height:520px){.sxbar{flex-wrap:nowrap;overflow-x:auto;margin-bottom:6px}.sxbar .btn{flex:0 0 auto;min-height:40px}}
+
+.warnbar{margin:0 0 10px;padding:8px 12px;border-radius:8px;background:color-mix(in srgb,var(--warn,#b45309) 14%,transparent);border:1px solid color-mix(in srgb,var(--warn,#b45309) 45%,transparent);font-size:14px}
