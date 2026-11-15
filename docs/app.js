@@ -33,7 +33,8 @@
     let dbp = null;
     const open = () => dbp || (dbp = new Promise((res, rej) => { try { const r = indexedDB.open('qlhh', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); } catch (e) { rej(e); } }));
     const tx = (mode, fn) => open().then(db => new Promise((res, rej) => { const t = db.transaction('kv', mode), s = t.objectStore('kv'), r = fn(s); t.oncomplete = () => res(r && r.result); t.onerror = () => rej(t.error); }));
-    return { get: k => tx('readonly', s => s.get(k)).catch(() => null), set: (k, v) => tx('readwrite', s => s.put(v, k)).catch(() => null), del: k => tx('readwrite', s => s.delete(k)).catch(() => null) };
+    const clr = pre => tx('readwrite', s => { const r = s.openCursor(); r.onsuccess = () => { const c = r.result; if (!c) return; if (String(c.key).startsWith(pre)) c.delete(); c.continue(); }; return null; }).catch(() => null);
+    return { clr, get: k => tx('readonly', s => s.get(k)).catch(() => null), set: (k, v) => tx('readwrite', s => s.put(v, k)).catch(() => null), del: k => tx('readwrite', s => s.delete(k)).catch(() => null) };
   })();
 
   // ---------------- trạng thái ----------------
@@ -51,6 +52,20 @@
   // ---------------- giao tiếp máy chủ ----------------
   const rid = () => 'r' + Date.now().toString(36) + Array.from(crypto.getRandomValues(new Uint8Array(8)), b => b.toString(16).padStart(2, '0')).join('');
   const RETRY = ['LOCK_TIMEOUT', 'INTERNAL', 'NOT_JSON', 'NETWORK', 'STALE'];
+  /* Đọc có hiển thị "Đang tải…" (sau 300 ms), chống bấm 2 lần (lệnh đọc giống hệt đang chạy → lần bấm sau bị bỏ qua),
+     và lưu tạm bản vừa đọc trên máy: mất mạng thì mở bản lưu (ghi rõ giờ lưu). */
+  const INFL = {};
+  async function load(action, body, label) {
+    const key = action + ':' + JSON.stringify(body);
+    if (INFL[key]) return new Promise(() => {});   // đang mở rồi
+    INFL[key] = 1; let ov = null; const tm = setTimeout(() => { ov = document.createElement('div'); ov.className = 'loadov'; ov.setAttribute('role', 'status'); ov.innerHTML = `<span>${esc(label || 'Đang tải…')}</span>`; ($('dialog[open]') || document.body).appendChild(ov); }, 300);
+    try {
+      const r = await call(action, body, 3), ck = 'v:' + S.co.id + ':' + key;
+      if (r.ok) { IDB.set(ck, { r, at: Date.now(), ver: S.version }).catch(() => {}); return r; }
+      if (r.code === 'NETWORK' || S.offline) { const c = await IDB.get(ck).catch(() => null); if (c && c.r) { toast('Ngoại tuyến — đang xem bản lưu lúc ' + new Date(c.at).toLocaleString('vi-VN')); return { ...c.r, cached: c.at }; } }
+      return r;
+    } finally { clearTimeout(tm); if (ov) ov.remove(); delete INFL[key]; }
+  }
   async function call(action, body = {}, tries = 1) {
     if (!S.co || !S.co.url) return { ok: false, code: 'CONFIG', error: 'Công ty chưa cấu hình máy chủ' };
     let wait = 1000, last;
@@ -78,12 +93,13 @@
     writeChain = p.catch(() => {});
     return p;
   }
-  function expire(msg) { if (S.user) IDB.del(cacheKey()); IDB.del('sess:' + S.co.id); S.session = null; S.user = null; S.data = null; S.version = 0; toast(msg || 'Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại'); renderLogin(); }
+  function expire(msg) { if (S.user) IDB.del(cacheKey()); IDB.clr('v:' + S.co.id + ':'); IDB.del('sess:' + S.co.id); S.session = null; S.user = null; S.data = null; S.version = 0; toast(msg || 'Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại'); renderLogin(); }
 
   // ---------------- đăng nhập ----------------
   async function startLogin() {
     if (!S.co.url) return toast(`${S.co.ten} chưa có máy chủ — liên hệ quản trị`);
     const btn = $('#loginBtn'); btn && btn.classList.add('busy');
+    try { if (/^#\/\w/.test(location.hash)) sessionStorage.setItem('qlhh-ret', location.hash); } catch (e) {}   // quét QR khi chưa đăng nhập: đăng nhập xong mở lại đúng tủ
     const n = await call('auth.nonce', {}, 3);
     if (!n.ok) { btn && btn.classList.remove('busy'); return toast('Không lấy được mã đăng nhập: ' + (n.error || n.code)); }
     const u = new URL('https://accounts.google.com/o/oauth2/v2/auth');
@@ -103,11 +119,13 @@
     S.session = r.data.session; S.user = { email: r.data.email, vaiTro: r.data.vaiTro, hoTen: r.data.hoTen };
     await IDB.set('sess:' + co.id, { session: S.session, user: S.user });
     countUse();
+    let ret = ''; try { ret = sessionStorage.getItem('qlhh-ret') || ''; sessionStorage.removeItem('qlhh-ret'); } catch (e) {}
+    if (/^#\/\w/.test(ret)) history.replaceState(null, '', location.pathname + location.search + ret);
     await boot();
     return true;
   }
   async function logout() {
-    if (S.co && S.user) await IDB.del(cacheKey());
+    if (S.co && S.user) { await IDB.del(cacheKey()); await IDB.clr('v:' + S.co.id + ':'); }
     await IDB.del('sess:' + S.co.id); S.session = null; S.user = null; S.data = null; S.version = 0;
     renderLogin(); toast('Đã đăng xuất và xoá dữ liệu lưu trên máy');
   }
@@ -119,29 +137,44 @@
     if (cached && !S.data) { S.data = cached.data; S.version = cached.version; reindex(); renderView(); }
     await sync();
   }
-  async function sync() {
-    const r = await call('sync.pull', { since: S.data ? S.version : 0 }, 3);
+  async function sync(opt = {}) {
+    const r = await call('sync.pull', { since: S.data ? S.version : 0 }, opt.poll ? 1 : 3);
     if (!r.ok) {
-      if (S.offline) { renderView(); toast(S.data ? 'Đang ngoại tuyến — xem dữ liệu lưu gần nhất' : 'Không kết nối được máy chủ'); }
+      if (opt.poll) return;
+      if (S.offline) { S.wasOff = true; renderView(); toast(S.data ? 'Đang ngoại tuyến — xem dữ liệu lưu gần nhất' : 'Không kết nối được máy chủ'); }
       else if (r.code === 'FORBIDDEN') expire('Tài khoản đã bị khoá hoặc chưa được cấp quyền — đã xoá dữ liệu trên máy');
       else if (r.code !== 'AUTH_INVALID' && r.code !== 'AUTH_EXPIRED') toast('Lỗi tải dữ liệu: ' + (r.error || r.code));
       return;
     }
     if (r.data.today) S.today = r.data.today;
     if (r.data.me && S.user && r.data.me.vaiTro !== S.user.vaiTro) {   // QT vừa đổi vai trò của mình
-      if (r.data.me.vaiTro !== 'QUAN_TRI') await IDB.del(cacheKey());
+      if (r.data.me.vaiTro !== 'QUAN_TRI') { await IDB.del(cacheKey()); await IDB.clr('v:' + S.co.id + ':'); }
       S.user = { ...S.user, ...r.data.me }; IDB.set('sess:' + S.co.id, { session: S.session, user: S.user }); S.data = null; S.version = 0;
       toast('Vai trò của anh/chị đã đổi thành ' + (ROLE[S.user.vaiTro] || S.user.vaiTro)); renderShell(); return sync();
     }
+    if (r.data.unchanged && !opt.force) { if (S.wasOff) { S.wasOff = false; renderView(); } flushFeedbackQueue(); return; }   // không đổi: không vẽ lại (giữ cuộn, ô đang gõ)
     if (!r.data.unchanged) {
+      SX.stale = true; KS.vmc = null;
       S.data = r.data.data; S.version = r.data.version; reindex();
       IDB.set(cacheKey(), { data: S.data, version: S.version, at: Date.now() });
       if (isQT() && r.data.warnings && r.data.warnings.length) toast(`Sheet có ${r.data.warnings.length} dòng sai kiểu (vd ${r.data.warnings[0]})`);
     }
-    renderView();
+    if (opt.noRender) { if (!$('#newbar') && $('#main')) { $('#main').insertAdjacentHTML('afterbegin', '<div class="newbar" id="newbar" role="status"><span>Có dữ liệu mới từ máy khác</span><button class="btn pri" type="button" id="nbGo">Cập nhật</button></div>'); $('#nbGo').onclick = () => renderView(); } }
+    else renderView();
     flushFeedbackQueue();
   }
   function reindex() { S.idx = QSearch.buildIndex(S.data.items); }
+  /* Tự làm mới: mỗi 60 giây khi app đang hiện, hỏi máy chủ phiên bản dữ liệu (rất nhẹ). Có dữ liệu mới:
+     đang gõ / đang mở hộp thoại → hiện dải "Có dữ liệu mới — Cập nhật" (không vẽ lại dưới tay người dùng); còn lại → cập nhật luôn. */
+  async function poll() {
+    if (document.hidden || !S.user || !S.data || S.offline || S.polling) return;
+    S.polling = true;
+    try {
+      const a = document.activeElement, busy = $('dialog[open]') || $('.scanov') || (a && a.matches && a.matches('#main input,#main textarea,#main select'));
+      await sync({ poll: true, noRender: !!busy });
+    } finally { S.polling = false; }
+  }
+  setInterval(poll, 60000); S._poll = poll;
 
   // ---------------- khung ----------------
   function applyCo() {
@@ -297,8 +330,8 @@
         <dt>Quy đổi ĐVT</dt><dd>${(S.data.units || []).filter(u => u.maHang === i.maHang).map(u => `1 ${esc(u.dvtPhu)} = ${num(u.heSo)} ${esc(i.dvt)}`).join('; ') || '—'}${canEdit() && !S.offline ? ' <button class="btn ghost" style="min-height:32px;padding:0 8px" id="addUnit" type="button">+ Thêm</button>' : ''}</dd>
         ${safeUrl(i.taiLieuUrl) ? `<dt>Tài liệu</dt><dd><a href="${esc(safeUrl(i.taiLieuUrl))}" target="_blank" rel="noopener noreferrer">Mở tài liệu</a></dd>` : ''}</dl>
       ${canEdit() && !S.offline ? `<div class="acts"><button class="btn" id="edItem">Sửa</button><button class="btn" id="addPrice">${ic('plus')} Thêm giá</button><button class="btn ${i.trangThai === 'NGUNG' ? '' : 'danger'}" id="stopItem">${i.trangThai === 'NGUNG' ? 'Kinh doanh lại' : 'Ngừng KD'}</button></div>` : ''}
-      <div class="hist"><h3>Lịch sử giá bán</h3>${ban.length ? `<ul>${ban.slice(0, 12).map(p => `<li><span>Từ ${esc(p.tuNgay)}</span><b>${money(p.gia)}</b></li>`).join('')}</ul>` : '<p class="mut">Chưa có giá bán.</p>'}</div>
-      ${isQT() ? `<div class="hist"><h3>Giá nhập theo NCC</h3>${nhap.length ? `<ul>${nhap.slice(0, 12).map(p => `<li><span>${esc(sup(p.maNCC))} · ${esc(p.tuNgay)}</span><b>${money(p.gia)}</b></li>`).join('')}</ul>` : '<p class="mut">Chưa có giá nhập.</p>'}</div>` : ''}`;
+      <div class="hist"><h3>Lịch sử giá bán</h3>${ban.length ? `<ul>${ban.slice(0, 12).map(p => `<li><span>Từ ${esc(vnD(p.tuNgay))}</span><b>${money(p.gia)}</b></li>`).join('')}</ul>` : '<p class="mut">Chưa có giá bán.</p>'}</div>
+      ${isQT() ? `<div class="hist"><h3>Giá nhập theo NCC</h3>${nhap.length ? `<ul>${nhap.slice(0, 12).map(p => `<li><span>${esc(sup(p.maNCC))} · ${esc(vnD(p.tuNgay))}</span><b>${money(p.gia)}</b></li>`).join('')}</ul>` : '<p class="mut">Chưa có giá nhập.</p>'}</div>` : ''}`;
   }
   function bindDetail() {
     const b = $('#detBack'); if (b) b.onclick = () => history.state && history.state.det ? history.back() : closeDetail();
@@ -362,16 +395,30 @@
   const projName = c => ((S.data.projects || []).find(x => x.maCongTrinh === c) || {}).ten || c;
   const supName = c => ((S.data.suppliers || []).find(x => x.maNCC === c) || {}).ten || c;
   const activeKho = (loi) => (S.data.warehouses || []).filter(w => w.trangThai !== 'NGUNG' && (loi === undefined || (w.loai === 'HANG_LOI') === loi));
-  const KS = { q: '', kho: '', lowOnly: false, pq: '', pg: '', sel: null };
+  const KS = { q: '', kho: '', lowOnly: false, pq: '', pg: '', sel: null, lim: 300, vlim: 300, vm: '' };
 
-  function viewStock(m) {
+  /* Vẽ lại: only = bộ chọn vùng kết quả → chỉ thay vùng đó (ô tìm giữ nguyên: không mất con trỏ, bộ gõ Telex/VNI không bị cắt). */
+  function paint(m, only, html) {
+    const cur = only && $(only, m);
+    if (cur) { const t = document.createElement('template'); t.innerHTML = html; const n = t.content.querySelector(only); if (n) { cur.replaceWith(n); return; } }
+    m.innerHTML = html;
+  }
+  /** Gắn ô tìm 1 lần: chờ gõ xong dấu (composition), đồng bộ ô điện thoại/máy tính, trễ ms rồi redraw(). */
+  function onSearch(sel, set, redraw, ms = 250) {
+    let t = null;
+    $$(sel).forEach(q => { if (q._srch) return; q._srch = 1; let comp = false;
+      q.addEventListener('compositionstart', () => comp = true);
+      q.addEventListener('compositionend', () => { comp = false; q.dispatchEvent(new Event('input')); });
+      q.addEventListener('input', () => { if (comp) return; set(q.value); $$(sel).forEach(o => { if (o !== q) o.value = q.value; }); clearTimeout(t); t = setTimeout(redraw, ms); }); });
+  }
+  function viewStock(m, only) {
     const d = S.data, ws = d.warehouses || [];
     const list0 = QSearch.search(d.items, KS.q, S.idx).filter(i => i.trangThai !== 'NGUNG' || tonQ(i.maHang) !== 0);
     const list = list0.filter(i => (!KS.lowOnly || low(i)) && (!KS.kho || tonRow(i.maHang, KS.kho)));
     const nLow = d.items.filter(low).length, val = isQT() ? (d.stock || []).filter(t => t.kho === '*').reduce((a, t) => a + (Number(t.giaTri) || 0), 0) : null;
     const thisMonth = (d.vouchers || []).filter(p => String(p.ngay).slice(0, 7) === S.today.slice(0, 7)).length;
     const act = (canEdit() ? `<button class="btn pri" id="newV">${ic('plus')}<span>Lập phiếu</span></button>` : '') + (isQT() ? `<button class="btn" id="khoAdm">${ic('layers')}<span>Kho & khoá sổ</span></button>` : '') + `<button class="btn" id="xlsT">${ic('dl')}<span>Xuất Excel</span></button>`;
-    m.innerHTML = header('Tồn kho', act, false, canEdit() ? 'newVM' : '') +
+    paint(m, only, header('Tồn kho', act, false, canEdit() ? 'newVM' : '') +
       `<label class="msearch">${ic('search')}<span class="sr">Tìm hàng</span><input id="qkm" type="search" placeholder="Tìm mã, tên hàng…" value="${esc(KS.q)}" autocomplete="off"></label>
       <div class="kpi"><div class="k"><small>Mã có tồn</small><b>${(d.stock || []).filter(t => t.kho === '*' && Number(t.soLuong) > 0).length.toLocaleString('vi-VN')}</b></div>
         <div class="k"><small>⚠ Dưới tồn tối thiểu</small><b>${nLow}</b></div><div class="k"><small>${isQT() ? 'Giá trị tồn (giá vốn)' : 'Số kho'}</small><b>${isQT() ? money(val) : ws.length}</b></div>
@@ -381,9 +428,9 @@
         <button class="chip" type="button" id="lowT" aria-pressed="${KS.lowOnly}">⚠ Dưới tồn tối thiểu (${nLow})</button></div>
       ${(d.vouchers || []).length ? '' : `<div class="banner" role="status" style="background:var(--acc-soft)">Chưa có phiếu kho. ${canEdit() ? 'Bắt đầu bằng phiếu <b>Tồn đầu kỳ</b> (hàng đang có) hoặc <b>Nhập mua</b>.' : ''}</div>`}
       ${d.config && d.config.ngayKhoaSo ? `<p class="mut" style="margin:0 0 10px">Đã khoá sổ đến hết ngày <b>${esc(vnD(d.config.ngayKhoaSo))}</b>.</p>` : ''}${d.config && d.config.ngayKhoaMax && d.config.ngayKhoaMax > (d.config.ngayKhoaSo || '') ? `<p class="warnbar" role="status">Sổ đang được mở lại từ ${esc(vnD(d.config.ngayKhoaSo ? addDay(d.config.ngayKhoaSo) : ''))} đến ${esc(vnD(d.config.ngayKhoaMax))} để Quản trị điều chỉnh — chỉ Quản trị ghi phiếu trong khoảng này. Điều chỉnh xong nhớ khoá lại.</p>` : ''}
-      <div class="layout"><div class="card"><div class="tbl" id="stockRes"></div></div><section class="card det ${KS.sel ? '' : 'closed'}" id="kdet" aria-label="Chi tiết tồn">${stockDetail()}</section></div>`;
+      <div class="layout"><div class="card"><div class="tbl" id="stockRes"></div></div><section class="card det ${KS.sel ? '' : 'closed'}" id="kdet" aria-label="Chi tiết tồn">${stockDetail()}</section></div>`);
     const draw = () => {
-      const box = $('#stockRes'), mob = isMobile(), rows = list.slice(0, 300);
+      const box = $('#stockRes'), mob = isMobile(), rows = list.slice(0, KS.lim);
       const wcols = ws.filter(w => (d.stock || []).some(t => t.kho === w.maKho && Number(t.soLuong)));   // ẩn cột kho không có hàng
       const q = i => KS.kho ? tonQ(i.maHang, KS.kho) : tonQ(i.maHang);
       const warn = i => low(i) ? ` <span class="tag stop">${ic('warn')} dưới tối thiểu ${num(i.tonToiThieu)}</span>` : '';
@@ -392,9 +439,11 @@
         : `<table><thead><tr><th>Mã hàng</th><th>Tên hàng</th><th>ĐVT</th>${KS.kho || wcols.length < 2 ? '' : wcols.map(w => `<th class="n">${esc(w.ten)}</th>`).join('')}<th class="n" title="Không gồm kho hàng lỗi">${KS.kho ? esc(khoName(KS.kho)) : 'Tổng tồn'}</th>${isQT() ? '<th class="n">Giá vốn</th><th class="n">Giá trị</th>' : ''}</tr></thead><tbody>
           ${rows.map(i => { const t = tonRow(i.maHang) || {}; return `<tr data-km="${esc(i.maHang)}" role="button" tabindex="0" aria-selected="${KS.sel === i.maHang}"><td class="mono">${esc(i.maHang)}</td><td>${esc(i.ten)}${warn(i)}</td><td>${esc(i.dvt)}</td>${KS.kho || wcols.length < 2 ? '' : wcols.map(w => `<td class="n">${num(tonQ(i.maHang, w.maKho) || '')}</td>`).join('')}<td class="n"><b>${num(q(i))}</b></td>${isQT() ? `<td class="n">${money(i.giaVon)}</td><td class="n">${money(t.giaTri)}</td>` : ''}</tr>`; }).join('')}</tbody></table>`)
         : `<div class="empty">${d.items.length ? 'Không có mã nào khớp bộ lọc.' : 'Chưa có mặt hàng — thêm ở Danh mục hàng.'}${canEdit() && !(d.vouchers || []).length ? '<br>Bắt đầu bằng phiếu <b>Tồn đầu kỳ</b> hoặc <b>Nhập mua</b>.' : ''}</div>`;
+      if (list.length > rows.length) box.insertAdjacentHTML('beforeend', `<p class="mut cnt">Đang hiện ${rows.length.toLocaleString('vi-VN')}/${list.length.toLocaleString('vi-VN')} mã — gõ tìm để thu hẹp.</p><button class="btn more" type="button" id="kMore">Xem thêm (${(list.length - rows.length).toLocaleString('vi-VN')} mã)</button>`);
+      const km = $('#kMore', box); if (km) km.onclick = () => { KS.lim += 500; draw(); };
       $$('[data-km]', box).forEach(r => r.onclick = () => { KS.sel = r.dataset.km; const det = $('#kdet'); det.innerHTML = stockDetail(); det.classList.remove('closed'); bindStockDetail(); $$('[data-km]').forEach(x => x.setAttribute('aria-selected', x.dataset.km === KS.sel)); if (isMobile()) history.pushState({ kdet: 1 }, ''); });
     };
-    let t = null; $$('#qkm,#qkd').forEach(q => { let comp = false; q.addEventListener('compositionstart', () => comp = true); q.addEventListener('compositionend', () => { comp = false; q.dispatchEvent(new Event('input')); }); q.oninput = () => { if (comp) return; KS.q = q.value; clearTimeout(t); t = setTimeout(() => viewStock(m), 250); }; });
+    onSearch('#qkm,#qkd', v => { KS.q = v; KS.lim = 300; }, () => viewStock(m, '#stockRes'));
     $$('.chip[data-k]').forEach(b => b.onclick = () => { KS.kho = b.dataset.k; viewStock(m); });
     $('#lowT').onclick = () => { KS.lowOnly = !KS.lowOnly; viewStock(m); };
     $$('#newV,#newVM').forEach(b => b.onclick = () => voucherPick());
@@ -423,18 +472,31 @@
   }
 
   // ---------- danh sách phiếu ----------
-  function viewVouchers(m) {
-    const d = S.data, all = (d.vouchers || []).slice().sort((a, b) => b.ngay < a.ngay ? -1 : b.ngay > a.ngay ? 1 : b.stt - a.stt);
+  /* Lọc theo tháng: tháng nằm trong 500 phiếu đã tải thì dùng luôn, cũ hơn thì hỏi máy chủ (voucher.list) — nhớ theo phiên bản dữ liệu. */
+  function monthVouchers(m) {
+    const loc = (S.data.vouchers || []), old = loc.length && String(loc.reduce((a, p) => p.ngay < a ? p.ngay : a, '9999')).slice(0, 7);
+    if (loc.length < 500 || (old && KS.vm > old)) return loc;
+    const c = KS.vmc || {}; if (c.thang === KS.vm && c.ver === S.version) return c.rows;
+    if (!c.busy || c.busy !== KS.vm) { KS.vmc = { thang: KS.vm, busy: KS.vm, rows: [] };
+      call('voucher.list', { thang: KS.vm }, 3).then(r => { if (KS.vm !== r.data?.thang && r.ok) return; KS.vmc = r.ok ? { thang: KS.vm, ver: S.version, rows: r.data.vouchers } : { thang: KS.vm, ver: S.version, rows: [], err: r.error || r.code }; if (route() === 'phieu') viewVouchers(m); }); }
+    return [];
+  }
+  function viewVouchers(m, only) {
+    const d = S.data, src = KS.vm ? monthVouchers(m) : (d.vouchers || []);
+    const all = src.slice().sort((a, b) => b.ngay < a.ngay ? -1 : b.ngay > a.ngay ? 1 : b.stt - a.stt);
     const nq = QSearch.norm(KS.pq);
-    const list = all.filter(p => (!KS.pg || NHOM_PHIEU[KS.pg].includes(p.loai)) && (!nq || QSearch.norm([p.soPhieu, custName(p.maKH), projName(p.maCongTrinh), supName(p.maNCC), p.lyDo, p.soCTGoc].join(' ')).includes(nq)));
-    m.innerHTML = header('Phiếu kho', canEdit() ? `<button class="btn pri" id="newV">${ic('plus')}<span>Lập phiếu</span></button>` : '', false, canEdit() ? 'newVM' : '') +
+    const list = all.filter(p => (!KS.pg || NHOM_PHIEU[KS.pg].includes(p.loai)) && (!KS.vm || String(p.ngay).slice(0, 7) === KS.vm) && (!nq || QSearch.norm([p.soPhieu, custName(p.maKH), projName(p.maCongTrinh), supName(p.maNCC), p.lyDo, p.soCTGoc].join(' ')).includes(nq)));
+    paint(m, only, header('Phiếu kho', canEdit() ? `<button class="btn pri" id="newV">${ic('plus')}<span>Lập phiếu</span></button>` : '', false, canEdit() ? 'newVM' : '') +
       `<label class="msearch">${ic('search')}<span class="sr">Tìm phiếu</span><input id="qpm" type="search" placeholder="Số phiếu, khách, công trình…" value="${esc(KS.pq)}" autocomplete="off"></label>
       <div class="top" style="margin-top:-4px"><label class="search" style="flex:1 1 380px">${ic('search')}<span class="sr">Tìm phiếu</span><input id="qpd" type="search" placeholder="Số phiếu, khách, công trình, NCC, lý do…" value="${esc(KS.pq)}" autocomplete="off"></label></div>
-      <div class="chips" role="group" aria-label="Lọc phiếu">${[['', 'Tất cả'], ['nhap', 'Nhập'], ['xuat', 'Xuất'], ['khac', 'Chuyển kho · Kiểm kê'], ['dao', 'Phiếu đảo']].map(([k, t]) => `<button class="chip" type="button" data-pg="${k}" aria-pressed="${KS.pg === k}">${t}</button>`).join('')}</div>
-      <div class="card list">${list.length ? list.slice(0, 300).map(p => `<div class="it" data-so="${esc(p.soPhieu)}" role="button" tabindex="0"><div><div class="mono">${esc(p.soPhieu)}${p.daDao ? ' <span class="tag stop">Đã đảo</span>' : ''}</div><b>${esc(LOAI[p.loai] || p.loai)}</b> · ${esc(p.ngay)} · ${esc(khoName(p.kho))}${p.khoDen ? ' → ' + esc(khoName(p.khoDen)) : ''}<br><small class="mut">${esc([p.maKH && custName(p.maKH), p.maCongTrinh && projName(p.maCongTrinh), p.maNCC && supName(p.maNCC), p.phieuGoc && 'gốc ' + p.phieuGoc, p.lyDo].filter(Boolean).join(' · '))}</small></div>${isQT() && p.tongTien !== undefined ? `<b style="white-space:nowrap">${money(p.tongTien)}</b>` : ''}</div>`).join('')
+      <div class="chips" role="group" aria-label="Lọc phiếu">${[['', 'Tất cả'], ['nhap', 'Nhập'], ['xuat', 'Xuất'], ['khac', 'Chuyển kho · Kiểm kê'], ['dao', 'Phiếu đảo']].map(([k, t]) => `<button class="chip" type="button" data-pg="${k}" aria-pressed="${KS.pg === k}">${t}</button>`).join('')}
+        <label class="chip monthf">Tháng <input type="month" id="vMon" value="${esc(KS.vm)}" aria-label="Lọc theo tháng"></label>${KS.vm ? '<button class="chip" type="button" id="vMonX">Mọi tháng</button>' : ''}</div>
+      <div id="vres"><div class="card list">${list.length ? list.slice(0, KS.vlim).map(p => `<div class="it" data-so="${esc(p.soPhieu)}" role="button" tabindex="0"><div><div class="mono">${esc(p.soPhieu)}${p.daDao ? ' <span class="tag stop">Đã đảo</span>' : ''}</div><b>${esc(LOAI[p.loai] || p.loai)}</b> · ${esc(vnD(p.ngay))} · ${esc(khoName(p.kho))}${p.khoDen ? ' → ' + esc(khoName(p.khoDen)) : ''}<br><small class="mut">${esc([p.maKH && custName(p.maKH), p.maCongTrinh && projName(p.maCongTrinh), p.maNCC && supName(p.maNCC), p.phieuGoc && 'gốc ' + p.phieuGoc, p.lyDo].filter(Boolean).join(' · '))}</small></div>${isQT() && p.tongTien !== undefined ? `<b style="white-space:nowrap">${money(p.tongTien)}</b>` : ''}</div>`).join('')
         : `<div class="empty">${all.length ? 'Không có phiếu khớp.' : 'Chưa có phiếu kho.' + (canEdit() ? ' Bấm <b>Lập phiếu</b> — bắt đầu bằng Tồn đầu kỳ hoặc Nhập mua.' : '')}</div>`}</div>
-      ${all.length >= 500 ? '<p class="mut">Hiện 500 phiếu gần nhất.</p>' : ''}`;
-    let t = null; $$('#qpm,#qpd').forEach(q => q.oninput = () => { KS.pq = q.value; clearTimeout(t); t = setTimeout(() => { viewVouchers(m); const n = $('#' + q.id); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } }, 300); });
+      ${list.length > KS.vlim ? `<p class="mut cnt">Đang hiện ${KS.vlim.toLocaleString('vi-VN')}/${list.length.toLocaleString('vi-VN')} phiếu (mới nhất trước) — lọc theo tháng hoặc gõ tìm để thu hẹp.</p><button class="btn more" type="button" id="vMore">Xem thêm (${(list.length - KS.vlim).toLocaleString('vi-VN')} phiếu)</button>` : ''}</div>`);
+    const vmo = $('#vMore'); if (vmo) vmo.onclick = () => { KS.vlim += 500; viewVouchers(m, '#vres'); };
+    $('#vMon').onchange = e => { KS.vm = e.target.value; KS.vlim = 300; viewVouchers(m); }; const vx = $('#vMonX'); if (vx) vx.onclick = () => { KS.vm = ''; viewVouchers(m); };
+    onSearch('#qpm,#qpd', v => { KS.pq = v; }, () => viewVouchers(m, '#vres'), 300);
     $$('.chip[data-pg]').forEach(b => b.onclick = () => { KS.pg = b.dataset.pg; viewVouchers(m); });
     $$('#newV,#newVM').forEach(b => b.onclick = () => voucherPick());
     $$('[data-so]').forEach(r => r.onclick = () => voucherView(r.dataset.so));
@@ -444,17 +506,17 @@
     dialog('Lập phiếu kho', `<div class="list">${types.map(t => `<button class="it btn ghost" type="button" style="width:100%;justify-content:flex-start" data-t="${t}"><span class="mono" style="min-width:34px">${QStock.prefix(t)}</span><span style="flex:1;text-align:left">${LOAI[t]}</span></button>`).join('')}</div>`, null, d => $$('[data-t]', d).forEach(b => b.onclick = () => { d.close(); voucherForm(b.dataset.t); }));
   }
   async function voucherView(so) {
-    const r = await call('voucher.get', { soPhieu: so }, 3);
+    const r = await load('voucher.get', { soPhieu: so }, 'Đang mở phiếu ' + so + '…');
     if (!r.ok) return toast('Không mở được phiếu: ' + (r.error || r.code));
     const p = r.data.phieu, L = r.data.lines, showMoney = isQT();
     const canRev = isQT() && !S.offline && p.loai !== 'DAO' && !p.daDao;
     const canRet = canEdit() && !S.offline && ['XUAT_BAN', 'XUAT_CONG_TRINH', 'XUAT_BH'].includes(p.loai) && !p.daDao;
     const canTn = canEdit() && !S.offline && ['NHAP_MUA', 'TON_DAU'].includes(p.loai) && !p.daDao;
     dialog(esc(LOAI[p.loai] || p.loai) + ' ' + esc(p.soPhieu), `
-      <dl class="dl"><dt>Ngày</dt><dd>${esc(p.ngay)}</dd><dt>Kho</dt><dd>${esc(khoName(p.kho))}${p.khoDen ? ' → ' + esc(khoName(p.khoDen)) : ''}</dd>
+      <dl class="dl"><dt>Ngày</dt><dd>${esc(vnD(p.ngay))}</dd><dt>Kho</dt><dd>${esc(khoName(p.kho))}${p.khoDen ? ' → ' + esc(khoName(p.khoDen)) : ''}</dd>
         ${p.maNCC ? `<dt>Nhà cung cấp</dt><dd>${esc(supName(p.maNCC))}</dd>` : ''}${p.maKH ? `<dt>Khách hàng</dt><dd>${esc(custName(p.maKH))}</dd>` : ''}${p.maCongTrinh ? `<dt>Công trình</dt><dd>${esc(projName(p.maCongTrinh))}</dd>` : ''}
         ${p.soLSX ? `<dt>Lệnh sản xuất</dt><dd class="mono">${esc(p.soLSX)}</dd>` : ''}${p.phieuGoc ? `<dt>Phiếu gốc</dt><dd class="mono">${esc(p.phieuGoc)}</dd>` : ''}${p.nguoiGiaoNhan ? `<dt>Người giao/nhận</dt><dd>${esc(p.nguoiGiaoNhan)}</dd>` : ''}
-        ${p.lyDo ? `<dt>Lý do</dt><dd>${esc(p.lyDo)}</dd>` : ''}${p.soCTGoc ? `<dt>Chứng từ gốc</dt><dd>${esc(p.soCTGoc)}${p.ngayCTGoc ? ' ngày ' + esc(p.ngayCTGoc) : ''}</dd>` : ''}
+        ${p.lyDo ? `<dt>Lý do</dt><dd>${esc(p.lyDo)}</dd>` : ''}${p.soCTGoc ? `<dt>Chứng từ gốc</dt><dd>${esc(p.soCTGoc)}${p.ngayCTGoc ? ' ngày ' + esc(vnD(p.ngayCTGoc)) : ''}</dd>` : ''}
         <dt>Người lập</dt><dd>${esc(p.nguoiTao)}</dd>${p.daDao ? '<dt>Trạng thái</dt><dd><span class="tag stop">Đã đảo</span></dd>' : ''}</dl>
       <div class="tbl" style="max-height:none"><table><thead><tr><th>#</th><th>Hàng</th><th class="n">${p.loai === 'KIEM_KE' ? 'Sổ sách → Thực tế' : 'Số lượng'}</th>${showMoney ? '<th class="n">Giá trị kho</th>' : ''}</tr></thead><tbody>
         ${L.map(l => { const i = itemOf(l.maHang); return `<tr><td>${l.dong}</td><td><span class="mono">${esc(l.maHang)}</span> ${esc(i.ten)}${l.serials && l.serials.length ? `<br><small class="mono">${l.serials.map(esc).join(', ')}</small>` : ''}</td><td class="n">${p.loai === 'KIEM_KE' ? num(l.slSoSach) + ' → ' + num(l.slThucTe) : num(l.soLuongCT) + ' ' + esc(l.dvt)}${l.heSo && l.heSo !== 1 ? `<br><small class="mut">= ${num(l.soLuong)} ${esc(i.dvt)}</small>` : ''}</td>${showMoney ? `<td class="n">${money(l.giaTriKho)}${Number(l.chenhLechGV) ? `<br><small class="mut">chênh lệch GV ${money(l.chenhLechGV)}</small>` : ''}</td>` : ''}</tr>`; }).join('')}</tbody></table></div>
@@ -476,14 +538,80 @@
     if (S.offline) { dlgMsg(d, 'Đang ngoại tuyến — chưa lưu được. Dữ liệu trong phiếu vẫn giữ nguyên.'); return false; }
     const r = await write(action, { ...body, requestId: d._rid || (d._rid = rid()) });
     if (!r.ok) {
-      if (Array.isArray(r.fields)) { r.fields.forEach(e => { const c = e.dong ? $(`[data-line="${e.dong}"]`, d) : null; if (c) c.classList.add('bad-line'); }); }
-      else if (r.fields) showErrors(d, r.fields);
+      $$('.lineerr', d).forEach(x => x.remove()); $$('.bad-line', d).forEach(x => x.classList.remove('bad-line'));
+      if (Array.isArray(r.fields)) {   // lỗi theo dòng: tô viền + ghi lý do ngay dưới dòng (lỗi tồn kho chỉ có mã hàng → tìm dòng có mã đó)
+        r.fields.forEach(e => {
+          const c = e.dong ? $(`[data-line="${e.dong}"]`, d) : e.maHang ? $$('[data-line]', d).find(x => { const i = $('[data-f="maHang"]', x); return i && i.value.trim().toUpperCase() === String(e.maHang).toUpperCase(); }) : null;
+          const msg = e.msg || e.error || (e.code === 'NEG' ? 'không đủ tồn' + (e.ton !== undefined ? ' (thiếu ' + num(-e.ton) + ')' : '') : '');
+          if (c) { c.classList.add('bad-line'); if (msg) c.insertAdjacentHTML('beforeend', `<div class="lineerr" role="alert">Dòng ${esc(c.dataset.line)}: ${esc(msg)}</div>`); }
+        });
+        const f = $('.bad-line', d); if (f) f.scrollIntoView({ block: 'center' });
+      } else if (r.fields) showErrors(d, r.fields);
+      if (!['NETWORK', 'VALIDATION', 'AUTH_INVALID', 'AUTH_EXPIRED', 'FORBIDDEN', 'PERIOD_LOCKED'].includes(r.code)) sync();   // hết tồn / serial vừa bị người khác dùng → lấy số mới
       dlgMsg(d, 'Chưa lưu: ' + (r.error || r.code) + (r.code === 'NETWORK' ? ' — kiểm tra mạng rồi bấm Lưu lại' : '')); return false;
     }
     d._guard = null; toast((r.data.lapLai || r.replay ? 'Phiếu đã lưu từ lần bấm trước: ' + r.data.soPhieu : okMsg(r.data.soPhieu)) + (r.data.tinhLai ? ` · đã tính lại giá vốn ${r.data.tinhLai} dòng phiếu sau` : '')); await sync(); return true;
   }
 
   // ---------- lập phiếu ----------
+  // ---------- quét mã bằng camera (QR tem tủ, mã serial) ----------
+  const hasCam = () => !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  /** Chuỗi quét được → số serial (tem tủ là đường dẫn …#/t/<cty>/<xê-ri>). */
+  const serOf = t => { const m = String(t).match(/#\/t\/([^/]+)\/([^?#\s]+)/); return (m ? decodeURIComponent(m[2]) : String(t)).trim(); };
+  let JSQR = null;
+  const loadJsQR = () => JSQR || (JSQR = new Promise((ok, no) => { const sc = document.createElement('script'); sc.src = 'vendor/jsqr.js'; sc.onload = () => ok(window.jsQR); sc.onerror = () => { JSQR = null; no(new Error('Không tải được bộ đọc QR')); }; document.head.appendChild(sc); }));
+  /** Mở camera sau, đọc liên tục. onCode(text) → { msg, bad } hiện dưới khung; multi = quét nhiều mã (bấm Xong để đóng), không multi = đóng sau mã đầu.
+   *  Máy có BarcodeDetector (Android Chrome) đọc cả QR lẫn mã vạch 1D; còn lại (iPhone) đọc QR bằng jsQR. */
+  async function scanCode(title, onCode, multi) {
+    if (!hasCam()) return toast('Máy không cho dùng camera — nhập tay');
+    const host = $('dialog[open]') || document.body, ov = document.createElement('div');
+    ov.className = 'scanov'; ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-modal', 'true'); ov.setAttribute('aria-label', title);
+    ov.innerHTML = `<div class="scanbox"><header><b>${esc(title)}</b><button class="btn ghost iconbtn" type="button" data-sx aria-label="Đóng">${ic('x')}</button></header>
+      <div class="scanvid"><video playsinline muted></video><div class="scanaim"></div></div><p class="scanmsg" role="status" aria-live="polite">Đang mở camera…</p>
+      ${multi ? '<button class="btn pri" type="button" data-sx style="width:100%">Xong</button>' : ''}</div>`;
+    host.appendChild(ov);
+    const v = $('video', ov), msg = $('.scanmsg', ov); let stream = null, alive = true, last = '', lastAt = 0, timer = null;
+    const stop = () => { alive = false; clearTimeout(timer); if (stream) stream.getTracks().forEach(t => t.stop()); ov.remove(); };
+    $$('[data-sx]', ov).forEach(b => b.onclick = stop); ov.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); stop(); } });
+    try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false }); }
+    catch (e) { msg.textContent = 'Không mở được camera (' + (e.name === 'NotAllowedError' ? 'chưa cho phép dùng camera' : e.message) + ') — nhập tay.'; return; }
+    if (!alive) { stream.getTracks().forEach(t => t.stop()); return; }
+    v.srcObject = stream; await v.play().catch(() => {});
+    let det = null; if ('BarcodeDetector' in window) { try { const f = await BarcodeDetector.getSupportedFormats(); det = new BarcodeDetector({ formats: f.filter(x => ['qr_code', 'code_128', 'code_39', 'ean_13', 'data_matrix', 'itf'].includes(x)) }); } catch (e) { det = null; } }
+    let qr = null; if (!det) { try { qr = await loadJsQR(); } catch (e) { msg.textContent = e.message; return; } }
+    msg.textContent = 'Đưa mã vào khung'; const cv = document.createElement('canvas'), cx = cv.getContext('2d', { willReadFrequently: true });
+    const tick = async () => {
+      if (!alive) return;
+      try {
+        let txt = '';
+        if (v.readyState >= 2) {
+          if (det) { const r = await det.detect(v); txt = r[0] && r[0].rawValue; }
+          else { const w = Math.min(v.videoWidth, 720), h = Math.round(v.videoHeight * w / v.videoWidth); cv.width = w; cv.height = h; cx.drawImage(v, 0, 0, w, h); const r = qr(cx.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: 'dontInvert' }); txt = r && r.data; }
+        }
+        if (txt && !(txt === last && Date.now() - lastAt < 2500)) {
+          last = txt; lastAt = Date.now(); if (navigator.vibrate) navigator.vibrate(60);
+          const r = (await onCode(txt)) || {}; msg.textContent = r.msg || txt; msg.classList.toggle('bad', !!r.bad);
+          if (!multi && !r.bad) return stop();
+        }
+      } catch (e) { /* khung hình lỗi: bỏ qua */ }
+      timer = setTimeout(tick, 220);
+    };
+    tick();
+  }
+  /** Quét tem QR tủ → mở hồ sơ tủ. */
+  function scanTu() {
+    scanCode('Quét tem QR tủ', txt => { const m = String(txt).match(/#\/t\/([^/]+)\/([^?#\s]+)/);
+      if (m && m[1] !== S.co.id) return { msg: 'Tủ của công ty ' + ((company(m[1]) || {}).ten || m[1]) + ' — đổi công ty để xem', bad: 1 };
+      const z = serOf(txt); setTimeout(() => tuView(z), 0); return { msg: z }; });
+  }
+  /** Tủ chưa đạt KCS (hoặc chưa kiểm) — không chọn được khi xuất bán / xuất công trình. */
+  function cabNoKCS(x) { const c = x && x.key && (S.data.cabinets || []).find(k => k.key === x.key && k.trangThai !== 'HUY'); return !!c && !(c.kcsDat === true || c.kcsDat === 'true'); }
+  /** Serial nhập trùng: trong danh sách, hoặc đã có trên hệ thống (cùng mã). */
+  function serDup(it, list) {
+    list = list || []; const seen = {}, dup = [], has = [];
+    list.forEach(z => { const u = z.toUpperCase(); if (seen[u]) dup.push(z); seen[u] = 1; if (it && (S.data.serials || []).some(x => x.maHang === it.maHang && String(x.serial).toUpperCase() === u)) has.push(z); });
+    return (dup.length ? 'Trùng trong danh sách: ' + [...new Set(dup)].join(', ') + '. ' : '') + (has.length ? 'Đã có trên hệ thống: ' + has.join(', ') : '');
+  }
   function voucherForm(loai, pre = {}) {
     const d = S.data, t = QStock.TYPES[loai], priced = t.cost === 'PRICE', kk = loai === 'KIEM_KE', out = t.dir < 0 || loai === 'CHUYEN_KHO';
     const loiType = loai === 'NHAP_HANG_LOI', khos = pre.sx ? activeKho(false).filter(w => w.maKho === pre.kho) : loiType ? activeKho(true) : loai === 'TRA_NCC' ? activeKho() : activeKho(false);
@@ -498,7 +626,7 @@
         ${custProj ? `<div>${fld('maKH', 'Khách hàng', pre.maKH || '', { opts: opt(d.customers || [], 'maKH', 'ten', '— Chọn khách —') })}</div>` : ''}
         ${custProj || loai === 'XUAT_CONG_TRINH' ? `<div>${fld('maCongTrinh', 'Công trình', pre.maCongTrinh || '', { opts: opt(d.projects || [], 'maCongTrinh', 'ten', '— Chọn công trình —') })}</div>` : ''}
         ${loai === 'KHACH_TRA' ? `<div>${fld('phieuGoc', 'Phiếu xuất gốc', pre.phieuGoc || '', { ro: !!pre.phieuGoc })}</div>` : ''}
-        ${loai === 'TRA_NCC' ? `<div>${fld('phieuGoc', 'Phiếu nhập gốc (bắt buộc nếu trả từ kho thường)', pre.phieuGoc || '', { ro: !!pre.phieuGoc, list: 'dlGocN' })}<datalist id="dlGocN">${(d.vouchers || []).filter(x => ['NHAP_MUA', 'TON_DAU'].includes(x.loai) && !x.daDao).slice(-200).reverse().map(x => `<option value="${esc(x.soPhieu)}">${esc(x.ngay)} · ${esc(supName(x.maNCC))}</option>`).join('')}</datalist></div>` : ''}
+        ${loai === 'TRA_NCC' ? `<div>${fld('phieuGoc', 'Phiếu nhập gốc (bắt buộc nếu trả từ kho thường)', pre.phieuGoc || '', { ro: !!pre.phieuGoc, list: 'dlGocN' })}<datalist id="dlGocN">${(d.vouchers || []).filter(x => ['NHAP_MUA', 'TON_DAU'].includes(x.loai) && !x.daDao).slice(-200).reverse().map(x => `<option value="${esc(x.soPhieu)}">${esc(vnD(x.ngay))} · ${esc(supName(x.maNCC))}</option>`).join('')}</datalist></div>` : ''}
         <div>${fld('nguoiGiaoNhan', t.dir > 0 ? 'Người giao hàng' : 'Người nhận hàng', '')}</div>
         <div>${fld('soCTGoc', 'Số chứng từ gốc (HĐ, hợp đồng…)', '')}</div><div>${fld('ngayCTGoc', 'Ngày chứng từ gốc', '', { type: 'date', max: S.today })}</div></div>
       ${fld('lyDo', kk ? 'Ghi chú kiểm kê' : 'Lý do ' + (t.dir > 0 ? 'nhập' : 'xuất'), pre.lyDo || '')}
@@ -524,18 +652,34 @@
             <div style="align-self:end"><button class="btn ghost iconbtn" type="button" data-del="${i}" aria-label="Xoá dòng ${i + 1}" ${lines.length < 2 ? 'disabled' : ''}>${ic('x')}</button></div>
           </div>
           ${ser ? (pick.length || gocS.length
-            ? `<div class="f" style="margin-top:8px">Chọn serial (${(l.serials || []).length} đã chọn)</div><div class="serpick">${(gocS.length ? gocS : pick.map(x => x.serial)).map(s => `<label class="chk" style="margin:0;min-height:48px"><input type="checkbox" data-i="${i}" data-s="${esc(s)}" ${(l.serials || []).includes(s) ? 'checked' : ''}> <span class="mono">${esc(s)}</span></label>`).join('')}</div>`
+            ? (() => { const all = gocS.length ? gocS.map(z => ({ serial: z })) : pick, sell = loai === 'XUAT_BAN' || loai === 'XUAT_CONG_TRINH';
+                return `<div class="serhead"><span class="f" style="margin:0">Chọn serial · <b id="l_cnt_${i}">${(l.serials || []).length}</b> đã chọn${l.soLuongCT ? ' / ' + esc(l.soLuongCT) : ''}</span>
+                  ${all.length > 6 ? `<input class="in serf" id="l_sf_${i}" data-sf="${i}" type="search" placeholder="Lọc serial…" aria-label="Lọc serial dòng ${i + 1}" autocomplete="off">` : ''}
+                  <button class="btn ghost" type="button" data-first="${i}">Chọn ${esc(l.soLuongCT || 'N')} đầu</button><button class="btn ghost" type="button" data-none="${i}">Bỏ chọn</button>${hasCam() ? `<button class="btn ghost" type="button" data-scanpick="${i}">${ic('search')} Quét</button>` : ''}</div>
+                <div class="serpick" id="l_sp_${i}">${all.map(x => { const z = x.serial, nk = sell && cabNoKCS(x); return `<label class="chk${nk ? ' dis' : ''}" style="margin:0;min-height:48px" data-sv="${esc(QSearch.norm(z))}"><input type="checkbox" data-i="${i}" data-s="${esc(z)}" ${(l.serials || []).includes(z) ? 'checked' : ''} ${nk ? 'disabled' : ''}> <span class="mono">${esc(z)}</span>${nk ? ' <span class="tag bad">Chưa KCS</span>' : ''}</label>`; }).join('')}</div>`; })()
             : out && !kk ? `<div class="err">Không có serial nào của mã này trong kho đã chọn.</div>`
-            : `<label class="f" for="l_sr_${i}">Số serial (mỗi dòng 1 số, đủ = số lượng)</label><textarea class="in" id="l_sr_${i}" data-i="${i}" data-f="serials" style="min-height:64px">${esc((l.serials || []).join('\n'))}</textarea>`) : ''}
+            : `<div class="serhead"><label class="f" for="l_sr_${i}" style="margin:0">Số serial (mỗi dòng 1 số) · <b id="l_cnt_${i}">${(l.serials || []).length}</b>${l.soLuongCT ? ' / ' + esc(l.soLuongCT) : ''}</label>${hasCam() ? `<button class="btn ghost" type="button" data-scan="${i}">${ic('search')} Quét serial</button>` : ''}</div>
+               <textarea class="in" id="l_sr_${i}" data-i="${i}" data-f="serials" style="min-height:64px" autocapitalize="characters" spellcheck="false">${esc((l.serials || []).join('\n'))}</textarea><div class="err" id="l_dup_${i}" role="status">${serDup(it, l.serials)}</div>`) : ''}
         </div>`;
       }).join('');
       $$('[data-f]', box).forEach(x => x.onchange = x.oninput = () => {
         const l = lines[+x.dataset.i]; let v = x.value;
         if (x.dataset.f === 'serials') v = v.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean);
         l[x.dataset.f] = v; if (x.dataset.f === 'gia') l.gia = String(v).replace(/[.\s,₫]/g, '');
+        if (x.dataset.f === 'serials') { const c = $('#l_cnt_' + x.dataset.i, dlg); if (c) c.textContent = v.length; const e = $('#l_dup_' + x.dataset.i, dlg); if (e) e.textContent = serDup(itemOf(String(l.maHang || '').toUpperCase()), v); }
         sum(dlg);
       });
-      $$('[data-s]', box).forEach(c => c.onchange = () => { const l = lines[+c.dataset.i]; l.serials = l.serials || []; if (c.checked) l.serials.push(c.dataset.s); else l.serials = l.serials.filter(s => s !== c.dataset.s); if (!l.soLuongCT || out) l.soLuongCT = String(l.serials.length); draw(dlg); });
+      const pickSync = i => { const l = lines[i]; l.serials = $$(`#l_sp_${i} input:checked`, box).map(c => c.dataset.s); if (!l.soLuongCT || out) { l.soLuongCT = String(l.serials.length); const q = $('#l_sl_' + i, box); if (q) q.value = l.soLuongCT; } const c = $('#l_cnt_' + i, box); if (c) c.textContent = l.serials.length; sum(dlg); };
+      $$('[data-s]', box).forEach(c => c.onchange = () => pickSync(+c.dataset.i));   // không vẽ lại cả khối dòng hàng
+      $$('[data-sf]', box).forEach(f => f.oninput = () => { const q = QSearch.norm(f.value); $$(`#l_sp_${f.dataset.sf} [data-sv]`, box).forEach(x => x.hidden = !!q && !x.dataset.sv.includes(q)); });
+      $$('[data-first]', box).forEach(b => b.onclick = () => { const i = +b.dataset.first, n = Number(lines[i].soLuongCT) || 0; let k = 0;
+        $$(`#l_sp_${i} [data-sv]`, box).forEach(x => { const c = $('input', x); if (c.disabled) return; c.checked = !x.hidden && (n ? k < n : true) && (++k, true); }); pickSync(i); });
+      $$('[data-none]', box).forEach(b => b.onclick = () => { const i = +b.dataset.none; $$(`#l_sp_${i} input`, box).forEach(c => c.checked = false); pickSync(i); });
+      $$('[data-scanpick]', box).forEach(b => b.onclick = () => { const i = +b.dataset.scanpick; scanCode('Quét serial để chọn', txt => { const z = serOf(txt), c = $$(`#l_sp_${i} input`, box).find(x => x.dataset.s.toUpperCase() === z.toUpperCase());
+        if (!c) return { msg: z + ': không có trong kho đã chọn', bad: 1 }; if (c.disabled) return { msg: z + ': tủ chưa đạt KCS', bad: 1 }; if (c.checked) return { msg: z + ': đã chọn rồi', bad: 1 }; c.checked = true; pickSync(i); return { msg: z + ' ✓ (' + lines[i].serials.length + ')' }; }, true); });
+      $$('[data-scan]', box).forEach(b => b.onclick = () => { const i = +b.dataset.scan, ta = $('#l_sr_' + i, box); scanCode('Quét serial nhập kho', txt => { const z = serOf(txt), cur = ta.value.split(/[\n,;]+/).map(x => x.trim()).filter(Boolean);
+        if (cur.some(x => x.toUpperCase() === z.toUpperCase())) return { msg: z + ': đã có trong danh sách', bad: 1 };
+        cur.push(z); ta.value = cur.join('\n'); ta.dispatchEvent(new Event('input')); return { msg: z + ' ✓ (' + cur.length + (lines[i].soLuongCT ? '/' + lines[i].soLuongCT : '') + ')' }; }, true); });
       $$('[data-del]', box).forEach(b => b.onclick = () => { lines.splice(+b.dataset.del, 1); draw(dlg); });
       sum(dlg);
     };
@@ -728,7 +872,7 @@
   }
 
   // ----- danh sách lệnh -----
-  function viewSX(m) {
+  function viewSX(m, only) {
     if (SX.sel) return lsxPage(m);
     const d = S.data, L = (d.lsx || []).slice().sort((a, b) => a.soLSX < b.soLSX ? 1 : -1);
     const bad = so => cabsOf(so).some(c => Number(c.lanKiemCuoi) && !c.kcsDat);
@@ -737,20 +881,20 @@
     const list = L.filter(l => (!SX.f || (SX.f === 'DANG' ? ['MOI', 'DANG_LAP'].includes(l.trangThai) : SX.f === 'LOI' ? bad(l.soLSX) : l.trangThai === SX.f))
       && (!nq || QSearch.norm([l.soLSX, l.maMau, l.maHang, tplName(l), custName(l.maKH), projName(l.maCongTrinh)].join(' ')).includes(nq)));
     const noTpl = !(d.templates || []).length;
-    m.innerHTML = header('Sản xuất tủ', canEdit() && !noTpl ? `<button class="btn pri" id="newL">${ic('plus')}<span>Lệnh sản xuất</span></button>` : '', false, canEdit() && !noTpl ? 'newLM' : '') + `
+    paint(m, only, header('Sản xuất tủ', canEdit() && !noTpl ? `<button class="btn pri" id="newL">${ic('plus')}<span>Lệnh sản xuất</span></button>` : '', false, canEdit() && !noTpl ? 'newLM' : '') + `
       <label class="msearch">${ic('search')}<span class="sr">Tìm lệnh</span><input id="qsm" type="search" placeholder="Số lệnh, mẫu, khách, công trình…" value="${esc(SX.q)}" autocomplete="off"></label>
       <div class="top" style="margin-top:-4px"><label class="search" style="flex:1 1 320px">${ic('search')}<span class="sr">Tìm lệnh</span><input id="qsd" type="search" placeholder="Số lệnh, mẫu, khách, công trình…" value="${esc(SX.q)}" autocomplete="off"></label></div>
-      <div class="sxbar"><button class="btn" type="button" id="serB">${ic('search')} Tra xê-ri tủ</button><button class="btn" type="button" id="tplB">${ic('layers')} Mẫu tủ (${(d.templates || []).length})</button>${isQT() ? `<button class="btn" type="button" id="wipB">${ic('chart')} Dở dang (TK 154)</button>` : ''}</div>
+      <div class="sxbar"><button class="btn" type="button" id="serB">${ic('search')} Tra xê-ri tủ</button>${hasCam() ? `<button class="btn" type="button" data-scantu>${ic('search')} Quét QR tủ</button>` : ''}<button class="btn" type="button" id="tplB">${ic('layers')} Mẫu tủ (${(d.templates || []).length})</button>${isQT() ? `<button class="btn" type="button" id="wipB">${ic('chart')} Dở dang (TK 154)</button>` : ''}</div>
       <div class="chips" role="group" aria-label="Lọc lệnh">${F.map(([k, t]) => `<button class="chip" type="button" data-f="${k}" aria-pressed="${SX.f === k}">${t}</button>`).join('')}</div>
-      <div class="card list">${list.length ? list.slice(0, 300).map(l => { const c = cabsOf(l.soLSX), ok = c.filter(x => x.kcsDat).length;
+      <div class="card list" id="sxres">${list.length ? list.slice(0, 300).map(l => { const c = cabsOf(l.soLSX), ok = c.filter(x => x.kcsDat).length;
         return `<div class="it" data-lsx="${esc(l.soLSX)}" role="button" tabindex="0"><div><div class="mono">${esc(l.soLSX)} <span class="tag st-${esc(l.trangThai)}">${LSX_ST[l.trangThai] || esc(l.trangThai)}</span>${bad(l.soLSX) ? ` <span class="tag bad">${ic('warn')} Không đạt KCS</span>` : ''}</div>
-          <b>${esc(tplName(l))}</b> × ${num(l.soLuong)}<br><small class="mut">${esc([l.ngay, l.maKH && custName(l.maKH), l.maCongTrinh && projName(l.maCongTrinh)].filter(Boolean).join(' · '))}</small></div>
+          <b>${esc(tplName(l))}</b> × ${num(l.soLuong)}<br><small class="mut">${esc([vnD(l.ngay), l.maKH && custName(l.maKH), l.maCongTrinh && projName(l.maCongTrinh)].filter(Boolean).join(' · '))}</small></div>
           <div style="text-align:right;white-space:nowrap"><b>${ok}/${num(l.soLuong)}</b><br><small class="mut">tủ đạt KCS</small></div></div>`; }).join('')
-        : `<div class="empty">${L.length ? 'Không có lệnh khớp bộ lọc.' : 'Chưa có lệnh sản xuất.' + (noTpl ? (isQT() ? '<br>Bắt đầu bằng <b>Mẫu tủ</b>: định mức linh kiện + các mục kiểm tra xuất xưởng.' : '<br>Cần Quản trị tạo Mẫu tủ trước.') : canEdit() ? '<br>Bấm <b>+ Lệnh sản xuất</b>.' : '')}</div>`}</div>`;
-    let t = null; $$('#qsm,#qsd').forEach(q => q.oninput = () => { SX.q = q.value; clearTimeout(t); t = setTimeout(() => { viewSX(m); const n = $('#' + q.id); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } }, 300); });
+        : `<div class="empty">${L.length ? 'Không có lệnh khớp bộ lọc.' : 'Chưa có lệnh sản xuất.' + (noTpl ? (isQT() ? '<br>Bắt đầu bằng <b>Mẫu tủ</b>: định mức linh kiện + các mục kiểm tra xuất xưởng.' : '<br>Cần Quản trị tạo Mẫu tủ trước.') : canEdit() ? '<br>Bấm <b>+ Lệnh sản xuất</b>.' : '')}</div>`}</div>`);
+    onSearch('#qsm,#qsd', v => { SX.q = v; }, () => viewSX(m, '#sxres'), 300);
     $$('.chip[data-f]').forEach(b => b.onclick = () => { SX.f = b.dataset.f; viewSX(m); });
     $$('#newL,#newLM').forEach(b => b.onclick = lsxForm);
-    $('#tplB').onclick = tplList; $('#serB').onclick = serialSearch; const wb = $('#wipB'); if (wb) wb.onclick = wipReport;
+    $('#tplB').onclick = tplList; $('#serB').onclick = serialSearch; $$('[data-scantu]', m).forEach(b => b.onclick = scanTu); const wb = $('#wipB'); if (wb) wb.onclick = wipReport;
     $$('[data-lsx]').forEach(r => r.onclick = r.onkeydown = e => { if (e.type === 'keydown' && e.key !== 'Enter') return; openLSX(r.dataset.lsx); });
   }
   function openLSX(so) { SX.sel = so; SX.stale = true; if (isMobile()) history.pushState({ lsx: 1 }, ''); if (route() !== 'sx') location.hash = '#/sx'; else renderView(); }
@@ -760,7 +904,7 @@
     const so = SX.sel;
     if (SX.stale || !SX.data || SX.data.lsx.soLSX !== so) {
       if (!SX.data || SX.data.lsx.soLSX !== so) m.innerHTML = header(esc(so)) + `<div class="card">${'<div class="skel"></div>'.repeat(5)}</div>`;
-      const r = await call('sx.get', { soLSX: so }, 3);
+      const r = await load('sx.get', { soLSX: so }, 'Đang mở lệnh ' + so + '…');
       if (!r.ok) { toast('Không mở được lệnh: ' + (r.error || r.code)); SX.sel = null; SX.data = null; return renderView(); }
       SX.data = r.data; SX.stale = false; if (route() !== 'sx' || SX.sel !== so) return;
     }
@@ -777,7 +921,7 @@
       ${huy ? `<div class="banner" role="status">${ic('warn')} Lệnh đã huỷ${l.lyDoHuy ? ': ' + esc(l.lyDoHuy) : ''}.</div>` : `<ol class="steps" aria-label="Tiến độ lệnh">${STEPS.map((s, i) => `<li class="${i + 1 < step ? 'done' : i + 1 === step ? 'cur' : ''}" ${i + 1 === step ? 'aria-current="step"' : ''}><b>${i + 1}</b><span>${s}</span></li>`).join('')}</ol>`}
       <div class="layout sxl"><div>
         <section class="card"><h2 class="h2">${esc(t.ten || l.maMau)} <small class="mut">mẫu ${esc(l.maMau)} · bản ${esc(l.phienBan)}</small></h2>
-          <dl class="dl"><dt>Số tủ</dt><dd>${num(l.soLuong)} ${tus.length ? `· đã nhập ${tus.length}` : ''}</dd><dt>Ngày lệnh</dt><dd>${esc(l.ngay)}</dd><dt>Kho linh kiện</dt><dd>${esc(khoName(l.kho))}</dd>
+          <dl class="dl"><dt>Số tủ</dt><dd>${num(l.soLuong)} ${tus.length ? `· đã nhập ${tus.length}` : ''}</dd><dt>Ngày lệnh</dt><dd>${esc(vnD(l.ngay))}</dd><dt>Kho linh kiện</dt><dd>${esc(khoName(l.kho))}</dd>
             ${l.maKH ? `<dt>Khách hàng</dt><dd>${esc(custName(l.maKH))}</dd>` : ''}${l.maCongTrinh ? `<dt>Công trình</dt><dd>${esc(projName(l.maCongTrinh))}</dd>` : ''}
             ${l.canCuCheTao ? `<dt>Căn cứ chế tạo</dt><dd>${esc(l.canCuCheTao)}</dd>` : ''}${l.ghiChu ? `<dt>Ghi chú</dt><dd>${esc(l.ghiChu)}</dd>` : ''}
             ${isQT() && g.doDang !== undefined ? `<dt>Dở dang (TK 154)</dt><dd><b>${money(g.doDang)}</b></dd>` : ''}</dl>
@@ -796,8 +940,8 @@
               ${live && !c.soPXX && !c.kcsDat ? `<button class="btn ${step === 3 ? 'pri' : ''} kcsb" type="button" data-kcs="${esc(c.serial)}">${ic('check')} Kiểm tra</button>` : ''}</div>`; }).join('')}</div>`
           : `<div class="empty">${hasX ? 'Chưa nhập tủ nào. Lắp xong bấm <b>Nhập thành phẩm</b> — hệ thống cấp số xê-ri cho từng tủ.' : 'Bước đầu: <b>Xuất linh kiện</b> theo định mức × số tủ (sửa được theo thực tế).'}</div>`}</section>
       </div><div>
-        <section class="card"><h2 class="h2">Phiếu kho của lệnh</h2>${ph.length ? `<div class="list">${ph.map(p => `<div class="it" data-so="${esc(p.soPhieu)}" role="button" tabindex="0"><div><span class="mono">${esc(p.soPhieu)}</span> · ${esc(LOAI[p.loai] || p.loai)}<br><small class="mut">${esc(p.ngay)} · ${p.lines.length} dòng</small></div>${isQT() && p.tongTien !== undefined ? `<b style="white-space:nowrap">${money(p.tongTien)}</b>` : ''}</div>`).join('')}</div>` : '<div class="empty">Chưa có phiếu.</div>'}</section>
-        ${isQT() && g.chiPhi ? `<section class="card"><h2 class="h2">Chi phí khác</h2>${g.chiPhi.length ? `<div class="list">${g.chiPhi.map(c => { const huyRoi = g.chiPhi.some(y => y.soCTGoc === c.id && Number(y.soTien) < 0); return `<div class="it"><div>${esc(CP_LOAI[c.loai] || c.loai)} <small class="mut mono">${esc(c.id)}</small><br><small class="mut">${esc(c.ngay)}${c.soCTGoc ? ' · ' + esc(c.soCTGoc) : ''}${c.ghiChu ? ' · ' + esc(c.ghiChu) : ''}</small></div><div style="text-align:right"><b>${money(c.soTien)}</b>${!huy && !S.offline && Number(c.soTien) > 0 && c.loai !== 'KC_HUY' && !huyRoi ? `<br><button class="linkbtn" type="button" data-cph="${esc(c.id)}">Huỷ dòng</button>` : huyRoi ? '<br><small class="mut">đã huỷ</small>' : ''}</div></div>`; }).join('')}</div>` : '<div class="empty">Chưa có (nhân công, gia công…).</div>'}</section>` : ''}
+        <section class="card"><h2 class="h2">Phiếu kho của lệnh</h2>${ph.length ? `<div class="list">${ph.map(p => `<div class="it" data-so="${esc(p.soPhieu)}" role="button" tabindex="0"><div><span class="mono">${esc(p.soPhieu)}</span> · ${esc(LOAI[p.loai] || p.loai)}<br><small class="mut">${esc(vnD(p.ngay))} · ${p.lines.length} dòng</small></div>${isQT() && p.tongTien !== undefined ? `<b style="white-space:nowrap">${money(p.tongTien)}</b>` : ''}</div>`).join('')}</div>` : '<div class="empty">Chưa có phiếu.</div>'}</section>
+        ${isQT() && g.chiPhi ? `<section class="card"><h2 class="h2">Chi phí khác</h2>${g.chiPhi.length ? `<div class="list">${g.chiPhi.map(c => { const huyRoi = g.chiPhi.some(y => y.soCTGoc === c.id && Number(y.soTien) < 0); return `<div class="it"><div>${esc(CP_LOAI[c.loai] || c.loai)} <small class="mut mono">${esc(c.id)}</small><br><small class="mut">${esc(vnD(c.ngay))}${c.soCTGoc ? ' · ' + esc(c.soCTGoc) : ''}${c.ghiChu ? ' · ' + esc(c.ghiChu) : ''}</small></div><div style="text-align:right"><b>${money(c.soTien)}</b>${!huy && !S.offline && Number(c.soTien) > 0 && c.loai !== 'KC_HUY' && !huyRoi ? `<br><button class="linkbtn" type="button" data-cph="${esc(c.id)}">Huỷ dòng</button>` : huyRoi ? '<br><small class="mut">đã huỷ</small>' : ''}</div></div>`; }).join('')}</div>` : '<div class="empty">Chưa có (nhân công, gia công…).</div>'}</section>` : ''}
         <section class="card"><h2 class="h2">Định mức 1 tủ</h2><div class="tbl"><table><thead><tr><th>Mã</th><th>Linh kiện</th><th class="n">SL</th></tr></thead><tbody>${t.bom.map(b => { const it = itemOf(b.maHang); return `<tr><td class="mono">${esc(b.maHang)}</td><td>${esc(it.ten)}${isSer(it) ? ' <span class="tag">serial</span>' : ''}</td><td class="n">${num(b.soLuong)} ${esc(it.dvt)}</td></tr>`; }).join('')}</tbody></table></div></section>
       </div></div>`;
     const back = () => history.state && history.state.lsx ? history.back() : (SX.sel = null, renderView());
@@ -992,8 +1136,9 @@
 
   // ----- hồ sơ tủ (tra xê-ri / quét QR) -----
   function serialSearch() {
-    dialog('Tra xê-ri', `${fld('serial', 'Số xê-ri tủ hoặc serial linh kiện', '', { req: 1 })}<p class="mut" style="font-size:12.5px">Hoặc quét mã QR trên tem tủ / phiếu xuất xưởng bằng camera điện thoại.</p>`,
-      async (v, dlg) => { if (!v.serial.trim()) { showErrors(dlg, { serial: 'Nhập số xê-ri' }); return false; } dlg.close(); tuView(v.serial.trim()); return false; }, null, 'Tra');
+    dialog('Tra xê-ri', `${fld('serial', 'Số xê-ri tủ hoặc serial linh kiện', '', { req: 1 })}${hasCam() ? `<button class="btn" type="button" id="scanQ" style="width:100%;margin-top:8px">${ic('search')} Quét mã QR trên tem tủ</button>` : ''}<p class="mut" style="font-size:12.5px">Mã QR có trên tem tủ và phiếu xuất xưởng.</p>`,
+      async (v, dlg) => { if (!v.serial.trim()) { showErrors(dlg, { serial: 'Nhập số xê-ri' }); return false; } dlg.close(); tuView(serOf(v.serial)); return false; },
+      d => { const b = $('#scanQ', d); if (b) b.onclick = () => { d.close(); scanTu(); }; }, 'Tra');
   }
   function viewTu(m) {
     const p = location.hash.split('/'), co = p[2], ser = decodeURIComponent(p[3] || '');
@@ -1001,27 +1146,28 @@
     location.replace('#/sx'); if (ser) setTimeout(() => tuView(ser), 0);
   }
   async function tuView(ser) {
-    const r = await call('serial.get', { serial: ser }, 3);
+    const r = await load('serial.get', { serial: ser }, 'Đang mở hồ sơ ' + ser + '…');
     if (!r.ok) return toast(r.code === 'NOT_FOUND' ? 'Không có xê-ri ' + ser : 'Lỗi: ' + (r.error || r.code));
-    const x = r.data, h = x.hoSo, sr = x.serial || {}, ST = { TRONG_KHO: 'Trong kho', DA_BAN: 'Đã bán/giao', DA_LAP: 'Đã lắp vào tủ', HUY: 'Huỷ', HANG_LOI: 'Hàng lỗi', DA_TRA_NCC: 'Đã trả NCC', MAT: 'Mất' };
+    const x = r.data, h = x.hoSo, sr = x.serial || {}, ST = { TRONG_KHO: 'Trong kho', DA_BAN: 'Đã bán/giao', DA_LAP: 'Đã lắp vào tủ', HUY: 'Huỷ', HANG_LOI: 'Hàng lỗi', DA_TRA_NCC: 'Đã trả NCC', MAT: 'Mất', DA_THAY: 'Đã thay ra (bảo hành)', GUI_NCC: 'Đang gửi NCC' };
     if (!h) return dialog('Serial ' + esc(sr.serial), `<dl class="dl"><dt>Mã hàng</dt><dd>${esc(sr.maHang)} ${esc(x.item.ten || '')}</dd><dt>Hãng</dt><dd>${esc(sr.hang)}</dd><dt>Trạng thái</dt><dd>${ST[sr.trangThai] || esc(sr.trangThai)}${sr.kho ? ' · ' + esc(khoName(sr.kho)) : ''}</dd>${x.cha ? `<dt>Lắp trong tủ</dt><dd><button class="linkbtn mono" type="button" id="toCha">${esc(x.cha.serial)}</button></dd>` : ''}</dl>${x.baoHanh && (x.baoHanh.serialTu || sr.trangThai === 'DA_BAN') ? bhBlock(x) : ''}
       ${bhCanAct(x) ? `<div class="acts" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"><button class="btn" type="button" id="tB">${ic('shield')} Tiếp nhận bảo hành</button></div>` : ''}`, null, d => { const b = $('#toCha', d); if (b) b.onclick = () => { d.close(); tuView(x.cha.serial); }; bhBind(d, x, sr.serial); });
     const qr = await qrSvg(tuLink(h.serial), 4).catch(() => '');
     const live = canEdit() && !S.offline && sr.trangThai === 'TRONG_KHO' && !h.soPXX && h.trangThai !== 'HUY';
     dialog('Hồ sơ tủ ' + esc(h.serial), `<div class="tuhead"><div class="tuqr">${qr}</div><div><div class="mono"><b>${esc(h.serial)}</b></div><b>${esc(x.item.ten || h.maHang)}</b><br>
         ${h.trangThai === 'HUY' ? '<span class="tag stop">Hồ sơ đã huỷ</span>' : kcsTag(h)} <span class="tag">${ST[sr.trangThai] || esc(sr.trangThai || '')}${sr.kho ? ' · ' + esc(khoName(sr.kho)) : ''}</span></div></div>
-      <dl class="dl"><dt>Lệnh sản xuất</dt><dd><button class="linkbtn mono" type="button" id="toL">${esc(h.soLSX)}</button></dd><dt>Nhập kho</dt><dd>${esc(h.ngayNhap)} · <span class="mono">${esc(h.soPhieuNhap)}</span></dd>
+      <dl class="dl"><dt>Lệnh sản xuất</dt><dd><button class="linkbtn mono" type="button" id="toL">${esc(h.soLSX)}</button></dd><dt>Nhập kho</dt><dd>${esc(vnD(h.ngayNhap))} · <button class="linkbtn mono" type="button" data-vso="${esc(h.soPhieuNhap)}">${esc(h.soPhieuNhap)}</button></dd>${h.phieuXuat ? `<dt>Xuất kho</dt><dd>${esc(vnD(h.ngayXuat))} · <button class="linkbtn mono" type="button" data-vso="${esc(h.phieuXuat)}">${esc(h.phieuXuat)}</button></dd>` : ''}
         <dt>Mẫu</dt><dd>${esc(h.maMau)} bản ${esc(h.phienBan)}${h.kichThuoc ? ' · ' + esc(h.kichThuoc) + ' mm' : ''}</dd>
-        ${x.pxx ? `<dt>Phiếu xuất xưởng</dt><dd><span class="mono">${esc(x.pxx.soPXX)}</span> · ${esc(x.pxx.ngay)}${x.pxx.maKH ? ' · ' + esc(custName(x.pxx.maKH)) : ''}</dd>` : ''}
+        ${x.pxx ? `<dt>Phiếu xuất xưởng</dt><dd><button class="linkbtn mono" type="button" id="tP2">${esc(x.pxx.soPXX)}</button> · ${esc(vnD(x.pxx.ngay))}${x.pxx.maKH ? ' · ' + esc(custName(x.pxx.maKH)) : ''}</dd>` : ''}
         ${x.lsx && x.lsx.maKH ? `<dt>Khách theo lệnh</dt><dd>${esc(custName(x.lsx.maKH))}${x.lsx.maCongTrinh ? ' · ' + esc(projName(x.lsx.maCongTrinh)) : ''}</dd>` : ''}
         ${x.giaThanh !== undefined ? `<dt>Giá thành</dt><dd>${money(x.giaThanh)} <small class="mut">(khi bán, giá vốn theo bình quân của mã thành phẩm)</small></dd>` : ''}</dl>
       <h3 class="h3">Linh kiện có serial trong tủ</h3>${(x.con || []).length ? `<ul class="plain">${x.con.map(c => `<li><span class="mono">${esc(c.serial)}</span> — ${esc(itemOf(c.maHang).ten)}</li>`).join('')}</ul>` : '<p class="mut">Không có.</p>'}
-      ${bhBlock(x)}<h3 class="h3">Kiểm tra xuất xưởng (${(x.kcs || []).length} lần)</h3>${(x.kcs || []).length ? x.kcs.slice().reverse().map(k => `<details ${k === x.kcs[x.kcs.length - 1] ? 'open' : ''}><summary>Lần ${k.lanKiem} · ${esc(k.ngay)} · ${k.dat ? '<b class="ok-ink">Đạt</b>' : '<b class="bad-ink">Không đạt</b>'} · ${esc(k.nguoiKiem)}</summary><ol class="kcsum">${k.ketQua.map(q => `<li>${esc(q.noiDung)} — ${q.ketQua === 'DAT' ? '✓' : `<b class="bad-ink">✗ ${esc(q.ghiChu)}</b>`}</li>`).join('')}</ol></details>`).join('') : '<p class="mut">Chưa kiểm.</p>'}
-      <div class="acts" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">${live ? `<button class="btn pri" type="button" id="tK">${ic('check')} Kiểm tra xuất xưởng</button>` : ''}${x.pxx ? `<button class="btn" type="button" id="tP">In PXX</button>${isQT() && !S.offline && x.pxx.trangThai === 'PHAT_HANH' ? '<button class="btn danger" type="button" id="tPH">Huỷ PXX</button>' : ''}` : ''}${bhCanAct(x) ? `<button class="btn pri" type="button" id="tL">${ic('pin')} ${(x.baoHanh || {}).ngayBanGiao ? 'Di dời' : 'Ghi bàn giao'}</button><button class="btn" type="button" id="tB">${ic('shield')} Tiếp nhận bảo hành</button>` : ''}<button class="btn" type="button" id="tTem">In tem QR</button></div>`, null, d => {
+      ${bhBlock(x)}<h3 class="h3">Kiểm tra xuất xưởng (${(x.kcs || []).length} lần)</h3>${(x.kcs || []).length ? x.kcs.slice().reverse().map(k => `<details ${k === x.kcs[x.kcs.length - 1] ? 'open' : ''}><summary>Lần ${k.lanKiem} · ${esc(vnD(k.ngay))} · ${k.dat ? '<b class="ok-ink">Đạt</b>' : '<b class="bad-ink">Không đạt</b>'} · ${esc(k.nguoiKiem)}</summary><ol class="kcsum">${k.ketQua.map(q => `<li>${esc(q.noiDung)} — ${q.ketQua === 'DAT' ? '✓' : `<b class="bad-ink">✗ ${esc(q.ghiChu)}</b>`}</li>`).join('')}</ol></details>`).join('') : '<p class="mut">Chưa kiểm.</p>'}
+      <div class="acts stickacts" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">${live ? `<button class="btn pri" type="button" id="tK">${ic('check')} Kiểm tra xuất xưởng</button>` : ''}${x.pxx ? `<button class="btn" type="button" id="tP">In PXX</button>${isQT() && !S.offline && x.pxx.trangThai === 'PHAT_HANH' ? '<button class="btn danger" type="button" id="tPH">Huỷ PXX</button>' : ''}` : ''}${bhCanAct(x) ? `<button class="btn pri" type="button" id="tL">${ic('pin')} ${(x.baoHanh || {}).ngayBanGiao ? 'Di dời' : 'Ghi bàn giao'}</button><button class="btn" type="button" id="tB">${ic('shield')} Tiếp nhận bảo hành</button>` : ''}<button class="btn" type="button" id="tTem">In tem QR</button></div>`, null, d => {
       d.classList.add('wide'); bhBind(d, x, h.serial);
       $('#toL', d).onclick = () => { d.close(); openLSX(h.soLSX); };
-      const k = $('#tK', d); if (k) k.onclick = async () => { d.close(); const g = await call('sx.get', { soLSX: h.soLSX }, 3); if (!g.ok) return toast('Không mở được lệnh'); kcsScreen(h.serial, g.data.template, g.data.hoSoTu.filter(c => c.trangThai !== 'HUY')); };
-      const pp = $('#tP', d); if (pp) pp.onclick = () => printPXX(x.pxx.soPXX);
+      const k = $('#tK', d); if (k) k.onclick = async () => { d.close(); const g = await load('sx.get', { soLSX: h.soLSX }, 'Đang mở lệnh…'); if (!g.ok) return toast('Không mở được lệnh'); kcsScreen(h.serial, g.data.template, g.data.hoSoTu.filter(c => c.trangThai !== 'HUY')); };
+      const pp = $('#tP', d); if (pp) pp.onclick = () => printPXX(x.pxx.soPXX); const pp2 = $('#tP2', d); if (pp2) pp2.onclick = () => printPXX(x.pxx.soPXX);
+      $$('[data-vso]', d).forEach(b => b.onclick = () => { d.close(); voucherView(b.dataset.vso); });   // hồ sơ tủ → phiếu nhập / xuất
       const ph = $('#tPH', d); if (ph) ph.onclick = () => { d.close(); pxxCancelForm(x.pxx); };
       $('#tTem', d).onclick = () => printTem(h.serial, x.item.ten || h.maHang, qr);
     });
@@ -1112,7 +1258,7 @@
         const r = await submitSX(dlg, 'bh.update', { soPBH: t.soPBH, ...v }, z => `${t.soPBH}: ${PBH_TT[z.trangThai]}`); if (r) setTimeout(() => ticketView(t.soPBH), 0); return !!r; }, null, 'Lưu');
   }
   async function replaceForm(t) {
-    const g = await call('serial.get', { serial: t.serialTu }, 3); if (!g.ok) return toast('Không đọc được hồ sơ tủ');
+    const g = await load('serial.get', { serial: t.serialTu }, 'Đang đọc hồ sơ tủ…'); if (!g.ok) return toast('Không đọc được hồ sơ tủ: ' + (g.error || g.code));
     const con = g.data.con || [], items = S.data.items.filter(i => i.trangThai !== 'NGUNG'), lines = [{}];
     const kho0 = (activeKho(false)[0] || {}).maKho;
     const mien = QBH.mienPhi(t.tinhTrangBH, t.nguyenNhan);
@@ -1146,7 +1292,9 @@
   }
   async function printPBH(t) {
     const co = S.co, tt = JSON.parse(t.thayThe || '[]'), dd = (t.ngayDong || t.ngay).split('-');
-    const g = await call('serial.get', { serial: t.serialTu || t.serial }, 3), bh = (g.ok && g.data.baoHanh) || {}, v = bh.viTri || {};
+    const g = await load('serial.get', { serial: t.serialTu || t.serial }, 'Đang chuẩn bị bản in…');
+    if (!g.ok) return toast('Chưa in được: không đọc được hồ sơ tủ (' + (g.error || g.code) + ') — thử lại khi có mạng');   // không in phiếu thiếu khách / vị trí
+    const bh = g.data.baoHanh || {}, v = bh.viTri || {};
     const kh = (S.data.customers || []).find(z => z.maKH === v.maKH) || {};
     const host = document.createElement('div'); host.id = 'printArea';
     host.innerHTML = `<div class="pv pxx"><div class="c"><b>${esc((co.tenDay || co.ten).toUpperCase())}</b><br>Địa chỉ: ${esc(co.diaChi || '')}${co.mst ? ' – MST: ' + esc(co.mst) : ''}</div>
@@ -1173,7 +1321,7 @@
         const xb = $('#bhX', dlg); if (xb) xb.onclick = () => exportRows(`ChiPhiBH_${v.from}_${v.to}`, x.rows.map(z => ({ 'Phiếu xuất': z.soPhieu, 'Ngày': z.ngay, 'Phiếu BH': z.soPBH, 'Tủ': z.serialTu, 'Tình trạng BH': TT_BH[z.tinhTrangBH] || '', 'Nguyên nhân': NN[z.nguyenNhan] || '', 'Thiện chí': z.thienChi, 'Giá trị': z.giaTri })));
         return false; }, dlg => dlg.classList.add('wide'), 'Xem báo cáo');
   }
-  function viewBH(m) {
+  function viewBH(m, only) {
     const d = S.data, sk = {}; (d.serials || []).forEach(z => sk[z.key] = z);
     const tpl = {}; (d.templates || []).forEach(t => tpl[t.maMau] = t);
     const hist = {}; (d.lapDat || []).forEach(l => { if (!l.lyDoHuy) (hist[l.key] = hist[l.key] || []).push(l); });
@@ -1200,13 +1348,13 @@
       body = `<div class="chips" role="group" aria-label="Lọc phiếu">${FP.map(([k, t]) => `<button class="chip" type="button" data-f="${k}" aria-pressed="${BH.f === k}">${t}</button>`).join('')}</div>
         <div class="card list">${list.length ? list.map(t => `<div class="it" data-pbh="${esc(t.soPBH)}" role="button" tabindex="0"><div><span class="mono">${esc(t.soPBH)}</span> · <span class="mono">${esc(t.serialTu || t.serial)}</span> <span class="tag ${t.trangThai === 'HOAN_THANH' ? 'ok' : t.trangThai === 'TU_CHOI' ? 'bad' : 'warn'}">${PBH_TT[t.trangThai]}</span><br><small class="mut">${vnD(t.ngay)} · ${esc(TT_BH[t.tinhTrangBH] || '')} · ${esc(t.moTaLoi)}</small></div></div>`).join('') : '<div class="empty">Chưa có phiếu bảo hành. Lập phiếu từ hồ sơ tủ (tra xê-ri / quét QR) → <b>Tiếp nhận bảo hành</b>.</div>'}</div>`;
     }
-    m.innerHTML = header('Lắp đặt & bảo hành') + `
-      <div class="sxbar"><button class="btn ${BH.tab === 'tu' ? 'pri' : ''}" type="button" data-tab="tu">${ic('box')} Tủ đã giao (${tus.length})</button><button class="btn ${BH.tab === 'pbh' ? 'pri' : ''}" type="button" data-tab="pbh">${ic('shield')} Phiếu bảo hành (${pb.filter(t => ['TIEP_NHAN', 'DANG_XU_LY'].includes(t.trangThai)).length} đang mở)</button><button class="btn" type="button" id="bSer">${ic('search')} Tra xê-ri</button>${isQT() ? `<button class="btn" type="button" id="bRep">${ic('chart')} Chi phí BH</button>` : ''}</div>
-      <label class="search" style="margin-bottom:10px">${ic('search')}<span class="sr">Tìm</span><input id="qbh" type="search" placeholder="${BH.tab === 'tu' ? 'Xê-ri, địa chỉ, công trình, khách…' : 'Số phiếu, xê-ri, hiện tượng…'}" value="${esc(BH.q)}" autocomplete="off"></label>${body}`;
-    let tm = null; const q = $('#qbh'); q.oninput = () => { BH.q = q.value; clearTimeout(tm); tm = setTimeout(() => { viewBH(m); const n = $('#qbh'); n.focus(); n.setSelectionRange(n.value.length, n.value.length); }, 300); };
+    paint(m, only, header('Lắp đặt & bảo hành') + `
+      <div class="sxbar"><button class="btn ${BH.tab === 'tu' ? 'pri' : ''}" type="button" data-tab="tu">${ic('box')} Tủ đã giao (${tus.length})</button><button class="btn ${BH.tab === 'pbh' ? 'pri' : ''}" type="button" data-tab="pbh">${ic('shield')} Phiếu bảo hành (${pb.filter(t => ['TIEP_NHAN', 'DANG_XU_LY'].includes(t.trangThai)).length} đang mở)</button><button class="btn" type="button" id="bSer">${ic('search')} Tra xê-ri</button>${hasCam() ? `<button class="btn" type="button" data-scantu>${ic('search')} Quét QR tủ</button>` : ''}${isQT() ? `<button class="btn" type="button" id="bRep">${ic('chart')} Chi phí BH</button>` : ''}</div>
+      <label class="search" style="margin-bottom:10px">${ic('search')}<span class="sr">Tìm</span><input id="qbh" type="search" placeholder="${BH.tab === 'tu' ? 'Xê-ri, địa chỉ, công trình, khách…' : 'Số phiếu, xê-ri, hiện tượng…'}" value="${esc(BH.q)}" autocomplete="off"></label><div id="bhbody">${body}</div>`);
+    onSearch('#qbh', v => { BH.q = v; }, () => viewBH(m, '#bhbody'), 300);
     $$('[data-tab]').forEach(b => b.onclick = () => { BH.tab = b.dataset.tab; BH.f = ''; viewBH(m); });
     $$('.chip[data-f]').forEach(b => b.onclick = () => { BH.f = b.dataset.f; viewBH(m); });
-    $('#bSer').onclick = serialSearch; const br = $('#bRep'); if (br) br.onclick = bhReport;
+    $('#bSer').onclick = serialSearch; $$('[data-scantu]', m).forEach(b => b.onclick = scanTu); const br = $('#bRep'); if (br) br.onclick = bhReport;
     $$('[data-tu]', m).forEach(r => r.onclick = e => { if (e.target.closest('a')) return; tuView(r.dataset.tu); });
     $$('[data-pbh]', m).forEach(r => r.onclick = () => ticketView(r.dataset.pbh));
   }
@@ -1268,13 +1416,25 @@
   }
 
   // ---------------- hộp thoại & biểu mẫu ----------------
+  /** Khách ↔ công trình: chọn khách thì chỉ hiện công trình của khách đó; chọn công trình thì tự điền khách. */
+  function linkCustProj(dlg) {
+    const kh = $('#f_maKH', dlg), ct = $('#f_maCongTrinh', dlg); if (!kh || !ct || kh.tagName !== 'SELECT' || ct.tagName !== 'SELECT') return;
+    const all = [...ct.options].map(o => [o.value, o.textContent]), owner = v => ((S.data.projects || []).find(p => p.maCongTrinh === v) || {}).maKH || '';
+    const fill = () => { const k = kh.value, cur = ct.value;
+      ct.innerHTML = all.filter(([v]) => !v || !k || !owner(v) || owner(v) === k).map(([v, t]) => `<option value="${esc(v)}">${esc(t)}</option>`).join('');
+      ct.value = [...ct.options].some(o => o.value === cur) ? cur : ''; };
+    kh.addEventListener('change', fill);
+    ct.addEventListener('change', () => { const o = owner(ct.value); if (o && kh.value !== o && [...kh.options].some(x => x.value === o)) { kh.value = o; fill(); } });
+    fill();
+  }
   function dialog(title, body, onSubmit, after, submitText = 'Lưu') {
     const d = $('#dlg');
     const back = document.activeElement;
     d.innerHTML = `<form method="dialog" novalidate><header><h2>${title}</h2><button class="btn ghost iconbtn" type="button" data-x aria-label="Đóng">${ic('x')}</button></header><div class="body">${body}<div class="dlgmsg" id="dlgMsg" role="alert"></div></div>${onSubmit ? `<footer><button class="btn" type="button" data-x>Huỷ</button><button class="btn pri" id="dlgOk" type="submit">${submitText}</button></footer>` : ''}</form>`;
     const f = $('form', d);
     d._rid = null; d._guard = null;   // 1 requestId cho cả vòng đời hộp thoại: bấm Lưu lại sau khi mất phản hồi KHÔNG tạo phiếu thứ 2
-    const tryClose = () => { if (d._guard && d._guard() && !confirm('Bỏ phiếu đang nhập dở?')) return; d.close(); };
+    d._dirty = false;
+    const tryClose = () => { const dirty = d._guard ? d._guard() : onSubmit && d._dirty; if (dirty && !confirm('Bỏ nội dung đang nhập dở?')) return; d.close(); };   // chạm ra ngoài / bấm X khi đang nhập: hỏi lại
     $$('[data-x]', d).forEach(b => b.onclick = tryClose);
     d.oncancel = e => { if (d._guard && d._guard()) { e.preventDefault(); tryClose(); } };
     d.onclose = () => { if (back && back.isConnected && back.focus) back.focus(); };
@@ -1285,6 +1445,8 @@
     };
     d.onclick = e => { if (e.target === d) tryClose(); };
     if (after) after(d);
+    linkCustProj(d);
+    f.addEventListener('input', () => { d._dirty = true; });
     d.showModal();
     const first = $('.body input:not([type=hidden]):not([readonly]),.body select,.body textarea', d); if (first && matchMedia('(pointer:fine)').matches) first.focus();
     $$('.body .in', d).forEach(i => { const e = $('#e_' + i.name, d); if (e) i.setAttribute('aria-describedby', e.id); });
@@ -1439,7 +1601,7 @@
     if (e.key === 'Escape' && S.sel && !$('#dlg').open) { history.state && history.state.det ? history.back() : closeDetail(); return; }
   });
   document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { const q = $('#qd') || $('#qm'); if (q) { e.preventDefault(); q.focus(); q.select(); } } });
-  window.addEventListener('hashchange', () => { if (S.user) { S.sel = null; if (route() !== 'kho') KS.sel = null; if (route() !== 'sx') SX.sel = null; renderView(); } });
+  window.addEventListener('hashchange', () => { const dg = $('#dlg'); if (dg && dg.open && !dg._keep) dg.close(); if (S.user) { S.sel = null; if (route() !== 'kho') KS.sel = null; if (route() !== 'sx') SX.sel = null; renderView(); } });
   window.addEventListener('online', () => { if (S.user) sync(); });
   matchMedia(MOBILE).addEventListener('change', () => { if (S.user && S.data && route() === 'hang') renderResults(); });
   document.addEventListener('visibilitychange', () => { if (!document.hidden && S.user && S.data) sync(); });
@@ -1454,6 +1616,7 @@
   (async function start() {
     const th = LS.get('qlhh-theme', null); if (th) document.documentElement.dataset.theme = th;
     S.co = company(LS.get('qlhh-co', 'LAVIPCO')) || CFG.companies[0];
+    const qc = (location.hash.match(/^#\/t\/([^/]+)\//) || [])[1]; if (qc && company(qc)) { S.co = company(qc); LS.set('qlhh-co', S.co.id); }   // QR tủ: mở đúng công ty của tem
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
     if (await handleReturn()) return;
     await restore();

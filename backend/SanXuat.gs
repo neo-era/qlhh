@@ -128,6 +128,7 @@ function lsxCreate(u, req, logs) {
   var maKH = up(x.maKH), maCT = up(x.maCongTrinh);
   if (maKH && !readTable('KhachHang').rows.some(function (r) { return r.maKH === maKH; })) throw fail('VALIDATION', 'Khách hàng ' + maKH + ' chưa có', { maKH: 'Chọn khách có sẵn' });
   if (maCT && !readTable('CongTrinh').rows.some(function (r) { return r.maCongTrinh === maCT; })) throw fail('VALIDATION', 'Công trình ' + maCT + ' chưa có', { maCongTrinh: 'Chọn công trình có sẵn' });
+  custProj(maKH, maCT);
   var yr = ngay.slice(0, 4), so = 'LSX-' + yr + '-' + pad(nextId('LSX:' + yr), 5);
   appendBlock('LenhSX', [{ soLSX: so, ngay: ngay, maMau: t.maMau, phienBan: t.phienBan, maHang: t.maHang, soLuong: n, maKH: maKH, maCongTrinh: maCT, canCuCheTao: txt(x.canCuCheTao, 300),
     kho: kho.maKho, trangThai: 'MOI', ghiChu: txt(x.ghiChu, 500), nguoiTao: u.email, thoiGian: nowIso(), lyDoHuy: '', requestId: String(req.requestId) }]);
@@ -339,6 +340,7 @@ function pxxIssue(u, req, logs) {
   var maKH = up(x.maKH), maCT = up(x.maCongTrinh);
   if (maKH && !readTable('KhachHang').rows.some(function (r) { return r.maKH === maKH; })) throw fail('VALIDATION', 'Khách hàng ' + maKH + ' chưa có', { maKH: 'Chọn khách có sẵn' });
   if (maCT && !readTable('CongTrinh').rows.some(function (r) { return r.maCongTrinh === maCT; })) throw fail('VALIDATION', 'Công trình ' + maCT + ' chưa có', { maCongTrinh: 'Chọn công trình có sẵn' });
+  custProj(maKH, maCT);
   var cty = congTy(), yr = Number(ngay.slice(0, 4)), key = 'seq:PXX:' + cty + ':' + yr;
   var n = Math.max(Number(props().getProperty(key) || 0), readTable('PhieuXuatXuong').rows.reduce(function (m, p) { return Number(p.nam) === yr ? Math.max(m, Number(p.so) || 0) : m; }, 0)) + 1;
   var so = QSX.pxxNo(n, yr, cty), lsx = readTable('LenhSX').rows.filter(function (l) { return l.soLSX === hs[sers[0]].soLSX; })[0] || {};

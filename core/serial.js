@@ -1,5 +1,6 @@
 /* QLHH core/serial — trạng thái serial theo phiếu kho. Khoá serial = HÃNG|SERIAL (viết hoa, bỏ khoảng trắng đầu/cuối). */
 var QSerial=(function(){
+  var TEN={TRONG_KHO:'đang trong kho',DA_BAN:'đã bán / đã giao khách',DA_LAP:'đã lắp vào tủ',HUY:'đã huỷ',HANG_LOI:'đang ở kho hàng lỗi',DA_TRA_NCC:'đã trả nhà cung cấp',MAT:'đã ghi mất',DA_THAY:'đã thay ra khi bảo hành',GUI_NCC:'đang gửi nhà cung cấp'};   // tên trạng thái cho thông báo
   // loại phiếu → [trạng thái được phép trước, trạng thái sau, kho sau: 'KHO' | 'DEN' | '']
   var MOVE={
     XUAT_BAN:[['TRONG_KHO'],'DA_BAN',''],XUAT_CONG_TRINH:[['TRONG_KHO'],'DA_BAN',''],XUAT_BH:[['TRONG_KHO'],'DA_BAN',''],
@@ -46,7 +47,7 @@ var QSerial=(function(){
         if(cur&&cur.trangThai==='DA_LAP'&&mv[0].indexOf('DA_LAP')<0)return fail('VALIDATION',l.dong,'Serial '+s+' đang lắp trong tủ'+(cur.serialCha?' '+cur.serialCha.split('|')[1]:'')+' — thay linh kiện qua phiếu bảo hành');
         if(cur&&cur.serialCha&&p.loai==='KHACH_TRA')return fail('VALIDATION',l.dong,'Serial '+s+' đang lắp trong tủ '+cur.serialCha.split('|')[1]+' — không nhận trả riêng');
         if(!cur||mv[0].indexOf(cur.trangThai)<0||(inStock&&cur.kho!==p.kho))
-          return fail(inStock?'SERIAL_NOT_IN_STOCK':'VALIDATION',l.dong,'Serial '+s+(cur?' đang ở trạng thái '+cur.trangThai+(cur.kho?' tại kho '+cur.kho:''):' chưa có trong hệ thống'));
+          return fail(inStock?'SERIAL_NOT_IN_STOCK':'VALIDATION',l.dong,'Serial '+s+(cur?' '+(TEN[cur.trangThai]||('đang ở trạng thái '+cur.trangThai))+(cur.kho&&cur.trangThai!=='DA_BAN'?' (kho '+cur.kho+')':''):' chưa có trong hệ thống'));
         changes.push(Object.assign(base,{to:mv[1]||cur.trangThai,kho:mv[2]==='KHO'?p.kho:mv[2]==='DEN'?p.khoDen:''}));
       }
     }

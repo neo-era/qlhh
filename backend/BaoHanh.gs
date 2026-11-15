@@ -72,6 +72,7 @@ function installAdd(u, req, logs) {
   if (v.loai === 'DI_DOI' && v.ngay < last) throw fail('VALIDATION', 'Ngày di dời không trước lần ghi cuối (' + last + ')', { ngay: 'Từ ' + last });
   if (v.maKH && !readTable('KhachHang').rows.some(function (z) { return z.maKH === v.maKH; })) throw fail('VALIDATION', 'Khách hàng ' + v.maKH + ' chưa có', { maKH: 'Chọn khách có sẵn' });
   if (v.maCongTrinh && !readTable('CongTrinh').rows.some(function (z) { return z.maCongTrinh === v.maCongTrinh; })) throw fail('VALIDATION', 'Công trình ' + v.maCongTrinh + ' chưa có', { maCongTrinh: 'Chọn công trình có sẵn' });
+  custProj(v.maKH, v.maCongTrinh);
   var id = 'LD' + pad(nextId('LAPDAT'), 6);
   appendBlock('LapDat', [{ id: id, serial: r.sr.serial, key: r.sr.key, maHang: r.sr.maHang, loai: v.loai, ngay: v.ngay, maKH: v.maKH, maCongTrinh: v.maCongTrinh, diaChi: v.diaChi, tenTaiCT: v.tenTaiCT,
     viDo: v.viDo, kinhDo: v.kinhDo, thangBH: v.loai === 'BAN_GIAO' && v.thangBH !== '' ? String(v.thangBH) : '', soBBBG: v.soBBBG, ghiChu: v.ghiChu, nguoiGhi: u.email, thoiGian: nowIso(), requestId: String(req.requestId),
