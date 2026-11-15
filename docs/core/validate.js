@@ -119,7 +119,7 @@ var QValidate=(function(){
     if(v.loai==='XUAT_BAN'&&!v.maKH)e.maKH='Phiếu xuất bán phải chọn khách hàng';
     if((v.loai==='XUAT_BAN'||v.loai==='XUAT_CONG_TRINH')&&!v.maCongTrinh)e.maCongTrinh='Chọn công trình';
     if(v.loai==='KHACH_TRA'&&!v.phieuGoc)e.phieuGoc='Chọn phiếu xuất gốc';
-    if(['XUAT_HUY','NHAP_KHAC','CHUYEN_SUA'].indexOf(v.loai)>=0&&!v.lyDo)e.lyDo=v.loai==='XUAT_HUY'?'Ghi lý do huỷ (số biên bản huỷ / mất)':v.loai==='NHAP_KHAC'?'Ghi lý do nhập (thừa, hàng tặng, thu hồi…)':'Ghi nội dung đã sửa';
+    if(['XUAT_HUY','NHAP_KHAC','CHUYEN_SUA','CHUYEN_LOI'].indexOf(v.loai)>=0&&!v.lyDo)e.lyDo=v.loai==='XUAT_HUY'||v.loai==='CHUYEN_LOI'?'Ghi lý do huỷ (số biên bản huỷ / mất)':v.loai==='NHAP_KHAC'?'Ghi lý do nhập (thừa, hàng tặng, thu hồi…)':'Ghi nội dung đã sửa';
     if((v.loai==='GUI_NCC'||v.loai==='NHAN_NCC')&&!v.maNCC)e.maNCC='Chọn nhà cung cấp';
     if(v.loai==='NHAN_NCC'&&!v.phieuGoc)e.phieuGoc='Chọn phiếu gửi NCC gốc';
     if(v.loai==='TRA_KHACH_SUA'&&!v.phieuGoc)e.phieuGoc='Chọn phiếu nhận hàng lỗi của khách';

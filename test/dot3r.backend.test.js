@@ -129,20 +129,23 @@ test('KT-C1 huỷ lần thay bị chặn khi tủ đã khách trả (kể cả �
 
 // ---------- kế toán C2: kiểm kê kho lỗi, chuyển hàng hỏng kho thường → kho lỗi ----------
 test('KT-C2 kiểm kê kho hàng lỗi (giá 0); chuyển hàng hỏng sang kho lỗi (giá trị rời giá vốn theo BQ, đảo được)', () => {
-  const x = plant(); x.buy('2026-11-01', 1);
-  VW(x, { loai: 'NHAP_MUA', ngay: '2026-11-01', kho: 'KHO', maNCC: 'NCC1', lines: [{ maHang: 'CB6', soLuongCT: 5, gia: 100000 }] }, x.s);
-  assert.equal(V(x, { loai: 'CHUYEN_LOI', ngay: '2026-11-02', kho: 'KHO', khoDen: 'KHO-LOI', lines: [{ maHang: 'CB6', soLuongCT: 1 }] }).code, 'VALIDATION', 'lý do bắt buộc');
-  const cl = VW(x, { loai: 'CHUYEN_LOI', ngay: '2026-11-02', kho: 'KHO', khoDen: 'KHO-LOI', lyDo: 'Hỏng khi lắp thử', lines: [{ maHang: 'CB6', soLuongCT: 1 }] });
-  const cb6 = ton(x, 'CB6'); assert.equal(cb6[0], 5); assert.equal(tonK(x, 'CB6', 'KHO-LOI'), 1); assert.equal(tonK(x, 'CB6', 'KHO'), 4);
+  const x = plant(); x.buy('2026-11-01', 1); x.W('item.upsert', { isNew: true, item: { maHang: 'CBX', ten: 'CB thử', dvt: 'cái' } });
+  VW(x, { loai: 'NHAP_MUA', ngay: '2026-11-01', kho: 'KHO', maNCC: 'NCC1', lines: [{ maHang: 'CBX', soLuongCT: 5, gia: 100000 }] }, x.s);
+  assert.equal(V(x, { loai: 'CHUYEN_LOI', ngay: '2026-11-02', kho: 'KHO', khoDen: 'KHO-LOI', lines: [{ maHang: 'CBX', soLuongCT: 1 }] }).code, 'VALIDATION', 'lý do bắt buộc');
+  const cl = VW(x, { loai: 'CHUYEN_LOI', ngay: '2026-11-02', kho: 'KHO', khoDen: 'KHO-LOI', lyDo: 'Hỏng khi lắp thử', lines: [{ maHang: 'CBX', soLuongCT: 1 }] });
+  const cb6 = ton(x, 'CBX'); assert.equal(cb6[0], 4, 'tồn giá vốn không gồm kho lỗi'); assert.equal(tonK(x, 'CBX', 'KHO-LOI'), 1); assert.equal(tonK(x, 'CBX', 'KHO'), 4);
   assert.equal(x.W('voucher.get', { soPhieu: cl }).lines[0].giaTriKho, 100000);
-  const totalVal = x.ton('CB6'); assert.equal(Number(totalVal.giaTri), 580000 - 100000, 'giá trị kho thường giảm theo BQ');
-  VW(x, { loai: 'CHUYEN_LOI', ngay: '2026-11-02', kho: 'KHO', khoDen: 'KHO-LOI', lyDo: 'LOGO! hỏng', lines: [{ maHang: 'LOGO', soLuongCT: 1, serials: ['LG11010'] }] });
+  const totalVal = x.ton('CBX'); assert.equal(Number(totalVal.giaTri), 400000, 'giá trị kho thường giảm theo BQ');
+  x.W('voucher.reverse', { phieuGoc: cl, ngay: '2026-11-03', lyDo: 'nhầm' }); assert.equal(Number(x.ton('CBX').giaTri), 500000, 'đảo: giá trị về như cũ'); assert.equal(tonK(x, 'CBX', 'KHO-LOI'), 0);
+  VW(x, { loai: 'CHUYEN_LOI', ngay: '2026-11-04', kho: 'KHO', khoDen: 'KHO-LOI', lyDo: 'Hỏng khi lắp thử', lines: [{ maHang: 'CBX', soLuongCT: 1 }] });
+  VW(x, { loai: 'CHUYEN_LOI', ngay: '2026-11-04', kho: 'KHO', khoDen: 'KHO-LOI', lyDo: 'LOGO! hỏng', lines: [{ maHang: 'LOGO', soLuongCT: 1, serials: ['LG11010'] }] });
   assert.deepEqual([ser(x, 'LG11010').trangThai, ser(x, 'LG11010').kho], ['HANG_LOI', 'KHO-LOI']);
-  const kk = V(x, { loai: 'KIEM_KE', ngay: '2026-11-03', kho: 'KHO-LOI', lyDo: 'Kiểm kho lỗi', lines: [{ maHang: 'CB6', slThucTe: 0 }] });
-  assert.equal(kk.ok, true, JSON.stringify(kk)); assert.equal(tonK(x, 'CB6', 'KHO-LOI'), 0); assert.equal(x.W('voucher.get', { soPhieu: kk.data.soPhieu }).lines[0].giaTriKho, 0);
-  const n = x.W('report.nxt', { from: '2026-11-01', to: '2026-11-30' }).rows.find(z => z.maHang === 'CB6'); assert.deepEqual(n.theoLoai.CHUYEN_LOI, { q: 1, v: 100000 });
-  x.W('voucher.reverse', { phieuGoc: kk.data.soPhieu, ngay: '2026-11-14', lyDo: 'x' });
-  x.W('voucher.reverse', { phieuGoc: cl, ngay: '2026-11-14', lyDo: 'x' }); assert.equal(Number(x.ton('CB6').giaTri), 580000);
+  const kk = V(x, { loai: 'KIEM_KE', ngay: '2026-11-05', kho: 'KHO-LOI', lyDo: 'Kiểm kho lỗi', lines: [{ maHang: 'CBX', slThucTe: 0 }] });
+  assert.equal(kk.ok, true, JSON.stringify(kk)); assert.equal(tonK(x, 'CBX', 'KHO-LOI'), 0); assert.equal(x.W('voucher.get', { soPhieu: kk.data.soPhieu }).lines[0].giaTriKho, 0);
+  const kk2 = V(x, { loai: 'KIEM_KE', ngay: '2026-11-05', kho: 'KHO-LOI', lyDo: 'Thừa serial', lines: [{ maHang: 'LOGO', slThucTe: 2, serials: ['LGTHUA1'] }] });
+  assert.equal(kk2.ok, true, JSON.stringify(kk2)); assert.deepEqual([ser(x, 'LGTHUA1').trangThai, ser(x, 'LGTHUA1').kho], ['HANG_LOI', 'KHO-LOI']);
+  const n = x.W('report.nxt', { from: '2026-11-01', to: '2026-11-30' }).rows.find(z => z.maHang === 'CBX'); assert.deepEqual(n.theoLoai.CHUYEN_LOI, { q: 1, v: 100000 }, 'lần chuyển đã đảo trừ ra');
+  const rb = x.W('stock.rebuild', {}); assert.equal(rb.tinhLai, 0); assert.deepEqual(rb.loiTonAm, []);
 });
 
 // ---------- kế toán C3: báo cáo kho lỗi tách hàng giữ hộ khách ----------
@@ -169,6 +172,7 @@ test('KTh-B1 huỷ lần thay chết giữa 2 phiếu đảo, làm lại bằng 
   const y = built(), [t1] = y.tp.serials;
   y.W('kcs.add', { serial: t1, ngay: '2026-11-09', ketQua: y.pass() }, y.nv);
   VW(y, { loai: 'XUAT_BAN', ngay: '2026-11-09', kho: 'KHO', maKH: 'TN', maCongTrinh: 'PDG', lines: [{ maHang: 'TU-DKCS-2N', soLuongCT: 1, serials: [t1] }] });
+  y.W('install.add', { serial: t1, lapDat: { loai: 'BAN_GIAO', ngay: '2026-11-10', maKH: 'TN', maCongTrinh: 'PDG', diaChi: 'H' } }, y.nv);
   VW(y, { loai: 'NHAP_MUA', ngay: '2026-11-10', kho: 'KHO', maNCC: 'NCC1', lines: [{ maHang: 'LOGO', soLuongCT: 1, gia: 4200000, serials: ['LGNEW1'] }] }, y.s);
   const pbh = y.W('bh.create', { serial: t1, phieu: { ngay: '2026-11-11', moTaLoi: 'x' } }, y.nv).soPBH;
   const r = y.W('bh.replace', { soPBH: pbh, ngay: '2026-11-12', kho: 'KHO', lines: [{ maHang: 'LOGO', soLuong: 1, serialMoi: ['LGNEW1'], serialCu: ['LG11010'] }] }, y.nv);

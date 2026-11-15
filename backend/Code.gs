@@ -6,7 +6,7 @@ var SESSION_TTL = 10 * 3600;
 
 // ======================= CÀI ĐẶT =======================
 function setup() {
-  var ss = SpreadsheetApp.getActive(), me = String(Session.getEffectiveUser().getEmail() || '').toLowerCase();
+  var ss = SpreadsheetApp.getActive(), me = String(Session.getEffectiveUser().getEmail() || '').toLowerCase(), lech = [];
   if (!me) throw new Error('Không đọc được email chủ — kiểm tra scope userinfo.email');
   Object.keys(QSchema.SHEETS).forEach(function (n) {
     var d = QSchema.SHEETS[n], s = ss.getSheetByName(n) || ss.insertSheet(n);
@@ -15,11 +15,13 @@ function setup() {
       var h = s.getRange(1, 1, 1, Math.max(1, s.getLastColumn())).getValues()[0].map(function (x) { return String(x).trim(); });
       while (h.length && !h[h.length - 1]) h.pop();
       if (h.length < d.cols.length && d.cols.slice(0, h.length).every(function (c, i) { return h[i] === c; })) s.getRange(1, h.length + 1, 1, d.cols.length - h.length).setValues([d.cols.slice(h.length)]);
+      else for (var i = 0; i < Math.min(h.length, d.cols.length); i++) if (h[i] !== d.cols[i]) { lech.push(n + ': cột ' + colLetter(i) + ' là "' + h[i] + '", cần "' + d.cols[i] + '"'); break; }   // cột tự đặt chen vào chỗ cột mới → không tự nối được
     }
     s.setFrozenRows(1);
     if (typeof s.getProtections === 'function' && SpreadsheetApp.ProtectionType && !s.getProtections(SpreadsheetApp.ProtectionType.SHEET).length) s.protect().setDescription('QLHH — dữ liệu do app ghi; sửa tay có thể làm sai số liệu').setWarningOnly(true);   // sửa tay → Sheets hỏi lại
     d.cols.forEach(function (c, i) { if ((d.num || []).indexOf(c) < 0) { var L = colLetter(i); s.getRange(L + ':' + L).setNumberFormat('@'); } });   // mọi cột chữ dạng văn bản: không tự đổi kiểu, không chạy công thức
   });
+  if (lech.length) throw new Error('Không nâng cấp được cấu trúc sheet (cột tự đặt nằm ở chỗ cột mới của QLHH): ' + lech.join('; ') + ' — chuyển cột tự đặt ra sau cột cuối của QLHH (hoặc sang sheet khác) rồi chạy lại setup()');
   var nd = ss.getSheetByName('NguoiDung');
   var has = nd.getDataRange().getValues().some(function (r) { return String(r[0]).trim().toLowerCase() === me; });
   if (!has) nd.appendRow([me, 'Chủ hệ thống', 'QUAN_TRI', 'HOAT_DONG', new Date().toISOString()]);

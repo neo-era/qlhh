@@ -122,8 +122,9 @@ function bhCreateLe(u, req, logs) {
   if (!sl) throw fail('VALIDATION', 'Phiếu ' + so + ' không có mã ' + ma, { maHang: 'Không có trong phiếu' });
   var kt = mapBy(readTable('Phieu').rows.filter(function (h) { return h.loai === 'KHACH_TRA' && h.phieuGoc === so && h.trangThai === 'HOAN_TAT' && !h.daDao; }), 'soPhieu');
   readTable('ChiTietPhieu').rows.forEach(function (l) { if (kt[l.soPhieu] && l.maHang === ma) sl -= Number(l.soLuong) || 0; });
-  sl = Math.round(sl * 1000) / 1000;
-  if (!(q > 0) || q > sl) throw fail('VALIDATION', 'Số lượng bảo hành từ 1 đến ' + sl + ' (số đã xuất còn ở phía khách)', { soLuong: 'Tối đa ' + sl });
+  var daTN = readTable('PhieuBaoHanh').rows.reduce(function (a, t) { return t.phieuGoc === so && t.maHang === ma && !t.serial && t.trangThai !== 'TU_CHOI' ? a + (Number(t.soLuong) || 0) : a; }, 0);   // đã tiếp nhận ở phiếu BH khác (trừ phiếu từ chối)
+  var con = Math.round((sl - daTN) * 1000) / 1000;
+  if (!(q > 0) || q > con) throw fail('VALIDATION', 'Số lượng bảo hành từ 1 đến ' + Math.max(0, con) + ' (còn ở phía khách ' + Math.round(sl * 1000) / 1000 + ', đã tiếp nhận ở phiếu BH khác ' + daTN + ')', { soLuong: 'Tối đa ' + Math.max(0, con) });
   var v = need(QBH.validateTicket(req.phieu, { today: today() }));
   if (v.ngay < g.ngay) throw fail('VALIDATION', 'Ngày tiếp nhận không trước ngày xuất (' + g.ngay + ')', { ngay: 'Từ ' + g.ngay });
   var thang = it.thangBH !== '' && it.thangBH !== undefined && it.thangBH !== null ? Number(it.thangBH) : 12, han = thang > 0 ? QBH.hanBH(g.ngay, thang) : '';
@@ -148,7 +149,7 @@ function bhUpdate(u, req, logs) {
   if (v.trangThai === 'TU_CHOI' && t.soPhieuXuat) throw fail('VALIDATION', 'Phiếu đã xuất linh kiện (' + t.soPhieuXuat + ') — không từ chối được; đóng Hoàn thành và ghi nguyên nhân', { trangThai: 'Đã thay linh kiện' });
   x.trangThai = v.trangThai; if (v.nguyenNhan) x.nguyenNhan = v.nguyenNhan; if (v.ketQua) x.ketQua = v.ketQua; x.nguoiXuLy = u.email;
   if (phi !== null) { x.phiSua = phi; if (phi > 0 && !x.hinhThuc) x.hinhThuc = 'THU_TIEN'; }   // sửa có thu tiền (kể cả chỉ công sửa): căn cứ xuất hoá đơn dịch vụ
-  if (v.trangThai === 'HOAN_THANH' || v.trangThai === 'TU_CHOI') x.ngayDong = today();
+  if (v.trangThai === 'HOAN_THANH' || v.trangThai === 'TU_CHOI') { var nd = req.ngay ? chkDate(String(req.ngay)) : today(); if (nd < t.ngay) throw fail('VALIDATION', 'Ngày hoàn thành không trước ngày tiếp nhận (' + t.ngay + ')', { ngay: 'Từ ' + t.ngay }); x.ngayDong = nd; }   // doanh thu sửa ghi nhận theo ngày hoàn thành thực tế
   putRow('PhieuBaoHanh', x, t._row);
   logs.push({ action: 'bh.update', doiTuong: 'PhieuBaoHanh', id: t.soPBH, truoc: { trangThai: t.trangThai }, sau: { trangThai: v.trangThai, nguyenNhan: v.nguyenNhan, ketQua: v.ketQua, phiSua: phi === null ? undefined : phi } });
   return { soPBH: t.soPBH, trangThai: v.trangThai };
@@ -181,6 +182,7 @@ function bhReplace(u, req, logs) {
   if (!px && !mien && !thu && (u.vaiTro !== 'QUAN_TRI' || !tc)) throw fail('VALIDATION', 'Ngoài bảo hành (' + t.tinhTrangBH + (QBH.NGOAI_BH.indexOf(t.nguyenNhan) >= 0 ? ', ' + t.nguyenNhan : '') + ') — chọn "Sửa có thu tiền", lập phiếu xuất bán linh kiện cho khách, hoặc Quản trị duyệt bảo hành thiện chí (ghi lý do)', { thienChi: 'Quản trị duyệt' });
   var phi = req.phiSua === undefined || req.phiSua === null || req.phiSua === '' ? null : Number(req.phiSua);
   if (thu && phi !== null && !(Number.isInteger(phi) && phi >= 0 && phi <= 1e12)) throw fail('VALIDATION', 'Phí sửa chữa là số nguyên VND ≥ 0', { phiSua: 'Số nguyên ≥ 0' });
+  if (!px && thu && mien && u.vaiTro !== 'QUAN_TRI') throw fail('VALIDATION', 'Phiếu ' + t.soPBH + ' còn bảo hành miễn phí — chọn thu tiền phải do Quản trị duyệt', { hinhThuc: 'Còn bảo hành' });
   var hinh = thu ? 'THU_TIEN' : mien ? 'BAO_HANH' : 'THIEN_CHI', loaiX = thu ? 'XUAT_SUA' : 'XUAT_BH';
   var ngay = chkDate(String(req.ngay || today())); if (ngay < t.ngay) throw fail('VALIDATION', 'Ngày thay không trước ngày tiếp nhận (' + t.ngay + ')', { ngay: 'Từ ' + t.ngay });
   var kh = mapBy(readTable('Kho').rows, 'maKho'), kho = kh[up(req.kho || 'KHO')], loi = readTable('Kho').rows.filter(function (k) { return k.loai === 'HANG_LOI' && k.trangThai === 'HOAT_DONG'; })[0];
@@ -211,6 +213,10 @@ function bhReplace(u, req, logs) {
     ghi.push({ maHang: it.maHang, soLuong: q, serialMoi: sm, serialCu: sc, ngay: ngay, hinhThuc: hinh });
   });
   if (cuLe > 0) cuL.push({ maHang: t.maHang, soLuongCT: Math.round(cuLe * 1000) / 1000 });
+  if (!cab && !px) {   // hàng bán rời / không serial: tổng số đổi (mọi lần) không vượt số trên phiếu BH
+    var tran = t.key ? 1 : Number(t.soLuong) || 0, da = parseSerials(t.thayThe).reduce(function (a, z) { return a + (Number(z.soLuong) || 0); }, 0), moi = ghi.reduce(function (a, z) { return a + z.soLuong; }, 0);
+    if (da + moi > tran + 1e-9) throw fail('VALIDATION', 'Phiếu ' + t.soPBH + ' bảo hành ' + tran + ' — đã đổi ' + da + ', chỉ đổi thêm tối đa ' + Math.max(0, tran - da) + ' (cần thêm thì lập phiếu bảo hành mới)', { lines: 'Vượt số bảo hành' });
+  }
   var src = {};
   if (cab) { var ld = QBH.current(bhHist(cab.key, bhXuat(cab.key, sk[cab.key])), 12), vt = ld ? ld.viTri : {}, lsx = readTable('LenhSX').rows.filter(function (z) { return z.soLSX === cab.soLSX; })[0] || {}; src = vt.maKH ? vt : lsx; }
   else src = { maKH: t.maKH || (sale && sale.maKH) || '', maCongTrinh: (sale && sale.maCongTrinh) || '' };   // cặp khách–công trình lấy cùng 1 nguồn
@@ -258,11 +264,16 @@ function bhReplaceVoid(u, req, logs) {
   var gx = loadVoucher(so); if (!gx || gx.trangThai !== 'HOAN_TAT') throw fail('VALIDATION', 'Không có phiếu ' + so, null);
   var hl = readTable('Phieu').rows.filter(function (h) { return h.loai === 'NHAP_HANG_LOI' && h.trangThai === 'HOAN_TAT' && h.requestId === gx.requestId && h.soCTGoc === t.soPBH; })[0], gl = hl ? loadVoucher(hl.soPhieu) : null;   // phiếu thu hồi cùng lệnh thay
   var ngay = chkDate(String(req.ngay || today())), prevD = prevHeads(req, 'DAO');
-  var dx = prevD.filter(function (h) { return h.phieuGoc === so; })[0], dl = gl ? prevD.filter(function (h) { return h.phieuGoc === gl.soPhieu; })[0] : null;
+  var daoOf = function (g) { return readTable('Phieu').rows.filter(function (h) { return h.loai === 'DAO' && h.trangThai === 'HOAN_TAT' && h.phieuGoc === g && String(h.lyDo).indexOf('Huỷ lần thay ' + t.soPBH + ':') === 0; })[0]; };   // lần huỷ trước chết giữa chừng (requestId khác) → làm tiếp
+  var dx = prevD.filter(function (h) { return h.phieuGoc === so; })[0] || daoOf(so), dl = gl ? prevD.filter(function (h) { return h.phieuGoc === gl.soPhieu; })[0] || daoOf(gl.soPhieu) : null;
   if (!dx && gx.daDao) throw fail('VALIDATION', 'Phiếu ' + so + ' đã bị đảo', null);
   if (gl && !dl && gl.daDao) throw fail('VALIDATION', 'Phiếu thu hồi ' + gl.soPhieu + ' đã bị đảo', null);
   var heads = cabHeads(), cab = t.serialTu ? readTable('HoSoTu').rows.filter(function (c) { return c.serial === t.serialTu && cabOK(c, heads); })[0] : null;
   var sk = mapBy(readTable('Serial').rows, 'key'), items = mapBy(readTable('HangHoa').rows, 'maHang'), alt = {}, newKeys = [];
+  if (cab && !dx) {   // chu kỳ cũ: tủ đã khách trả (kể cả đã bán khách mới) sau lần thay → không huỷ
+    var ret = parseSerials(cab.lichSu).filter(function (e) { return e.loai === 'KHACH_TRA' && !e.huy && e.ngay >= gx.ngay; })[0];
+    if (ret || !sk[cab.key] || sk[cab.key].trangThai !== 'DA_BAN') throw fail('VALIDATION', 'Tủ ' + cab.serial + (ret ? ' đã khách trả ngày ' + ret.ngay + ' (phiếu ' + ret.soPhieu + ')' : ' không còn ở phía khách') + ' sau lần thay — không huỷ lần thay của chu kỳ cũ', null);
+  }
   gx.lines.forEach(function (l) { (l.serials || []).forEach(function (z) { var k = QSerial.keyOf(items[l.maHang], z); newKeys.push(k);
     if (cab && sk[k] && sk[k].trangThai === 'DA_LAP') { if (sk[k].serialCha !== cab.key) throw fail('VALIDATION', 'Linh kiện mới ' + z + ' không còn trong tủ ' + cab.serial + ' — không huỷ được lần thay', null); alt[k] = 'DA_LAP'; } }); });
   var lyD = 'Huỷ lần thay ' + t.soPBH + ': ' + lyDo;
@@ -281,7 +292,10 @@ function bhReplaceVoid(u, req, logs) {
   var outS = {}; gx.lines.forEach(function (l) { (l.serials || []).forEach(function (z) { outS[l.maHang + '|' + z] = 1; }); outS[l.maHang] = 1; });
   all.forEach(function (z) { var mine = z.soPhieuXuat ? z.soPhieuXuat === so : outS[z.maHang] && (z.serialMoi || []).every(function (s) { return outS[z.maHang + '|' + s]; }); (mine ? gone : keep).push(z); });
   tx.thayThe = JSON.stringify(keep);
-  tx.huyThay = JSON.stringify(hv.concat([{ soPhieuXuat: so, soPhieuLoi: gl ? gl.soPhieu : '', daoXuat: sx, daoLoi: sl, ngay: ngay, lyDo: lyDo, nguoi: u.email, thoiGian: nowIso(), requestId: String(req.requestId), muc: gone }]));
+  var bo = {};
+  if (gone.some(function (z) { return z.hinhThuc === 'THU_TIEN'; }) && !keep.some(function (z) { return z.hinhThuc === 'THU_TIEN'; })) { bo.phiSua = tt.phiSua; tx.phiSua = ''; }   // huỷ lần sửa thu tiền → bỏ phí sửa (không còn căn cứ doanh thu)
+  if (gone.length) { bo.hinhThuc = tt.hinhThuc; tx.hinhThuc = keep.length ? keep[keep.length - 1].hinhThuc || '' : ''; }
+  tx.huyThay = JSON.stringify(hv.concat([{ soPhieuXuat: so, soPhieuLoi: gl ? gl.soPhieu : '', daoXuat: sx, daoLoi: sl, ngay: ngay, lyDo: lyDo, nguoi: u.email, thoiGian: nowIso(), requestId: String(req.requestId), muc: gone, boPhiSua: bo.phiSua === undefined ? undefined : bo.phiSua, hinhThucCu: bo.hinhThuc }]));
   tx.soPhieuXuat = String(tt.soPhieuXuat).split(/\s*,\s*/).filter(function (x) { return x && x !== so; }).join(', ');
   tx.soPhieuLoi = String(tt.soPhieuLoi).split(/\s*,\s*/).filter(function (x) { return x && (!gl || x !== gl.soPhieu); }).join(', ');
   putRow('PhieuBaoHanh', tx, tt._row);   // ghi cuối = huỷ xong
@@ -352,13 +366,20 @@ function bhAugment(out, sr, hs) {
 function reportBH(u, req) {
   var from = String(req.from || ''), to = String(req.to || '');
   if (!QValidate.isoDate(from) || !QValidate.isoDate(to) || from > to) return { ok: false, code: 'VALIDATION', error: 'Kỳ báo cáo không hợp lệ' };
-  var tks = readTable('PhieuBaoHanh').rows, tk = mapBy(tks, 'soPBH'), ph = readTable('Phieu').rows.filter(function (h) { return (h.loai === 'XUAT_BH' || h.loai === 'XUAT_SUA') && h.trangThai === 'HOAN_TAT' && !h.daDao && h.ngay >= from && h.ngay <= to; });
-  var rows = ph.map(function (h) { var t = tk[h.soCTGoc] || {}; return { soPhieu: h.soPhieu, ngay: h.ngay, soPBH: h.soCTGoc, loai: h.loai === 'XUAT_SUA' ? 'THU_TIEN' : 'BAO_HANH', serialTu: t.serialTu || '', serial: t.serial || '', maHang: t.serialTu ? '' : t.maHang || '', soLuong: t.soLuong || '',
-    tinhTrangBH: t.tinhTrangBH || '', nguyenNhan: t.nguyenNhan || '', thienChi: t.thienChi || '', giaTri: Number(h.tongTien) || 0 }; });
+  // phiếu xuất BH / sửa giữ nguyên ở kỳ của nó (kể cả đã đảo); phiếu đảo là dòng ÂM tại ngày hiệu lực (GOC = ngày phiếu gốc, NGAY = ngày phiếu đảo) — như N-X-T, không sửa kỳ đã khoá
+  var tks = readTable('PhieuBaoHanh').rows, tk = mapBy(tks, 'soPBH'), all = readTable('Phieu').rows.filter(function (h) { return h.trangThai === 'HOAN_TAT'; }), xb = mapBy(all.filter(function (h) { return h.loai === 'XUAT_BH' || h.loai === 'XUAT_SUA'; }), 'soPhieu');
+  var row = function (h, g, ngay, gt) { var t = tk[g.soCTGoc] || {}; return { soPhieu: h.soPhieu, ngay: ngay, soPBH: g.soCTGoc, loai: g.loai === 'XUAT_SUA' ? 'THU_TIEN' : 'BAO_HANH', serialTu: t.serialTu || '', serial: t.serial || '', maHang: t.serialTu ? '' : t.maHang || '', soLuong: t.soLuong || '',
+    tinhTrangBH: t.tinhTrangBH || '', nguyenNhan: t.nguyenNhan || '', thienChi: t.thienChi || '', giaTri: gt, dao: h !== g ? true : undefined, phieuGoc: h !== g ? g.soPhieu : undefined }; };
+  var rows = [];
+  all.forEach(function (h) {
+    if (xb[h.soPhieu] && h.ngay >= from && h.ngay <= to) rows.push(row(h, h, h.ngay, Number(h.tongTien) || 0));
+    var g = h.loai === 'DAO' && xb[h.phieuGoc]; if (!g) return; var nd = h.hieuLuc === 'GOC' ? g.ngay : h.ngay;
+    if (nd >= from && nd <= to) rows.push(row(h, g, nd, -(Number(h.tongTien) || 0)));
+  });
   var con = 0, sk = mapBy(readTable('Serial').rows, 'key'), heads = cabHeads();
   readTable('HoSoTu').rows.forEach(function (c) { if (!cabOK(c, heads) || !sk[c.key] || sk[c.key].trangThai !== 'DA_BAN') return;
     var cur = QBH.current(bhHist(c.key, bhXuat(c.key, sk[c.key])), bhThang(sk[c.key], c, null)); if (cur && cur.hanBH && cur.hanBH >= to && cur.ngayBanGiao <= to) con++; });
-  var sua = tks.filter(function (t) { return t.trangThai === 'HOAN_THANH' && Number(t.phiSua) > 0 && t.ngayDong >= from && t.ngayDong <= to; });   // doanh thu sửa chữa ghi nhận khi hoàn thành
+  var sua = tks.filter(function (t) { return ['HOAN_THANH', 'TU_CHOI', 'DONG_KHACH_TRA'].indexOf(t.trangThai) >= 0 && Number(t.phiSua) > 0 && t.ngayDong >= from && t.ngayDong <= to; });   // doanh thu sửa: theo ngày đóng phiếu (hoàn thành; từ chối / khách trả tủ mà đã làm và thu phí)
   var sum = function (l) { return rows.reduce(function (a, r) { return r.loai === l ? a + r.giaTri : a; }, 0); };
   return { from: from, to: to, rows: rows, tong: sum('BAO_HANH'), tongSua: sum('THU_TIEN'), phiSua: sua.reduce(function (a, t) { return a + Number(t.phiSua); }, 0),
     sua: sua.map(function (t) { return { soPBH: t.soPBH, ngayDong: t.ngayDong, serialTu: t.serialTu || t.serial || t.maHang, phiSua: Number(t.phiSua) }; }), tuConBH: con };

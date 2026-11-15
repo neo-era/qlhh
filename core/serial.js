@@ -8,7 +8,7 @@ var QSerial=(function(){
     CHUYEN_KHO:[['TRONG_KHO','HANG_LOI'],null,'DEN'],KHACH_TRA:[['DA_BAN'],'TRONG_KHO','KHO'],
     NHAP_HANG_LOI:[['DA_BAN','DA_THAY'],'HANG_LOI','KHO'],NHAP_LAI_SX:[['DA_LAP'],'TRONG_KHO','KHO'],
     XUAT_HUY:[['TRONG_KHO','HANG_LOI'],'XUAT_HUY',''],GUI_NCC:[['HANG_LOI'],'GUI_NCC',''],CHUYEN_SUA:[['HANG_LOI'],'TRONG_KHO','DEN'],
-    TRA_KHACH_SUA:[['HANG_LOI'],'DA_BAN',''],XUAT_SUA:[['TRONG_KHO'],'DA_BAN','']
+    TRA_KHACH_SUA:[['HANG_LOI'],'DA_BAN',''],XUAT_SUA:[['TRONG_KHO'],'DA_BAN',''],CHUYEN_LOI:[['TRONG_KHO'],'HANG_LOI','DEN']
   };
   var NEW=['TON_DAU','NHAP_MUA','NHAP_TP','NHAP_KHAC'];
   function norm(s){return String(s===undefined||s===null?'':s).trim().toUpperCase();}
@@ -35,7 +35,7 @@ var QSerial=(function(){
         var nhapMoi=NEW.indexOf(p.loai)>=0||(p.loai==='KIEM_KE'&&Number(l.slThucTe)>Number(l.slSoSach));
         if(nhapMoi){
           if(cur&&cur.trangThai!=='HUY')return fail('SERIAL_DUP',l.dong,'Serial '+s+' ('+(it.hang||'không hãng')+') đã có trong hệ thống');
-          changes.push(Object.assign(base,{to:'TRONG_KHO',kho:p.kho}));continue;
+          changes.push(Object.assign(base,{to:p.loai==='KIEM_KE'&&(ctx.khoLoi||[]).indexOf(p.kho)>=0?'HANG_LOI':'TRONG_KHO',kho:p.kho}));continue;
         }
         if(nccSent){   // nhận NCC trả về: serial đang gửi của phiếu gốc (đã sửa) hoặc serial mới (NCC đổi — phải chỉ serial gửi được đổi)
           var toN=(ctx.khoLoi||[]).indexOf(p.kho)>=0?'HANG_LOI':'TRONG_KHO';
@@ -44,13 +44,14 @@ var QSerial=(function(){
           nNew++;changes.push(Object.assign(base,{to:toN,kho:p.kho}));continue;
         }
         if(p.loai==='KIEM_KE'){
-          if(!cur||cur.trangThai!=='TRONG_KHO'||cur.kho!==p.kho)return fail('SERIAL_NOT_IN_STOCK',l.dong,'Serial '+s+' không có trong kho '+p.kho);
+          if(!cur||(cur.trangThai!=='TRONG_KHO'&&cur.trangThai!=='HANG_LOI')||cur.kho!==p.kho)return fail('SERIAL_NOT_IN_STOCK',l.dong,'Serial '+s+' không có trong kho '+p.kho);
           changes.push(Object.assign(base,{to:'MAT',kho:''}));continue;
         }
         var mv=MOVE[p.loai];if(!mv)return fail('VALIDATION',l.dong,'Loại phiếu không dùng serial');
         if(p.loai==='NHAP_HANG_LOI'&&ctx.choLapDat)mv=[mv[0].concat('DA_LAP'),mv[1],mv[2]];   // chỉ luồng thay linh kiện bảo hành được thu hồi linh kiện đang lắp trong tủ
         if(p.loai==='KHACH_TRA'||p.loai==='TRA_KHACH_SUA'){
-          var g=(ctx.vouchers||{})[p.phieuGoc],ok=g&&(g.lines||[]).some(function(x){return x.maHang===l.maHang&&(x.serials||[]).map(norm).indexOf(s)>=0;});
+          var g=(ctx.vouchers||{})[p.phieuGoc],ok=g&&((g.lines||[]).some(function(x){return x.maHang===l.maHang&&(x.serials||[]).map(norm).indexOf(s)>=0;})
+            ||(p.loai==='TRA_KHACH_SUA'&&g.maKH&&(ctx.owners||{})[k]===g.maKH));   // trả khách: cả serial NCC đổi cho hàng của khách
           if(!ok)return fail('VALIDATION',l.dong,'Serial '+s+' không thuộc phiếu xuất gốc');
         }
         var inStock=mv[0].indexOf('TRONG_KHO')>=0||mv[0].indexOf('HANG_LOI')>=0;

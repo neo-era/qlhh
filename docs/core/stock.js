@@ -25,11 +25,12 @@ var QStock=(function(){
     CHUYEN_SUA:{dir:0,cost:'PRICE',pre:'CS',ten:'Chuyển hàng đã sửa về kho thường'},
     TRA_KHACH_SUA:{dir:-1,cost:'ZERO',pre:'TS',ten:'Trả khách hàng đã sửa'},
     XUAT_SUA:{dir:-1,cost:'AVG',pre:'XR',ten:'Xuất sửa chữa (thu tiền)'},
+    CHUYEN_LOI:{dir:0,cost:'AVG',pre:'CL',ten:'Chuyển hàng hỏng sang kho lỗi'},   // giá trị rời giá vốn theo BQ (ghi giảm 632), số lượng sang kho lỗi
     DAO:{dir:0,pre:'DA',ten:'Phiếu đảo'}
   };
-  var LOI_OK=['NHAP_HANG_LOI','TRA_NCC','DAO','GUI_NCC','NHAN_NCC','CHUYEN_SUA','TRA_KHACH_SUA','XUAT_HUY'];   // loại phiếu được dùng ở kho hàng lỗi
+  var LOI_OK=['NHAP_HANG_LOI','TRA_NCC','DAO','GUI_NCC','NHAN_NCC','CHUYEN_SUA','TRA_KHACH_SUA','XUAT_HUY','KIEM_KE'];   // loại phiếu được dùng ở kho hàng lỗi
   var LOI_ONLY=['NHAP_HANG_LOI','GUI_NCC','CHUYEN_SUA','TRA_KHACH_SUA'];   // kho (đi) bắt buộc là kho hàng lỗi
-  function dirOf(loai){return loai==='CHUYEN_SUA'?1:(T[loai]||{}).dir;}   // chiều với kho THƯỜNG (giá vốn): hàng sửa về = nhập
+  function dirOf(loai){return loai==='CHUYEN_SUA'?1:loai==='CHUYEN_LOI'?-1:(T[loai]||{}).dir;}   // chiều với kho THƯỜNG (giá vốn): hàng sửa về = nhập
   function priceVal(l){return l.thanhTien!==undefined&&l.thanhTien!==''?money(l.thanhTien):money(Number(l.soLuong)*Number(l.donGia));}
   var TRA_DUOC=['XUAT_BAN','XUAT_CONG_TRINH','XUAT_BH'];   // phiếu gốc của KHACH_TRA
   var MAXP=1e12;
@@ -87,7 +88,7 @@ var QStock=(function(){
       }
       if(p.loai==='KIEM_KE'||(p._rev&&p._rev==='KIEM_KE')){
         var d=Q(l.slThucTe)-Q(l.slSoSach);if(dir<0)d=-d;
-        if(d>0){v=valueIn!==undefined?valueIn:avgVal(ma,d);inn(ma,p.kho,d,v);}
+        if(d>0){v=loi[p.kho]?0:valueIn!==undefined?valueIn:avgVal(ma,d);inn(ma,p.kho,d,v);}
         else if(d<0){if(valueIn!==undefined&&!loi[p.kho]){var cr=capOut(ma,p.kho,-d,valueIn,p);v=cr.v;if(cr.d)adj[p.soPhieu+'#'+l.dong]=cr.d;}else v=out(ma,p.kho,-d,p);}
         return v;
       }
@@ -110,6 +111,9 @@ var QStock=(function(){
             else{var crs=capOut(l.maHang,g.khoDen,qs,gv,rp);v=crs.v;if(crs.d)adj[p.soPhieu+'#'+l.dong]=crs.d;}
             var sk=S(l.maHang);sk.kho[g.kho]=(sk.kho[g.kho]||0)+qs;
           }
+          else if(g.loai==='CHUYEN_LOI'){   // đảo: hàng rời kho lỗi, về kho thường đúng giá trị đã ghi giảm
+            var ql=Q(l.soLuong),sl=S(l.maHang);sl.kho[g.khoDen]=(sl.kho[g.khoDen]||0)-ql;neg(l.maHang,g.khoDen,rp);inn(l.maHang,g.kho,ql,gv);v=gv;
+          }
           else if(tg.dir>0){
             if(atGoc){v=out(l.maHang,g.kho,Q(l.soLuong),rp);if(!loi[g.kho]&&v!==gv){var s=S(l.maHang);s.pv+=v-gv;v=gv;}}   // ngay sau phiếu gốc: luôn đủ giá trị
             else{var cr=capOut(l.maHang,g.kho,Q(l.soLuong),gv,rp);v=cr.v;if(cr.d)adj[p.soPhieu+'#'+l.dong]=cr.d;}
@@ -128,6 +132,8 @@ var QStock=(function(){
         if(p.loai==='CHUYEN_SUA'){   // hàng đã sửa: rời kho lỗi (không giá), vào kho thường theo đơn giá đánh giá
           var qc=Q(l.soLuong),sc=S(ma);sc.kho[p.kho]=(sc.kho[p.kho]||0)-qc;neg(ma,p.kho,p);
           v=loi[p.khoDen]?0:priceVal(l);inn(ma,p.khoDen,qc,v);
+        }else if(p.loai==='CHUYEN_LOI'){   // hàng hỏng: rời kho thường theo BQ, số lượng sang kho lỗi (không giá)
+          var qh=Q(l.soLuong);v=out(ma,p.kho,qh,p);var sh=S(ma);sh.kho[p.khoDen]=(sh.kho[p.khoDen]||0)+qh;
         }else if(t.dir>0){
           if(t.cost==='PRICE')v=l.thanhTien!==undefined&&l.thanhTien!==''?money(l.thanhTien):money(Number(l.soLuong)*Number(l.donGia));
           else if(p.loai==='NHAP_TP'&&p.soLSX&&Lc[p.soLSX]){var c=Lc[p.soLSX],x=LS(p.soLSX),k=Q(l.soLuong),rem=Q(c.n)-x.nq,bal=x.xv+cpTo(p.soLSX,p.ngay)-x.nv-x.tv;
@@ -161,6 +167,7 @@ var QStock=(function(){
       if(loi[p.kho]&&LOI_OK.indexOf(p.loai)<0)e.push({dong:0,field:'kho',msg:'Kho hàng lỗi chỉ dùng cho nhận hàng lỗi / trả NCC'});
       if(p.loai==='NHAP_HANG_LOI'&&!loi[p.kho])e.push({dong:0,field:'kho',msg:'Hàng lỗi phải nhận vào kho hàng lỗi'});
       else if(LOI_ONLY.indexOf(p.loai)>=0&&!loi[p.kho])e.push({dong:0,field:'kho',msg:'Phiếu '+t.ten.toLowerCase()+' lập từ kho hàng lỗi'});
+      if(p.loai==='CHUYEN_LOI'&&(!p.khoDen||!loi[p.khoDen]))e.push({dong:0,field:'khoDen',msg:'Kho đến phải là kho hàng lỗi'});
       if(p.loai==='CHUYEN_SUA'&&(!p.khoDen||loi[p.khoDen]))e.push({dong:0,field:'khoDen',msg:'Kho đến phải là kho thường'});
       if(p.loai==='CHUYEN_KHO'){
         if(!p.khoDen||p.khoDen===p.kho)e.push({dong:0,field:'khoDen',msg:'Kho đến phải khác kho đi'});
@@ -312,7 +319,7 @@ var QStock=(function(){
   }
 
   // ---------- đường nhanh: phiếu mới nằm sau mọi phiếu của các mã liên quan ----------
-  var FAST=['NHAP_MUA','NHAP_HANG_LOI','CHUYEN_KHO','KIEM_KE','XUAT_BAN','XUAT_CONG_TRINH','XUAT_BH','TRA_NCC','NHAP_KHAC','XUAT_HUY','GUI_NCC','XUAT_SUA'];   // phiếu sản xuất luôn qua đường đầy đủ (ràng buộc theo lệnh)
+  var FAST=['NHAP_MUA','NHAP_HANG_LOI','CHUYEN_KHO','KIEM_KE','XUAT_BAN','XUAT_CONG_TRINH','XUAT_BH','TRA_NCC','NHAP_KHAC','XUAT_HUY','GUI_NCC','XUAT_SUA','CHUYEN_LOI'];   // phiếu sản xuất luôn qua đường đầy đủ (ràng buộc theo lệnh)
   function applyFast(ton,p,opts){
     opts=opts||{};if(FAST.indexOf(p.loai)<0)return null;
     if(p.loai==='TRA_NCC'&&!loiSet(opts)[p.kho])return null;   // cần phiếu nhập gốc → đường đầy đủ
