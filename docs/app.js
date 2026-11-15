@@ -1169,7 +1169,8 @@
     const tpl = {}; (d.templates || []).forEach(t => tpl[t.maMau] = t);
     const hist = {}; (d.lapDat || []).forEach(l => { if (!l.lyDoHuy) (hist[l.key] = hist[l.key] || []).push(l); });
     const tus = (d.cabinets || []).filter(c => c.trangThai !== 'HUY' && sk[c.key] && sk[c.key].trangThai === 'DA_BAN').map(c => {
-      const h = (hist[c.key] || []).filter(l => l.phieuXuat ? l.phieuXuat === c.phieuXuat : (!l.ngayXuat || l.ngayXuat === c.ngayXuat));   // chu kỳ giao hiện hành (theo số phiếu xuất)
+      const all = hist[c.key] || [], px = c.phieuXuat || all.reduce((m, l) => (l.thoiGian > (m.t || '') ? { t: l.thoiGian, p: l.phieuXuat } : m), {}).p || '';   // tủ bán trước bản 0.4.0 chưa có phieuXuat → lấy chu kỳ ghi gần nhất
+      const h = all.filter(l => l.phieuXuat ? l.phieuXuat === px : (!l.ngayXuat || l.ngayXuat === c.ngayXuat));   // chu kỳ giao hiện hành (theo số phiếu xuất)
       const thang = tpl[c.maMau] && tpl[c.maMau].thangBH !== '' ? Number(tpl[c.maMau].thangBH) : Number(itemOf(c.maHang).thangBH || 12), cur = QBH.current(h, thang);
       return { c, cur, st: QBH.status(cur || { ngayXuat: c.ngayXuat }, S.today) }; });
     const rank = x => x.st.canhBao ? 0 : x.st.ma === 'SAP_HET' ? 1 : x.st.ma === 'CHUA_BAN_GIAO' ? 2 : x.st.ma === 'CON_BH' ? 3 : 4;
