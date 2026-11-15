@@ -225,7 +225,7 @@ dialog.wide{width:min(920px,calc(100vw - 24px))}
 .tname{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tuhead{display:flex;gap:14px;align-items:center;margin:8px 0}.tuqr svg{width:110px;height:110px;background:#fff;border-radius:6px}
 ul.plain{margin:0;padding-left:18px}.kcsum{margin:4px 0;padding-left:22px}.kcsum li{margin:4px 0}
-details{border:1px solid var(--line);border-radius:var(--r);padding:8px 10px;margin:6px 0}summary{cursor:pointer;min-height:44px;display:flex;align-items:center}
+details{border:1px solid var(--line);border-radius:var(--r);padding:8px 10px;margin:6px 0}summary{cursor:pointer;padding:10px 0;margin:-8px 0}
 /* KCS: mỗi lần 1 mục, nút lớn */
 dialog.kcsd .body{display:flex;flex-direction:column}
 .kchead{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:6px 0 8px}
@@ -290,3 +290,6 @@ dialog.kcsd .body{display:flex;flex-direction:column}
 .newbar{position:sticky;top:0;z-index:5;margin:0 0 10px;padding:8px 12px;border-radius:var(--r);background:var(--acc-soft);border:1px solid var(--acc);display:flex;gap:10px;align-items:center;justify-content:space-between}
 .lineerr{color:var(--bad);font-size:13px;font-weight:600;margin-top:6px}
 .stickacts{position:sticky;bottom:0;background:var(--panel);padding:10px 0 4px;margin-bottom:-4px;z-index:2;border-top:1px solid var(--line)}
+.dl dd .linkbtn{min-height:0;padding:10px 0;margin:-10px 0}   /* trong bảng thông tin: vẫn dễ chạm nhưng không lệch dòng nhãn */
+.monrow{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 0 10px}.monrow .in{width:auto;min-width:160px;flex:0 1 200px}
+@media (max-width:899px),(pointer:coarse){.serf,.search input,.msearch input{min-height:48px}.sxbar .btn{min-height:48px}}

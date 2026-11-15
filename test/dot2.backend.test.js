@@ -29,3 +29,37 @@ test('B10 thông báo serial bằng tiếng Việt, không lộ mã trạng thá
   const r = P('voucher.create', { voucher: { loai: 'XUAT_BAN', ngay: '2026-11-03', kho: 'KHO', maKH: 'TN', maCongTrinh: 'PDG', lines: [{ maHang: 'LOGO', soLuongCT: 1, serials: ['LG11010'] }] } }, x.nv);
   assert.equal(r.ok, false); const msg = JSON.stringify(r); assert.ok(!/DA_BAN|TRONG_KHO/.test(msg), msg); assert.match(msg, /đã bán/);
 });
+
+// ================= vòng 1 =================
+function sold(o = {}) {
+  const x = built(), [t1, t2] = x.tp.serials;
+  [t1, t2].forEach(t => x.W('kcs.add', { serial: t, ngay: '2026-11-09', ketQua: x.pass() }, x.nv));
+  kh2(x);
+  const px = x.W('voucher.create', { voucher: { loai: 'XUAT_BAN', ngay: '2026-11-09', kho: 'KHO', maKH: o.kh || 'TN', maCongTrinh: o.kh ? 'CT2' : 'PDG', lines: [{ maHang: 'TU-DKCS-2N', soLuongCT: 1, serials: [t1] }] } }, x.nv);
+  x.W('install.add', { serial: t1, lapDat: { loai: 'BAN_GIAO', ngay: '2026-11-10', maKH: o.kh || 'TN', maCongTrinh: o.ct === undefined ? 'PDG' : o.ct, diaChi: 'x' } }, x.nv);
+  return { ...x, t1, px: px.soPhieu };
+}
+const repl = x => { const b = x.W('bh.create', { serial: x.t1, phieu: { ngay: '2026-11-11', moTaLoi: 'PLC treo' } }, x.nv);
+  x.W('bh.update', { soPBH: b.soPBH, trangThai: 'DANG_XU_LY', nguyenNhan: 'LOI_THIET_BI' }, x.nv);
+  return x.P('bh.replace', { soPBH: b.soPBH, ngay: '2026-11-11', kho: 'KHO', lines: [{ maHang: 'CB6', soLuong: 1 }] }, x.nv); };
+test('V1 tech A1: tủ làm theo lệnh khách A, bán + bàn giao khách B → thay linh kiện bảo hành không bị chặn', () => {
+  const x = sold({ kh: 'KH2', ct: '' }); x.buy('2026-11-10', 1); const r = repl(x); assert.equal(r.ok, true, JSON.stringify(r));
+});
+test('V1 tech A1: công trình đổi chủ sau khi bán → bảo hành, khách trả theo phiếu gốc, di dời giữ vị trí cũ vẫn làm được', () => {
+  const x = sold(); x.buy('2026-11-10', 1);
+  x.W('project.upsert', { project: { maCongTrinh: 'PDG', ten: 'Hẻm 20 Phan Đình Giót', maKH: 'KH2' } });
+  assert.equal(repl(x).ok, true, 'bảo hành');
+  assert.equal(x.P('install.add', { serial: x.t1, lapDat: { loai: 'DI_DOI', ngay: '2026-11-12', maKH: 'TN', maCongTrinh: 'PDG', diaChi: 'y' } }, x.nv).ok, true, 'di dời giữ khách/công trình');
+  assert.equal(x.P('install.add', { serial: x.t1, lapDat: { loai: 'DI_DOI', ngay: '2026-11-12', maKH: 'TN', maCongTrinh: 'CT2', diaChi: 'z' } }, x.nv).ok, false, 'di dời sang cặp lệch vẫn chặn');
+  const kt = x.P('voucher.create', { voucher: { loai: 'KHACH_TRA', ngay: '2026-11-13', kho: 'KHO', maKH: 'TN', maCongTrinh: 'PDG', phieuGoc: x.px, lines: [{ maHang: 'TU-DKCS-2N', soLuongCT: 1, serials: [x.t1], dongGoc: 1 }] } }, x.nv);
+  assert.equal(kt.ok, true, JSON.stringify(kt));
+});
+test('V1 tech B4/B5: sync.ver chỉ trả phiên bản + ngày (không đọc sheet); sync.pull báo danh sách phiếu bị cắt', () => {
+  const x = plant(); x.buy('2026-11-01', 1); const v = x.pull().version; for (const k in x.a.reads) delete x.a.reads[k];
+  const r = x.P('sync.ver', {}, x.nv); assert.equal(r.ok, true); assert.equal(r.data.version, v); assert.ok(r.data.today);
+  assert.deepEqual(Object.keys(x.a.reads).filter(k => !/NguoiDung/.test(k)), [], 'không đọc sheet dữ liệu');
+  assert.equal(x.pull().vouchersCut, false);
+  const ph = x.a.sheets.Phieu; const row = ph.d[1]; for (let i = 0; i < 501; i++) ph.d.push(row.map((c, j) => j === 0 ? 'ZZ-' + i : j === 11 ? 'LOI_GHI' : c));
+  x.a.raw.dataVersion = String(Number(x.a.raw.dataVersion) + 1); for (const k of Object.keys(x.a.cache)) if (/dataVersion|^ver:/.test(k)) delete x.a.cache[k];
+  assert.equal(x.pull().vouchersCut, true);
+});

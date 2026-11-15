@@ -1,6 +1,6 @@
 /* QLHH core/perm — quyền theo vai trò + lọc dữ liệu nhạy cảm (chạy ở MÁY CHỦ trước khi trả về). */
 var QPerm=(function(){
-  var READ=['auth.me','sync.pull','feedback.add','voucher.get','voucher.list','sx.get','serial.get'];
+  var READ=['auth.me','sync.pull','sync.ver','feedback.add','voucher.get','voucher.list','sx.get','serial.get'];
   var EDIT=['item.upsert','item.stop','group.upsert','supplier.upsert','price.add','customer.upsert','project.upsert','unit.upsert','voucher.create','lsx.create','lsx.xuatSX','lsx.nhapTP','kcs.add','pxx.issue','install.add','bh.create','bh.update','bh.replace'];
   var ADMIN=['user.upsert','feedback.update','admin.schemaCheck','warehouse.upsert','voucher.reverse','period.lock','stock.rebuild','report.nxt','template.upsert','lsx.chiPhi','lsx.chiPhiHuy','lsx.huy','pxx.cancel','report.wip','install.void','report.bh'];
   var ACT={XEM:READ,NHAP_LIEU:READ.concat(EDIT),QUAN_TRI:READ.concat(EDIT,ADMIN)};

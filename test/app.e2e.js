@@ -48,7 +48,7 @@ const rows = p => p.$$('tbody tr');
   await p.focus('#f_ten'); await p.keyboard.press('Enter'); await p.waitForFunction(() => !document.querySelector('#dlg').open, null, { timeout: 8000 }).catch(() => {});
   await p.waitForTimeout(200); ok((await rows(p)).length === 2, 'bấm Enter trong ô nhập = Lưu (không phải Huỷ)');
   await p.click('#addItem'); await fill(p, { maHang: 'DL-STR-100', ten: 'x', dvt: 'bộ' }); await p.click('#dlgOk');
-  ok((await p.textContent('#e_maHang')).includes('đã tồn tại'), 'mã trùng bị chặn ngay trên máy'); await p.keyboard.press('Escape');
+  ok((await p.textContent('#e_maHang')).includes('đã tồn tại'), 'mã trùng bị chặn ngay trên máy'); p.once('dialog', d => d.accept()); await p.keyboard.press('Escape');   // đang nhập dở → Esc hỏi lại (đợt 2)
   ok((await rows(p)).length === 2, 'bảng có 2 mã');
   await p.fill('#qd', 'den 100w'); await p.waitForTimeout(250); ok((await rows(p)).length === 1, 'tìm không dấu nhiều từ');
   await p.fill('#qd', ''); await p.waitForTimeout(250); await p.click('tbody tr[data-ma="DL-STR-100"]');

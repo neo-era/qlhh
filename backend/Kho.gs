@@ -261,7 +261,7 @@ function voucherPrep(u, req, sx) {
   if (h.maNCC && !has('NhaCungCap', 'maNCC', h.maNCC)) throw fail('VALIDATION', 'Nhà cung cấp ' + h.maNCC + ' chưa có', { maNCC: 'Chọn NCC có sẵn' });
   if (h.maKH && !has('KhachHang', 'maKH', h.maKH)) throw fail('VALIDATION', 'Khách hàng ' + h.maKH + ' chưa có', { maKH: 'Chọn khách có sẵn' });
   if (h.maCongTrinh && !has('CongTrinh', 'maCongTrinh', h.maCongTrinh)) throw fail('VALIDATION', 'Công trình ' + h.maCongTrinh + ' chưa có', { maCongTrinh: 'Chọn công trình có sẵn' });
-  custProj(h.maKH, h.maCongTrinh);
+  if (!sx && !(h.loai === 'KHACH_TRA' && h.phieuGoc)) custProj(h.maKH, h.maCongTrinh);   // chỉ khi người dùng tự chọn; phiếu sinh từ lệnh/bảo hành, khách trả theo phiếu gốc thì kế thừa
   if (h.loai === 'TRA_NCC' && h.phieuGoc) { var gN = findByKey('Phieu', h.phieuGoc); if (gN && gN.maNCC && gN.maNCC !== h.maNCC) throw fail('VALIDATION', 'Phiếu gốc ' + h.phieuGoc + ' là của NCC ' + gN.maNCC, { maNCC: 'Trả đúng NCC đã nhập' }); }
   var items = mapBy(readTable('HangHoa').rows, 'maHang'), qd = readTable('QuyDoiDVT').rows, priced = QStock.TYPES[h.loai].cost === 'PRICE';
   var lines = [], le = [];
@@ -408,12 +408,12 @@ function voucherReverse(u, req, logs) {
   return { soPhieu: so, tinhLai: changed };
 }
 
-/** Đầu phiếu của 1 tháng (sync chỉ gửi 500 phiếu gần nhất; lọc tháng cũ hơn thì lấy ở đây). */
 /** Công trình phải thuộc khách đã chọn (công trình chưa gắn khách thì không ràng buộc). */
 function custProj(kh, ct) {
   if (!kh || !ct) return; var p = findByKey('CongTrinh', ct);
   if (p && p.maKH && p.maKH !== kh) throw fail('VALIDATION', 'Công trình ' + ct + ' thuộc khách ' + p.maKH + ', không phải ' + kh + ' — chọn lại khách hoặc công trình', { maCongTrinh: 'Công trình của khách ' + p.maKH, maKH: 'Không khớp công trình' });
 }
+/** Đầu phiếu của 1 tháng (sync chỉ gửi 500 phiếu gần nhất; lọc tháng cũ hơn thì lấy ở đây). */
 function voucherList(u, req) {
   var th = String(req.thang || ''); if (!/^\d{4}-\d{2}$/.test(th)) return { ok: false, code: 'VALIDATION', error: 'Tháng dạng YYYY-MM' };
   var rows = readTable('Phieu').rows.filter(function (p) { return p.trangThai === 'HOAN_TAT' && String(p.ngay).slice(0, 7) === th; }).map(strip);

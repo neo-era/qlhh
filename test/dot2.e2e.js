@@ -95,6 +95,10 @@ const focusId = p => p.evaluate(() => document.activeElement && document.activeE
     await p.fill('#vMon', '2026-10'); await p.dispatchEvent('#vMon', 'change'); await settle(p);
     ok((await p.$$('[data-so]')).length === 1 && /05\/10\/2026/.test(await main(p)), tag + 'B8 lọc phiếu theo tháng');
     await p.click('#vMonX'); await settle(p);
+    await p.evaluate(() => { QLHH_DEBUG.data.vouchersCut = true; QLHH_DEBUG.data.vouchers = QLHH_DEBUG.data.vouchers.filter(v => v.ngay >= '2026-11-01'); });   // giả lập 500 phiếu gần nhất không chứa tháng 10
+    await p.fill('#vMon', '2026-10'); await p.dispatchEvent('#vMon', 'change'); await p.waitForTimeout(900);
+    ok((await p.$$('[data-so]')).length === 1 && /05\/10\/2026/.test(await main(p)), tag + 'V1 A3 danh sách bị cắt → lọc tháng cũ hỏi máy chủ, hiện đủ phiếu');
+    await p.click('#vMonX'); await settle(p);
     // ---------- A3: khách ↔ công trình ----------
     await p.goto(BASE + '#/phieu'); await settle(p); await p.click(mob ? '#newVM' : '#newV'); await p.click('[data-t="XUAT_BAN"]'); await p.waitForSelector('#f_maKH');
     await p.selectOption('#f_maKH', 'TN'); let opts = await p.$$eval('#f_maCongTrinh option', o => o.map(x => x.value));
@@ -110,6 +114,13 @@ const focusId = p => p.evaluate(() => document.activeElement && document.activeE
     await p.fill('#l_sl_0', '2'); await p.dispatchEvent('#l_sl_0', 'input'); await p.click('[data-first="0"]');
     ok(await p.$$eval('#l_sp_0 input:checked', c => c.length) === 2 && (await p.textContent('#l_cnt_0')) === '2', tag + 'A4 "Chọn 2 đầu" chọn đúng 2 serial, bộ đếm 2');
     ok(await focusId(p) !== null, tag + 'A4 chọn serial không vẽ lại cả khối');
+    await p.click('[data-none="0"]'); await settle(p);
+    ok(await p.inputValue('#l_sl_0') === '2', tag + 'V1 A1 Bỏ chọn không ghi đè số lượng thành 0');
+    await p.click('[data-first="0"]'); ok(await p.$$eval('#l_sp_0 input:checked', c => c.length) === 2, tag + 'V1 A1 bấm Chọn N đầu lần 2 vẫn chọn đúng 2 (không chọn hết kho)');
+    await p.fill('#l_sl_0', '3'); await p.dispatchEvent('#l_sl_0', 'input');
+    ok(/Chọn 3 đầu/.test(await p.textContent('[data-first="0"]')) && /\/ 3/.test(await p.textContent('#l_tot_0')), tag + 'V1 B6 gõ số lượng → nhãn nút và "/ SL" cập nhật');
+    await p.fill('#l_sl_0', ''); await p.dispatchEvent('#l_sl_0', 'input'); await p.click('[data-none="0"]'); await p.click('[data-first="0"]');
+    ok(await p.$$eval('#l_sp_0 input:checked', c => c.length) === 0, tag + 'V1 A1 chưa nhập số lượng → không chọn gì, nhắc nhập SL');
     if (await p.$('#l_sf_0')) { await p.fill('#l_sf_0', 'zzz'); ok((await p.$$eval('#l_sp_0 [data-sv]', l => l.filter(x => !x.hidden).length)) === 0, tag + 'A4 ô lọc serial'); }
     // B6 lỗi theo dòng: xuất quá tồn → lý do ghi dưới đúng dòng
     await p.click('[data-none="0"]'); await p.fill('#l_ma_0', 'CB40'); await p.dispatchEvent('#l_ma_0', 'change'); await settle(p); await p.fill('#l_sl_0', '999'); await p.dispatchEvent('#l_sl_0', 'input');
@@ -118,6 +129,11 @@ const focusId = p => p.evaluate(() => document.activeElement && document.activeE
     // ---------- C: chạm X khi đang nhập dở → hỏi lại ----------
     let asked = false; p.once('dialog', d => { asked = true; d.dismiss(); }); await p.click('#dlg [data-x]'); await settle(p);
     ok(asked && await p.evaluate(() => document.querySelector('#dlg').open), tag + 'C bấm X khi đang nhập dở → hỏi lại, chọn ở lại thì phiếu còn');
+    p.once('dialog', d => d.accept()); await p.click('#dlg [data-x]'); await closed(p);
+    // ---------- V1 B3: Back khi đang nhập phiếu → hỏi lại ----------
+    await p.click(mob ? '#newVM' : '#newV'); await p.click('[data-t="NHAP_MUA"]'); await p.waitForSelector('#l_ma_0'); await p.fill('#l_ma_0', 'CB40'); await p.dispatchEvent('#l_ma_0', 'input');
+    let askB = false; p.once('dialog', d => { askB = true; d.dismiss(); }); await p.evaluate(() => { location.hash = '#/kho'; }); await settle(p);
+    ok(askB && await p.evaluate(() => document.querySelector('#dlg').open && location.hash === '#/phieu'), tag + 'V1 B3 đổi màn khi đang nhập phiếu → hỏi lại; ở lại thì phiếu và địa chỉ giữ nguyên');
     p.once('dialog', d => d.accept()); await p.click('#dlg [data-x]'); await closed(p);
     // ---------- A4: nhập serial — đếm + báo trùng ----------
     await p.click(mob ? '#newVM' : '#newV'); await p.click('[data-t="NHAP_MUA"]'); await p.waitForSelector('#l_ma_0');
@@ -130,6 +146,15 @@ const focusId = p => p.evaluate(() => document.activeElement && document.activeE
       await p.context().grantPermissions(['camera'], { origin: BASE.slice(0, -1) }); await p.click('[data-scan="0"]'); await p.waitForSelector('.scanov'); await p.waitForFunction(() => /khung|Không/.test((document.querySelector('.scanmsg') || {}).textContent || ''), null, { timeout: 8000 }).catch(() => {});
       ok(/Đưa mã vào khung/.test(await p.textContent('.scanmsg')), tag + 'A4 nút Quét serial mở camera');
       await p.click('.scanov [data-sx]'); ok(!(await p.$('.scanov')), tag + 'A4 đóng máy quét');
+      const live = () => p.evaluate(() => [...document.querySelectorAll('video')].some(v => v.srcObject && v.srcObject.getTracks().some(t => t.readyState === 'live')));
+      await p.click('[data-scan="0"]'); await p.waitForSelector('.scanov'); await p.waitForTimeout(600);
+      await p.keyboard.press('Escape'); await settle(p);
+      ok(!(await p.$('.scanov')) && await p.evaluate(() => document.querySelector('#dlg').open) && !(await live()), tag + 'V1 A2 Esc chỉ đóng máy quét (tắt camera), phiếu còn nguyên');
+      await p.click('[data-scan="0"]'); await p.waitForSelector('.scanov'); await p.waitForTimeout(600);
+      ok(await p.evaluate(() => document.activeElement && document.activeElement.closest('.scanov') !== null), tag + 'V1 B5 mở máy quét: con trỏ bàn phím nằm trong máy quét');
+      await p.evaluate(() => document.querySelector('#dlg').close()); await p.waitForTimeout(500);
+      ok(!(await p.$('.scanov')) && !(await live()), tag + 'V1 A2 hộp thoại đóng → máy quét đóng, camera tắt');
+      await p.click(mob ? '#newVM' : '#newV'); await p.click('[data-t="NHAP_MUA"]'); await p.waitForSelector('#l_ma_0');
     }
     p.once('dialog', d => d.accept()); await p.click('#dlg [data-x]'); await closed(p);
     // ---------- B11: ô nhập 16px trên điện thoại ----------

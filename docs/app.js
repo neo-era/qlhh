@@ -55,27 +55,32 @@
   /* Đọc có hiển thị "Đang tải…" (sau 300 ms), chống bấm 2 lần (lệnh đọc giống hệt đang chạy → lần bấm sau bị bỏ qua),
      và lưu tạm bản vừa đọc trên máy: mất mạng thì mở bản lưu (ghi rõ giờ lưu). */
   const INFL = {};
+  /** Bản lưu tối đa 200 mục (bỏ mục cũ nhất); khoá gồm công ty + email + vai trò → người khác / vai trò khác trên cùng máy không đọc được. */
+  function vkeep(k) { let l = LS.get('qlhh-vk', []); l = l.filter(x => x !== k); l.push(k); while (l.length > 200) IDB.del(l.shift()); LS.set('qlhh-vk', l); }
   async function load(action, body, label) {
     const key = action + ':' + JSON.stringify(body);
     if (INFL[key]) return new Promise(() => {});   // đang mở rồi
-    INFL[key] = 1; let ov = null; const tm = setTimeout(() => { ov = document.createElement('div'); ov.className = 'loadov'; ov.setAttribute('role', 'status'); ov.innerHTML = `<span>${esc(label || 'Đang tải…')}</span>`; ($('dialog[open]') || document.body).appendChild(ov); }, 300);
+    INFL[key] = 1; let ov = null; const sess = S.session, who = S.user ? S.user.email + ':' + S.user.vaiTro : ''; const tm = setTimeout(() => { ov = document.createElement('div'); ov.className = 'loadov'; ov.setAttribute('role', 'status'); ov.innerHTML = `<span>${esc(label || 'Đang tải…')}</span>`; ($('dialog[open]') || document.body).appendChild(ov); }, 300);
     try {
-      const r = await call(action, body, 3), ck = 'v:' + S.co.id + ':' + key;
-      if (r.ok) { IDB.set(ck, { r, at: Date.now(), ver: S.version }).catch(() => {}); return r; }
-      if (r.code === 'NETWORK' || S.offline) { const c = await IDB.get(ck).catch(() => null); if (c && c.r) { toast('Ngoại tuyến — đang xem bản lưu lúc ' + new Date(c.at).toLocaleString('vi-VN')); return { ...c.r, cached: c.at }; } }
+      const r = await call(action, body, 3, { timeout: 45000 }), ck = 'v:' + S.co.id + ':' + who + ':' + key;
+      if (S.session !== sess || !S.user) return new Promise(() => {});   // đã đăng xuất / đổi người trong lúc chờ: bỏ kết quả, không lưu
+      if (r.ok) { IDB.set(ck, { r, at: Date.now() }); vkeep(ck); return r; }
+      if (r.code === 'NETWORK' || S.offline) { const c = await IDB.get(ck); if (c && c.r && Date.now() - c.at < 30 * 864e5) { toast('Ngoại tuyến — đang xem bản lưu lúc ' + new Date(c.at).toLocaleString('vi-VN')); return { ...c.r, cached: c.at }; } }
       return r;
     } finally { clearTimeout(tm); if (ov) ov.remove(); delete INFL[key]; }
   }
-  async function call(action, body = {}, tries = 1) {
+  async function call(action, body = {}, tries = 1, opt = {}) {
     if (!S.co || !S.co.url) return { ok: false, code: 'CONFIG', error: 'Công ty chưa cấu hình máy chủ' };
     let wait = 1000, last;
     for (let i = 0; i < tries; i++) {
+      const ac = typeof AbortController === 'function' ? new AbortController() : null, to = ac && setTimeout(() => ac.abort(), opt.timeout || 75000);   // không treo "Đang tải…" vô hạn
       try {
-        const r = await fetch(S.co.url, { method: 'POST', redirect: 'follow', credentials: 'omit', body: JSON.stringify({ action, session: S.session, ...body }) });
+        const r = await fetch(S.co.url, { method: 'POST', redirect: 'follow', credentials: 'omit', body: JSON.stringify({ action, session: S.session, ...body }), signal: ac ? ac.signal : undefined });
         const t = await r.text();
         try { last = JSON.parse(t); } catch (e) { last = { ok: false, code: 'NOT_JSON', error: 'Máy chủ trả về trang lỗi' }; }
         setOffline(false);
-      } catch (e) { last = { ok: false, code: 'NETWORK', error: 'Không kết nối được máy chủ' }; setOffline(true); }
+      } catch (e) { last = { ok: false, code: 'NETWORK', error: e && e.name === 'AbortError' ? 'Máy chủ không trả lời — thử lại' : 'Không kết nối được máy chủ' }; if (!opt.quiet) setOffline(true); }
+      finally { if (to) clearTimeout(to); }
       if (last.ok || !RETRY.includes(last.code)) break;
       if (last.code === 'NETWORK' && i >= 1) break;   // mất mạng: báo sau ~1 s, không quay 31 s
       if (i < tries - 1) { await new Promise(r => setTimeout(r, wait)); wait *= 2; }
@@ -112,7 +117,7 @@
     history.replaceState(null, '', location.pathname + location.search);
     const co = company(p.get('state')) || company(LS.get('qlhh-co', 'LAVIPCO'));
     S.co = co; LS.set('qlhh-co', co.id); applyCo();
-    if (p.has('error')) { renderLogin(); toast('Google báo: ' + p.get('error')); return true; }
+    if (p.has('error')) { try { sessionStorage.removeItem('qlhh-ret'); } catch (e) {} renderLogin(); toast('Google báo: ' + p.get('error')); return true; }
     renderLogin('Đang xác minh với máy chủ…');
     const r = await call('auth.login', { idToken: p.get('id_token') }, 3);
     if (!r.ok) { renderLogin(); toast('Đăng nhập thất bại: ' + (r.error || r.code)); return true; }
@@ -155,23 +160,44 @@
     if (r.data.unchanged && !opt.force) { if (S.wasOff) { S.wasOff = false; renderView(); } flushFeedbackQueue(); return; }   // không đổi: không vẽ lại (giữ cuộn, ô đang gõ)
     if (!r.data.unchanged) {
       SX.stale = true; KS.vmc = null;
-      S.data = r.data.data; S.version = r.data.version; reindex();
+      S.data = r.data.data; S.data.vouchersCut = !!r.data.vouchersCut; S.version = r.data.version; reindex();
       IDB.set(cacheKey(), { data: S.data, version: S.version, at: Date.now() });
       if (isQT() && r.data.warnings && r.data.warnings.length) toast(`Sheet có ${r.data.warnings.length} dòng sai kiểu (vd ${r.data.warnings[0]})`);
     }
-    if (opt.noRender) { if (!$('#newbar') && $('#main')) { $('#main').insertAdjacentHTML('afterbegin', '<div class="newbar" id="newbar" role="status"><span>Có dữ liệu mới từ máy khác</span><button class="btn pri" type="button" id="nbGo">Cập nhật</button></div>'); $('#nbGo').onclick = () => renderView(); } }
-    else renderView();
+    renderView();
     flushFeedbackQueue();
   }
   function reindex() { S.idx = QSearch.buildIndex(S.data.items); }
-  /* Tự làm mới: mỗi 60 giây khi app đang hiện, hỏi máy chủ phiên bản dữ liệu (rất nhẹ). Có dữ liệu mới:
-     đang gõ / đang mở hộp thoại → hiện dải "Có dữ liệu mới — Cập nhật" (không vẽ lại dưới tay người dùng); còn lại → cập nhật luôn. */
-  async function poll() {
-    if (document.hidden || !S.user || !S.data || S.offline || S.polling) return;
-    S.polling = true;
+  /* Tự làm mới: 60 giây/lần khi app đang hiện (máy để yên > 5 phút: 3 phút/lần), chỉ 1 tab trên máy hỏi, và chỉ hỏi SỐ PHIÊN BẢN (sync.ver, không đọc sheet).
+     Có dữ liệu mới: đang gõ / mở hộp thoại / đang quét → dải "Có dữ liệu mới — Cập nhật" (bấm mới tải); còn lại → tải luôn.
+     Lỗi mạng khi tự kiểm tra: không báo ngoại tuyến ngay (2 lần liên tiếp mới báo), thử lại sau 1 → 2 → 5 phút. */
+  function pollOwner() {
+    const me = S.tabId || (S.tabId = Math.random().toString(36).slice(2)), o = LS.get('qlhh-poll', null), t = Date.now();
+    if (o && o.id !== me && t - o.at < 150e3) return false;
+    LS.set('qlhh-poll', { id: me, at: t }); return true;
+  }
+  function showNewBar() {
+    if ($('#newbar') || !$('#main')) return;
+    $('#main').insertAdjacentHTML('afterbegin', '<div class="newbar" id="newbar" role="status"><span>Có dữ liệu mới từ máy khác</span><button class="btn pri" type="button" id="nbGo">Cập nhật</button></div>');
+    $('#nbGo').onclick = () => sync();
+  }
+  async function poll(now) {
+    if (!S.user || !S.data || S.polling || (!now && document.hidden)) return;
+    const t = Date.now();
+    if (!now) {
+      if (S.offline && t < (S.pollNext || 0)) return;
+      if (t - (S.lastAct || t) > 300e3 && t - (S.lastPoll || 0) < 180e3) return;
+      if (!pollOwner()) return;
+    }
+    S.polling = true; S.lastPoll = t;
     try {
+      const r = await call('sync.ver', {}, 1, { quiet: true, timeout: 20000 });
+      if (!r.ok) { if (r.code === 'NETWORK') { S.pollFail = (S.pollFail || 0) + 1; S.pollNext = t + [60e3, 120e3, 300e3][Math.min(S.pollFail - 1, 2)]; if (S.pollFail >= 2) setOffline(true); } return; }
+      S.pollFail = 0; S.pollNext = 0;
+      const newDay = r.data.today && r.data.today !== S.today; if (r.data.today) S.today = r.data.today;
       const a = document.activeElement, busy = $('dialog[open]') || $('.scanov') || (a && a.matches && a.matches('#main input,#main textarea,#main select'));
-      await sync({ poll: true, noRender: !!busy });
+      if (Number(r.data.version) !== Number(S.version)) { if (busy) showNewBar(); else await sync(); }
+      else if (newDay && !busy) renderView();   // app mở qua đêm: ngày mặc định / giá "áp dụng hôm nay" sang ngày mới
     } finally { S.polling = false; }
   }
   setInterval(poll, 60000); S._poll = poll;
@@ -474,13 +500,15 @@
   // ---------- danh sách phiếu ----------
   /* Lọc theo tháng: tháng nằm trong 500 phiếu đã tải thì dùng luôn, cũ hơn thì hỏi máy chủ (voucher.list) — nhớ theo phiên bản dữ liệu. */
   function monthVouchers(m) {
-    const loc = (S.data.vouchers || []), old = loc.length && String(loc.reduce((a, p) => p.ngay < a ? p.ngay : a, '9999')).slice(0, 7);
-    if (loc.length < 500 || (old && KS.vm > old)) return loc;
-    const c = KS.vmc || {}; if (c.thang === KS.vm && c.ver === S.version) return c.rows;
-    if (!c.busy || c.busy !== KS.vm) { KS.vmc = { thang: KS.vm, busy: KS.vm, rows: [] };
-      call('voucher.list', { thang: KS.vm }, 3).then(r => { if (KS.vm !== r.data?.thang && r.ok) return; KS.vmc = r.ok ? { thang: KS.vm, ver: S.version, rows: r.data.vouchers } : { thang: KS.vm, ver: S.version, rows: [], err: r.error || r.code }; if (route() === 'phieu') viewVouchers(m); }); }
-    return [];
+    const loc = (S.data.vouchers || []);
+    if (!S.data.vouchersCut) return loc;   // máy đã có đủ mọi phiếu
+    const c = (KS.vmc = KS.vmc || {})[KS.vm], recent = KS.vm >= addMonth(S.today, -1);
+    if (c && !c.busy && !c.err && (!recent || c.ver === S.version)) return c.rows;   // tháng cũ: giữ bản đã tải; 2 tháng gần nhất: tải lại khi dữ liệu đổi
+    if (!c || !c.busy) { const th = KS.vm; KS.vmc[th] = { busy: 1, rows: c ? c.rows : [] };
+      call('voucher.list', { thang: th }, 3).then(r => { KS.vmc[th] = r.ok ? { ver: S.version, rows: r.data.vouchers } : { rows: [], err: r.error || r.code }; if (route() === 'phieu' && KS.vm === th) viewVouchers(m, '#vres'); }); }
+    return KS.vmc[KS.vm].rows;
   }
+  const addMonth = (d, n) => { const y = +d.slice(0, 4), mo = +d.slice(5, 7) - 1 + n; return new Date(Date.UTC(y, mo, 1)).toISOString().slice(0, 7); };
   function viewVouchers(m, only) {
     const d = S.data, src = KS.vm ? monthVouchers(m) : (d.vouchers || []);
     const all = src.slice().sort((a, b) => b.ngay < a.ngay ? -1 : b.ngay > a.ngay ? 1 : b.stt - a.stt);
@@ -489,11 +517,12 @@
     paint(m, only, header('Phiếu kho', canEdit() ? `<button class="btn pri" id="newV">${ic('plus')}<span>Lập phiếu</span></button>` : '', false, canEdit() ? 'newVM' : '') +
       `<label class="msearch">${ic('search')}<span class="sr">Tìm phiếu</span><input id="qpm" type="search" placeholder="Số phiếu, khách, công trình…" value="${esc(KS.pq)}" autocomplete="off"></label>
       <div class="top" style="margin-top:-4px"><label class="search" style="flex:1 1 380px">${ic('search')}<span class="sr">Tìm phiếu</span><input id="qpd" type="search" placeholder="Số phiếu, khách, công trình, NCC, lý do…" value="${esc(KS.pq)}" autocomplete="off"></label></div>
-      <div class="chips" role="group" aria-label="Lọc phiếu">${[['', 'Tất cả'], ['nhap', 'Nhập'], ['xuat', 'Xuất'], ['khac', 'Chuyển kho · Kiểm kê'], ['dao', 'Phiếu đảo']].map(([k, t]) => `<button class="chip" type="button" data-pg="${k}" aria-pressed="${KS.pg === k}">${t}</button>`).join('')}
-        <label class="chip monthf">Tháng <input type="month" id="vMon" value="${esc(KS.vm)}" aria-label="Lọc theo tháng"></label>${KS.vm ? '<button class="chip" type="button" id="vMonX">Mọi tháng</button>' : ''}</div>
-      <div id="vres"><div class="card list">${list.length ? list.slice(0, KS.vlim).map(p => `<div class="it" data-so="${esc(p.soPhieu)}" role="button" tabindex="0"><div><div class="mono">${esc(p.soPhieu)}${p.daDao ? ' <span class="tag stop">Đã đảo</span>' : ''}</div><b>${esc(LOAI[p.loai] || p.loai)}</b> · ${esc(vnD(p.ngay))} · ${esc(khoName(p.kho))}${p.khoDen ? ' → ' + esc(khoName(p.khoDen)) : ''}<br><small class="mut">${esc([p.maKH && custName(p.maKH), p.maCongTrinh && projName(p.maCongTrinh), p.maNCC && supName(p.maNCC), p.phieuGoc && 'gốc ' + p.phieuGoc, p.lyDo].filter(Boolean).join(' · '))}</small></div>${isQT() && p.tongTien !== undefined ? `<b style="white-space:nowrap">${money(p.tongTien)}</b>` : ''}</div>`).join('')
-        : `<div class="empty">${all.length ? 'Không có phiếu khớp.' : 'Chưa có phiếu kho.' + (canEdit() ? ' Bấm <b>Lập phiếu</b> — bắt đầu bằng Tồn đầu kỳ hoặc Nhập mua.' : '')}</div>`}</div>
+      <div class="chips" role="group" aria-label="Lọc phiếu">${[['', 'Tất cả'], ['nhap', 'Nhập'], ['xuat', 'Xuất'], ['khac', 'Chuyển kho · Kiểm kê'], ['dao', 'Phiếu đảo']].map(([k, t]) => `<button class="chip" type="button" data-pg="${k}" aria-pressed="${KS.pg === k}">${t}</button>`).join('')}</div>
+      <div class="monrow"><label for="vMon">Tháng</label><input class="in" type="month" id="vMon" value="${esc(KS.vm)}">${KS.vm ? `<button class="chip" type="button" id="vMonX" aria-pressed="true">Đang lọc ${esc(vnD(KS.vm))} ✕</button>` : '<span class="mut">tất cả các tháng</span>'}</div>
+      <div id="vres">${KS.vm && KS.vmc && KS.vmc[KS.vm] && KS.vmc[KS.vm].busy ? `<p class="mut cnt" role="status">Đang tải phiếu tháng ${esc(vnD(KS.vm))}…</p>` : ''}${KS.vm && KS.vmc && KS.vmc[KS.vm] && KS.vmc[KS.vm].err ? `<p class="cnt bad" role="alert">Không tải được phiếu tháng ${esc(vnD(KS.vm))}: ${esc(KS.vmc[KS.vm].err)} <button class="btn ghost" type="button" id="vRetry">Thử lại</button></p>` : ''}<div class="card list">${list.length ? list.slice(0, KS.vlim).map(p => `<div class="it" data-so="${esc(p.soPhieu)}" role="button" tabindex="0"><div><div class="mono">${esc(p.soPhieu)}${p.daDao ? ' <span class="tag stop">Đã đảo</span>' : ''}</div><b>${esc(LOAI[p.loai] || p.loai)}</b> · ${esc(vnD(p.ngay))} · ${esc(khoName(p.kho))}${p.khoDen ? ' → ' + esc(khoName(p.khoDen)) : ''}<br><small class="mut">${esc([p.maKH && custName(p.maKH), p.maCongTrinh && projName(p.maCongTrinh), p.maNCC && supName(p.maNCC), p.phieuGoc && 'gốc ' + p.phieuGoc, p.lyDo].filter(Boolean).join(' · '))}</small></div>${isQT() && p.tongTien !== undefined ? `<b style="white-space:nowrap">${money(p.tongTien)}</b>` : ''}</div>`).join('')
+        : `<div class="empty">${KS.vm && KS.vmc && KS.vmc[KS.vm] && (KS.vmc[KS.vm].busy || KS.vmc[KS.vm].err) ? '' : all.length || KS.vm ? 'Không có phiếu khớp.' : 'Chưa có phiếu kho.' + (canEdit() ? ' Bấm <b>Lập phiếu</b> — bắt đầu bằng Tồn đầu kỳ hoặc Nhập mua.' : '')}</div>`}</div>
       ${list.length > KS.vlim ? `<p class="mut cnt">Đang hiện ${KS.vlim.toLocaleString('vi-VN')}/${list.length.toLocaleString('vi-VN')} phiếu (mới nhất trước) — lọc theo tháng hoặc gõ tìm để thu hẹp.</p><button class="btn more" type="button" id="vMore">Xem thêm (${(list.length - KS.vlim).toLocaleString('vi-VN')} phiếu)</button>` : ''}</div>`);
+    const vr = $('#vRetry'); if (vr) vr.onclick = () => { delete KS.vmc[KS.vm]; viewVouchers(m, '#vres'); };
     const vmo = $('#vMore'); if (vmo) vmo.onclick = () => { KS.vlim += 500; viewVouchers(m, '#vres'); };
     $('#vMon').onchange = e => { KS.vm = e.target.value; KS.vlim = 300; viewVouchers(m); }; const vx = $('#vMonX'); if (vx) vx.onclick = () => { KS.vm = ''; viewVouchers(m); };
     onSearch('#qpm,#qpd', v => { KS.pq = v; }, () => viewVouchers(m, '#vres'), 300);
@@ -557,9 +586,9 @@
   // ---------- quét mã bằng camera (QR tem tủ, mã serial) ----------
   const hasCam = () => !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
   /** Chuỗi quét được → số serial (tem tủ là đường dẫn …#/t/<cty>/<xê-ri>). */
-  const serOf = t => { const m = String(t).match(/#\/t\/([^/]+)\/([^?#\s]+)/); return (m ? decodeURIComponent(m[2]) : String(t)).trim(); };
+  const serOf = t => { const m = String(t).match(/#\/t\/([^/]+)\/([^?#\s]+)/); let z = m ? m[2] : String(t); if (m) { try { z = decodeURIComponent(z); } catch (e) { /* % hỏng: giữ nguyên */ } } return z.trim().slice(0, 80); };
   let JSQR = null;
-  const loadJsQR = () => JSQR || (JSQR = new Promise((ok, no) => { const sc = document.createElement('script'); sc.src = 'vendor/jsqr.js'; sc.onload = () => ok(window.jsQR); sc.onerror = () => { JSQR = null; no(new Error('Không tải được bộ đọc QR')); }; document.head.appendChild(sc); }));
+  const loadJsQR = () => JSQR || (JSQR = new Promise((ok, no) => { const sc = document.createElement('script'); sc.src = 'vendor/jsqr.js'; sc.integrity = 'sha384-3oyTvplaWkcozEpjVh5YYIxrcwDnbZJ2cN0LnjEUo7sNQGp9sgaPhIhVnnzc8JXm';   /* jsQR 1.4.0 (npm, Apache-2.0, xem vendor/jsqr.LICENSE) */ sc.onload = () => ok(window.jsQR); sc.onerror = () => { JSQR = null; no(new Error('Không tải được bộ đọc QR')); }; document.head.appendChild(sc); }));
   /** Mở camera sau, đọc liên tục. onCode(text) → { msg, bad } hiện dưới khung; multi = quét nhiều mã (bấm Xong để đóng), không multi = đóng sau mã đầu.
    *  Máy có BarcodeDetector (Android Chrome) đọc cả QR lẫn mã vạch 1D; còn lại (iPhone) đọc QR bằng jsQR. */
   async function scanCode(title, onCode, multi) {
@@ -570,10 +599,16 @@
       <div class="scanvid"><video playsinline muted></video><div class="scanaim"></div></div><p class="scanmsg" role="status" aria-live="polite">Đang mở camera…</p>
       ${multi ? '<button class="btn pri" type="button" data-sx style="width:100%">Xong</button>' : ''}</div>`;
     host.appendChild(ov);
-    const v = $('video', ov), msg = $('.scanmsg', ov); let stream = null, alive = true, last = '', lastAt = 0, timer = null;
-    const stop = () => { alive = false; clearTimeout(timer); if (stream) stream.getTracks().forEach(t => t.stop()); ov.remove(); };
-    $$('[data-sx]', ov).forEach(b => b.onclick = stop); ov.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); stop(); } });
-    try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false }); }
+    const v = $('video', ov), msg = $('.scanmsg', ov), back = document.activeElement; let stream = null, alive = true, last = '', lastAt = 0, timer = null;
+    if (S.scanStop) S.scanStop();
+    const stop = () => { if (!alive) return; alive = false; clearTimeout(timer); if (stream) stream.getTracks().forEach(t => t.stop()); ov.remove(); document.removeEventListener('keydown', key, true); if (S.scanStop === stop) S.scanStop = null; if (back && back.isConnected && back.focus) back.focus(); };
+    const key = e => {   // Esc đóng máy quét (không đóng phiếu phía sau); Tab chỉ đi trong máy quét
+      if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); stop(); }
+      else if (e.key === 'Tab') { const f = $$('button', ov); if (!f.length) return; const i = f.indexOf(document.activeElement); e.preventDefault(); f[(i + (e.shiftKey ? f.length - 1 : 1)) % f.length].focus(); }
+    };
+    S.scanStop = stop; document.addEventListener('keydown', key, true);
+    $$('[data-sx]', ov).forEach(b => b.onclick = stop); $('[data-sx]', ov).focus();
+    try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false }); if (!alive || !ov.isConnected) { stream.getTracks().forEach(t => t.stop()); stream = null; return stop(); } }
     catch (e) { msg.textContent = 'Không mở được camera (' + (e.name === 'NotAllowedError' ? 'chưa cho phép dùng camera' : e.message) + ') — nhập tay.'; return; }
     if (!alive) { stream.getTracks().forEach(t => t.stop()); return; }
     v.srcObject = stream; await v.play().catch(() => {});
@@ -581,7 +616,7 @@
     let qr = null; if (!det) { try { qr = await loadJsQR(); } catch (e) { msg.textContent = e.message; return; } }
     msg.textContent = 'Đưa mã vào khung'; const cv = document.createElement('canvas'), cx = cv.getContext('2d', { willReadFrequently: true });
     const tick = async () => {
-      if (!alive) return;
+      if (!alive) return; if (!ov.isConnected) return stop();   // hộp thoại chứa máy quét đã đóng / bị thay
       try {
         let txt = '';
         if (v.readyState >= 2) {
@@ -591,7 +626,7 @@
         if (txt && !(txt === last && Date.now() - lastAt < 2500)) {
           last = txt; lastAt = Date.now(); if (navigator.vibrate) navigator.vibrate(60);
           const r = (await onCode(txt)) || {}; msg.textContent = r.msg || txt; msg.classList.toggle('bad', !!r.bad);
-          if (!multi && !r.bad) return stop();
+          if ((!multi || r.done) && !r.bad) return stop();
         }
       } catch (e) { /* khung hình lỗi: bỏ qua */ }
       timer = setTimeout(tick, 220);
@@ -653,12 +688,12 @@
           </div>
           ${ser ? (pick.length || gocS.length
             ? (() => { const all = gocS.length ? gocS.map(z => ({ serial: z })) : pick, sell = loai === 'XUAT_BAN' || loai === 'XUAT_CONG_TRINH';
-                return `<div class="serhead"><span class="f" style="margin:0">Chọn serial · <b id="l_cnt_${i}">${(l.serials || []).length}</b> đã chọn${l.soLuongCT ? ' / ' + esc(l.soLuongCT) : ''}</span>
+                return `<div class="serhead"><span class="f" style="margin:0">Chọn serial · <b id="l_cnt_${i}">${(l.serials || []).length}</b><span id="l_tot_${i}">${l.soLuongCT ? ' / ' + esc(l.soLuongCT) : ''}</span> đã chọn</span>
                   ${all.length > 6 ? `<input class="in serf" id="l_sf_${i}" data-sf="${i}" type="search" placeholder="Lọc serial…" aria-label="Lọc serial dòng ${i + 1}" autocomplete="off">` : ''}
-                  <button class="btn ghost" type="button" data-first="${i}">Chọn ${esc(l.soLuongCT || 'N')} đầu</button><button class="btn ghost" type="button" data-none="${i}">Bỏ chọn</button>${hasCam() ? `<button class="btn ghost" type="button" data-scanpick="${i}">${ic('search')} Quét</button>` : ''}</div>
+                  <button class="btn ghost" type="button" data-first="${i}">${l.soLuongCT ? 'Chọn ' + esc(l.soLuongCT) + ' đầu' : 'Chọn theo SL'}</button><button class="btn ghost" type="button" data-none="${i}">Bỏ chọn</button>${hasCam() ? `<button class="btn ghost" type="button" data-scanpick="${i}">${ic('search')} Quét</button>` : ''}</div>
                 <div class="serpick" id="l_sp_${i}">${all.map(x => { const z = x.serial, nk = sell && cabNoKCS(x); return `<label class="chk${nk ? ' dis' : ''}" style="margin:0;min-height:48px" data-sv="${esc(QSearch.norm(z))}"><input type="checkbox" data-i="${i}" data-s="${esc(z)}" ${(l.serials || []).includes(z) ? 'checked' : ''} ${nk ? 'disabled' : ''}> <span class="mono">${esc(z)}</span>${nk ? ' <span class="tag bad">Chưa KCS</span>' : ''}</label>`; }).join('')}</div>`; })()
             : out && !kk ? `<div class="err">Không có serial nào của mã này trong kho đã chọn.</div>`
-            : `<div class="serhead"><label class="f" for="l_sr_${i}" style="margin:0">Số serial (mỗi dòng 1 số) · <b id="l_cnt_${i}">${(l.serials || []).length}</b>${l.soLuongCT ? ' / ' + esc(l.soLuongCT) : ''}</label>${hasCam() ? `<button class="btn ghost" type="button" data-scan="${i}">${ic('search')} Quét serial</button>` : ''}</div>
+            : `<div class="serhead"><label class="f" for="l_sr_${i}" style="margin:0">Số serial (mỗi dòng 1 số) · <b id="l_cnt_${i}">${(l.serials || []).length}</b><span id="l_tot_${i}">${l.soLuongCT ? ' / ' + esc(l.soLuongCT) : ''}</span></label>${hasCam() ? `<button class="btn ghost" type="button" data-scan="${i}">${ic('search')} Quét serial</button>` : ''}</div>
                <textarea class="in" id="l_sr_${i}" data-i="${i}" data-f="serials" style="min-height:64px" autocapitalize="characters" spellcheck="false">${esc((l.serials || []).join('\n'))}</textarea><div class="err" id="l_dup_${i}" role="status">${serDup(it, l.serials)}</div>`) : ''}
         </div>`;
       }).join('');
@@ -666,20 +701,29 @@
         const l = lines[+x.dataset.i]; let v = x.value;
         if (x.dataset.f === 'serials') v = v.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean);
         l[x.dataset.f] = v; if (x.dataset.f === 'gia') l.gia = String(v).replace(/[.\s,₫]/g, '');
-        if (x.dataset.f === 'serials') { const c = $('#l_cnt_' + x.dataset.i, dlg); if (c) c.textContent = v.length; const e = $('#l_dup_' + x.dataset.i, dlg); if (e) e.textContent = serDup(itemOf(String(l.maHang || '').toUpperCase()), v); }
+        if (x.dataset.f === 'serials') { const e = $('#l_dup_' + x.dataset.i, dlg); if (e) e.textContent = serDup(itemOf(String(l.maHang || '').toUpperCase()), v); }
+        if (x.dataset.f === 'serials' || x.dataset.f === 'soLuongCT') serCount(+x.dataset.i);
         sum(dlg);
       });
-      const pickSync = i => { const l = lines[i]; l.serials = $$(`#l_sp_${i} input:checked`, box).map(c => c.dataset.s); if (!l.soLuongCT || out) { l.soLuongCT = String(l.serials.length); const q = $('#l_sl_' + i, box); if (q) q.value = l.soLuongCT; } const c = $('#l_cnt_' + i, box); if (c) c.textContent = l.serials.length; sum(dlg); };
+      // bộ đếm "đã chọn / SL" + nhãn nút cập nhật khi gõ số lượng; lệch số lượng thì tô màu
+      const serCount = i => { const l = lines[i], n = (l.serials || []).length, c = $('#l_cnt_' + i, box), t = $('#l_tot_' + i, box), b = $(`[data-first="${i}"]`, box);
+        if (c) { c.textContent = n; c.classList.toggle('bad-ink', !!l.soLuongCT && n !== Number(l.soLuongCT)); } if (t) t.textContent = l.soLuongCT ? ' / ' + l.soLuongCT : ''; if (b) b.textContent = l.soLuongCT ? 'Chọn ' + l.soLuongCT + ' đầu' : 'Chọn theo SL'; };
+      const pickSync = i => { const l = lines[i]; l.serials = $$(`#l_sp_${i} input:checked`, box).map(c => c.dataset.s);
+        if (l.serials.length && (!l.soLuongCT || out)) { l.soLuongCT = String(l.serials.length); const q = $('#l_sl_' + i, box); if (q) q.value = l.soLuongCT; }   // bỏ chọn hết: giữ số lượng đã nhập
+        serCount(i); sum(dlg); };
       $$('[data-s]', box).forEach(c => c.onchange = () => pickSync(+c.dataset.i));   // không vẽ lại cả khối dòng hàng
       $$('[data-sf]', box).forEach(f => f.oninput = () => { const q = QSearch.norm(f.value); $$(`#l_sp_${f.dataset.sf} [data-sv]`, box).forEach(x => x.hidden = !!q && !x.dataset.sv.includes(q)); });
-      $$('[data-first]', box).forEach(b => b.onclick = () => { const i = +b.dataset.first, n = Number(lines[i].soLuongCT) || 0; let k = 0;
-        $$(`#l_sp_${i} [data-sv]`, box).forEach(x => { const c = $('input', x); if (c.disabled) return; c.checked = !x.hidden && (n ? k < n : true) && (++k, true); }); pickSync(i); });
+      $$('[data-first]', box).forEach(b => b.onclick = () => { const i = +b.dataset.first, n = Number(lines[i].soLuongCT) || 0;
+        if (!(n > 0)) { const q = $('#l_sl_' + i, box); toast('Nhập số lượng trước'); if (q) q.focus(); return; }
+        const rows = $$(`#l_sp_${i} [data-sv]`, box); let k = rows.filter(x => x.hidden && $('input', x).checked).length;   // serial đang bị ô lọc ẩn mà đã chọn: giữ nguyên, tính vào N
+        rows.forEach(x => { if (x.hidden) return; const c = $('input', x); if (c.disabled) { c.checked = false; return; } c.checked = k < n; if (c.checked) k++; }); pickSync(i); });
       $$('[data-none]', box).forEach(b => b.onclick = () => { const i = +b.dataset.none; $$(`#l_sp_${i} input`, box).forEach(c => c.checked = false); pickSync(i); });
       $$('[data-scanpick]', box).forEach(b => b.onclick = () => { const i = +b.dataset.scanpick; scanCode('Quét serial để chọn', txt => { const z = serOf(txt), c = $$(`#l_sp_${i} input`, box).find(x => x.dataset.s.toUpperCase() === z.toUpperCase());
         if (!c) return { msg: z + ': không có trong kho đã chọn', bad: 1 }; if (c.disabled) return { msg: z + ': tủ chưa đạt KCS', bad: 1 }; if (c.checked) return { msg: z + ': đã chọn rồi', bad: 1 }; c.checked = true; pickSync(i); return { msg: z + ' ✓ (' + lines[i].serials.length + ')' }; }, true); });
       $$('[data-scan]', box).forEach(b => b.onclick = () => { const i = +b.dataset.scan, ta = $('#l_sr_' + i, box); scanCode('Quét serial nhập kho', txt => { const z = serOf(txt), cur = ta.value.split(/[\n,;]+/).map(x => x.trim()).filter(Boolean);
         if (cur.some(x => x.toUpperCase() === z.toUpperCase())) return { msg: z + ': đã có trong danh sách', bad: 1 };
-        cur.push(z); ta.value = cur.join('\n'); ta.dispatchEvent(new Event('input')); return { msg: z + ' ✓ (' + cur.length + (lines[i].soLuongCT ? '/' + lines[i].soLuongCT : '') + ')' }; }, true); });
+        cur.push(z); ta.value = cur.join('\n'); ta.dispatchEvent(new Event('input')); const full = Number(lines[i].soLuongCT) > 0 && cur.length >= Number(lines[i].soLuongCT);
+        return { msg: z + ' ✓ (' + cur.length + (lines[i].soLuongCT ? '/' + lines[i].soLuongCT : '') + ')', done: full }; }, true); });
       $$('[data-del]', box).forEach(b => b.onclick = () => { lines.splice(+b.dataset.del, 1); draw(dlg); });
       sum(dlg);
     };
@@ -693,7 +737,7 @@
       return submitV(dlg, 'voucher.create', { voucher: vh }, so => 'Đã lưu phiếu ' + so);
     }, dlg => {
       dlg.classList.add('wide');
-      const start = JSON.stringify(lines); dlg._guard = () => JSON.stringify(lines) !== start;
+      const start = JSON.stringify(lines); dlg._guard = () => dlg._dirty || JSON.stringify(lines) !== start;
       dlg.addEventListener('keydown', e => {   // Enter trong dòng hàng: sang ô kế tiếp (không lưu vội); Ctrl+Enter = Lưu phiếu
         if (e.key !== 'Enter' || e.target.tagName === 'TEXTAREA' || !e.target.closest || !e.target.closest('#vLines')) return;
         if (e.ctrlKey || e.metaKey) { e.preventDefault(); $('form', dlg).requestSubmit(); return; }   // Ctrl+Enter = Lưu phiếu
@@ -1138,7 +1182,7 @@
   function serialSearch() {
     dialog('Tra xê-ri', `${fld('serial', 'Số xê-ri tủ hoặc serial linh kiện', '', { req: 1 })}${hasCam() ? `<button class="btn" type="button" id="scanQ" style="width:100%;margin-top:8px">${ic('search')} Quét mã QR trên tem tủ</button>` : ''}<p class="mut" style="font-size:12.5px">Mã QR có trên tem tủ và phiếu xuất xưởng.</p>`,
       async (v, dlg) => { if (!v.serial.trim()) { showErrors(dlg, { serial: 'Nhập số xê-ri' }); return false; } dlg.close(); tuView(serOf(v.serial)); return false; },
-      d => { const b = $('#scanQ', d); if (b) b.onclick = () => { d.close(); scanTu(); }; }, 'Tra');
+      d => { d._noGuard = true; const b = $('#scanQ', d); if (b) b.onclick = () => { d.close(); scanTu(); }; }, 'Tra');
   }
   function viewTu(m) {
     const p = location.hash.split('/'), co = p[2], ser = decodeURIComponent(p[3] || '');
@@ -1159,7 +1203,7 @@
         <dt>Mẫu</dt><dd>${esc(h.maMau)} bản ${esc(h.phienBan)}${h.kichThuoc ? ' · ' + esc(h.kichThuoc) + ' mm' : ''}</dd>
         ${x.pxx ? `<dt>Phiếu xuất xưởng</dt><dd><button class="linkbtn mono" type="button" id="tP2">${esc(x.pxx.soPXX)}</button> · ${esc(vnD(x.pxx.ngay))}${x.pxx.maKH ? ' · ' + esc(custName(x.pxx.maKH)) : ''}</dd>` : ''}
         ${x.lsx && x.lsx.maKH ? `<dt>Khách theo lệnh</dt><dd>${esc(custName(x.lsx.maKH))}${x.lsx.maCongTrinh ? ' · ' + esc(projName(x.lsx.maCongTrinh)) : ''}</dd>` : ''}
-        ${x.giaThanh !== undefined ? `<dt>Giá thành</dt><dd>${money(x.giaThanh)} <small class="mut">(khi bán, giá vốn theo bình quân của mã thành phẩm)</small></dd>` : ''}</dl>
+        ${x.giaThanh !== undefined && isQT() ? `<dt>Giá thành</dt><dd>${money(x.giaThanh)} <small class="mut">(khi bán, giá vốn theo bình quân của mã thành phẩm)</small></dd>` : ''}</dl>
       <h3 class="h3">Linh kiện có serial trong tủ</h3>${(x.con || []).length ? `<ul class="plain">${x.con.map(c => `<li><span class="mono">${esc(c.serial)}</span> — ${esc(itemOf(c.maHang).ten)}</li>`).join('')}</ul>` : '<p class="mut">Không có.</p>'}
       ${bhBlock(x)}<h3 class="h3">Kiểm tra xuất xưởng (${(x.kcs || []).length} lần)</h3>${(x.kcs || []).length ? x.kcs.slice().reverse().map(k => `<details ${k === x.kcs[x.kcs.length - 1] ? 'open' : ''}><summary>Lần ${k.lanKiem} · ${esc(vnD(k.ngay))} · ${k.dat ? '<b class="ok-ink">Đạt</b>' : '<b class="bad-ink">Không đạt</b>'} · ${esc(k.nguoiKiem)}</summary><ol class="kcsum">${k.ketQua.map(q => `<li>${esc(q.noiDung)} — ${q.ketQua === 'DAT' ? '✓' : `<b class="bad-ink">✗ ${esc(q.ghiChu)}</b>`}</li>`).join('')}</ol></details>`).join('') : '<p class="mut">Chưa kiểm.</p>'}
       <div class="acts stickacts" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">${live ? `<button class="btn pri" type="button" id="tK">${ic('check')} Kiểm tra xuất xưởng</button>` : ''}${x.pxx ? `<button class="btn" type="button" id="tP">In PXX</button>${isQT() && !S.offline && x.pxx.trangThai === 'PHAT_HANH' ? '<button class="btn danger" type="button" id="tPH">Huỷ PXX</button>' : ''}` : ''}${bhCanAct(x) ? `<button class="btn pri" type="button" id="tL">${ic('pin')} ${(x.baoHanh || {}).ngayBanGiao ? 'Di dời' : 'Ghi bàn giao'}</button><button class="btn" type="button" id="tB">${ic('shield')} Tiếp nhận bảo hành</button>` : ''}<button class="btn" type="button" id="tTem">In tem QR</button></div>`, null, d => {
@@ -1420,24 +1464,27 @@
   function linkCustProj(dlg) {
     const kh = $('#f_maKH', dlg), ct = $('#f_maCongTrinh', dlg); if (!kh || !ct || kh.tagName !== 'SELECT' || ct.tagName !== 'SELECT') return;
     const all = [...ct.options].map(o => [o.value, o.textContent]), owner = v => ((S.data.projects || []).find(p => p.maCongTrinh === v) || {}).maKH || '';
-    const fill = () => { const k = kh.value, cur = ct.value;
-      ct.innerHTML = all.filter(([v]) => !v || !k || !owner(v) || owner(v) === k).map(([v, t]) => `<option value="${esc(v)}">${esc(t)}</option>`).join('');
+    let first = true;
+    const fill = () => { const k = kh.value, cur = ct.value, keep = first && cur && owner(cur) && owner(cur) !== k; first = false;   // giá trị điền sẵn (phiếu gốc, vị trí cũ) không bị xoá âm thầm
+      ct.innerHTML = all.filter(([v]) => !v || !k || !owner(v) || owner(v) === k || (keep && v === cur)).map(([v, t]) => `<option value="${esc(v)}">${esc(t)}</option>`).join('');
       ct.value = [...ct.options].some(o => o.value === cur) ? cur : ''; };
     kh.addEventListener('change', fill);
     ct.addEventListener('change', () => { const o = owner(ct.value); if (o && kh.value !== o && [...kh.options].some(x => x.value === o)) { kh.value = o; fill(); } });
     fill();
   }
   function dialog(title, body, onSubmit, after, submitText = 'Lưu') {
+    if (S.scanStop) S.scanStop();
     const d = $('#dlg');
     const back = document.activeElement;
     d.innerHTML = `<form method="dialog" novalidate><header><h2>${title}</h2><button class="btn ghost iconbtn" type="button" data-x aria-label="Đóng">${ic('x')}</button></header><div class="body">${body}<div class="dlgmsg" id="dlgMsg" role="alert"></div></div>${onSubmit ? `<footer><button class="btn" type="button" data-x>Huỷ</button><button class="btn pri" id="dlgOk" type="submit">${submitText}</button></footer>` : ''}</form>`;
     const f = $('form', d);
     d._rid = null; d._guard = null;   // 1 requestId cho cả vòng đời hộp thoại: bấm Lưu lại sau khi mất phản hồi KHÔNG tạo phiếu thứ 2
-    d._dirty = false;
-    const tryClose = () => { const dirty = d._guard ? d._guard() : onSubmit && d._dirty; if (dirty && !confirm('Bỏ nội dung đang nhập dở?')) return; d.close(); };   // chạm ra ngoài / bấm X khi đang nhập: hỏi lại
+    d._dirty = false; d._noGuard = false;
+    d._isDirty = () => !d._noGuard && !!(d._guard ? d._guard() : onSubmit && d._dirty);
+    const tryClose = () => { if (d._isDirty() && !confirm('Bỏ nội dung đang nhập dở?')) return; d.close(); };   // chạm ra ngoài / bấm X / Esc khi đang nhập: hỏi lại
     $$('[data-x]', d).forEach(b => b.onclick = tryClose);
-    d.oncancel = e => { if (d._guard && d._guard()) { e.preventDefault(); tryClose(); } };
-    d.onclose = () => { if (back && back.isConnected && back.focus) back.focus(); };
+    d.oncancel = e => { if (S.scanStop) { e.preventDefault(); S.scanStop(); return; } if (d._isDirty()) { e.preventDefault(); tryClose(); } };
+    d.onclose = () => { if (S.scanStop) S.scanStop(); if (back && back.isConnected && back.focus) back.focus(); };
     f.onsubmit = async e => {
       e.preventDefault(); if (!onSubmit) return d.close();
       const ok = $('#dlgOk'); if (ok.disabled) return; ok.classList.add('busy'); ok.disabled = true; $('#dlgMsg', d).textContent = '';
@@ -1601,10 +1648,18 @@
     if (e.key === 'Escape' && S.sel && !$('#dlg').open) { history.state && history.state.det ? history.back() : closeDetail(); return; }
   });
   document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { const q = $('#qd') || $('#qm'); if (q) { e.preventDefault(); q.focus(); q.select(); } } });
-  window.addEventListener('hashchange', () => { const dg = $('#dlg'); if (dg && dg.open && !dg._keep) dg.close(); if (S.user) { S.sel = null; if (route() !== 'kho') KS.sel = null; if (route() !== 'sx') SX.sel = null; renderView(); } });
-  window.addEventListener('online', () => { if (S.user) sync(); });
+  window.addEventListener('hashchange', e => {
+    if (S.scanStop) S.scanStop();
+    const dg = $('#dlg');
+    if (dg && dg.open) {   // nút Back / vuốt lùi khi đang nhập: hỏi lại; ở lại thì trả địa chỉ cũ
+      if (dg._isDirty && dg._isDirty() && !confirm('Bỏ nội dung đang nhập dở?')) { history.replaceState(null, '', new URL(e.oldURL).hash || '#/hang'); return; }
+      dg.close();
+    }
+    if (S.user) { S.sel = null; if (route() !== 'kho') KS.sel = null; if (route() !== 'sx') SX.sel = null; renderView(); } });
+  window.addEventListener('online', () => { if (S.user) { S.pollNext = 0; poll(true); } });
   matchMedia(MOBILE).addEventListener('change', () => { if (S.user && S.data && route() === 'hang') renderResults(); });
-  document.addEventListener('visibilitychange', () => { if (!document.hidden && S.user && S.data) sync(); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) { if (S.scanStop) S.scanStop(); return; } if (S.user && S.data) poll(true); });   // ẩn app: tắt camera; quay lại: kiểm tra phiên bản theo quy tắc "đang bận"
+  ['pointerdown', 'keydown'].forEach(t => document.addEventListener(t, () => { S.lastAct = Date.now(); }, { passive: true }));
 
   // ---------------- khởi động ----------------
   async function restore() {
@@ -1616,7 +1671,7 @@
   (async function start() {
     const th = LS.get('qlhh-theme', null); if (th) document.documentElement.dataset.theme = th;
     S.co = company(LS.get('qlhh-co', 'LAVIPCO')) || CFG.companies[0];
-    const qc = (location.hash.match(/^#\/t\/([^/]+)\//) || [])[1]; if (qc && company(qc)) { S.co = company(qc); LS.set('qlhh-co', S.co.id); }   // QR tủ: mở đúng công ty của tem
+    const qc = (location.hash.match(/^#\/t\/([^/]+)\//) || [])[1]; if (qc && company(qc)) S.co = company(qc);   // QR tủ: mở đúng công ty của tem (không đổi công ty mặc định đã lưu)
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
     if (await handleReturn()) return;
     await restore();

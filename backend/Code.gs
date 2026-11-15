@@ -86,6 +86,7 @@ var HANDLERS = {
   'voucher.reverse': function (u, r) { return write(u, r, voucherReverse); },
   'voucher.get': voucherGet,
   'voucher.list': voucherList,
+  'sync.ver': syncVer,
   'period.lock': function (u, r) { return write(u, r, periodLock); },
   'stock.rebuild': function (u, r) { return write(u, r, stockRebuild); },
   'report.nxt': reportNxt,
@@ -116,7 +117,7 @@ function route(req) {
     case 'auth.nonce': return issueNonce();
     case 'auth.login': return login(req);
   }
-  var s = QAuth.verifySession(req.session, now(), props().getProperty('SESSION_KEY'), hmac);
+  var s = QAuth.verifySession(req.session, now(), sessKey(), hmac);
   if (!s.ok) return s;
   var u = findUser(s.email);
   if (!u) return { ok: false, code: 'FORBIDDEN', error: 'Tài khoản chưa được cấp quyền hoặc đã bị khoá' };
@@ -131,11 +132,11 @@ function route(req) {
 var NONCE_TTL = 600;
 function issueNonce() {
   var ts = now().toString(36), r = Utilities.getUuid().replace(/-/g, '');
-  return { ok: true, code: 'OK', data: { nonce: ts + '.' + r + '.' + hmac(props().getProperty('SESSION_KEY'), 'nonce|' + ts + '|' + r) } };
+  return { ok: true, code: 'OK', data: { nonce: ts + '.' + r + '.' + hmac(sessKey(), 'nonce|' + ts + '|' + r) } };
 }
 function nonceOK(n) {
   var p = String(n || '').split('.'); if (p.length !== 3 || p[0].length > 12 || p[1].length > 64) return false;
-  var want = hmac(props().getProperty('SESSION_KEY'), 'nonce|' + p[0] + '|' + p[1]), age = now() - parseInt(p[0], 36);
+  var want = hmac(sessKey(), 'nonce|' + p[0] + '|' + p[1]), age = now() - parseInt(p[0], 36);
   if (want.length !== p[2].length) return false; var d = 0; for (var i = 0; i < want.length; i++) d |= want.charCodeAt(i) ^ p[2].charCodeAt(i);
   return d === 0 && age >= -60 && age <= NONCE_TTL;
 }
@@ -178,7 +179,7 @@ function findUser(email, fresh) {
   for (var i = 0; i < rows.length; i++) {
     if (String(rows[i].email).trim().toLowerCase() === email && String(rows[i].trangThai).trim() === 'HOAT_DONG') { u = { email: email, vaiTro: String(rows[i].vaiTro).trim(), hoTen: rows[i].hoTen }; break; }
   }
-  if (u) c.put(k, JSON.stringify(u), 60); else c.remove(k);
+  if (u) c.put(k, JSON.stringify(u), 300); else c.remove(k);   // 5 phút: đổi quyền qua app xoá ngay (user.upsert), sửa tay trên Sheet có hiệu lực ≤ 5 phút
   return u;
 }
 
@@ -272,21 +273,24 @@ function guardTable(n) {
  *  (Bảng khác vẫn được đối chiếu lúc ghi theo dòng — putRow / putMany / writeTon / updateCost.) */
 function guardEarly(names) { names.forEach(function (n) { if (cachedT(n) && !VERIFIED[n]) { readTable(n); guardTable(n); } }); }
 function stale(n) { DIRTY[n] = newVer(); WT[n] = false; delete MEMO[n]; throw fail('STALE', 'Sheet ' + n + ' vừa được sửa trực tiếp trên Google Sheet — máy chủ đọc lại, thử lại', null); }
+/** Máy tự kiểm tra 60 s/lần: chỉ trả số phiên bản + ngày (không đọc sheet). */
+function syncVer(u, req) { return { version: dataVer(), today: today() }; }
 function syncPull(u, req) {
-  var ver = Number(props().getProperty('dataVersion') || 1);   // đọc version TRƯỚC dữ liệu
+  var ver = dataVer();   // đọc version TRƯỚC dữ liệu (bộ đệm → ít lượt đọc ScriptProperties khi máy tự kiểm tra 60 s/lần)
   if (req.since && Number(req.since) === ver) return { unchanged: true, version: ver };
   var raw = {}, warnings = [];
   Object.keys(TABLES).forEach(function (k) {
     if (k === 'logs' && u.vaiTro !== 'QUAN_TRI') { raw[k] = []; return; }
     var t = k === 'logs' ? readTail('NhatKy', 300) : k === 'vouchers' ? readTail('Phieu', 500) : readTable(TABLES[k]); raw[k] = t.rows; warnings = warnings.concat(t.warnings);
   });
+  var cut = sheet('Phieu').getLastRow() - 1 > 500;   // sheet có hơn 500 dòng phiếu → máy khách biết danh sách bị cắt (lọc tháng cũ phải hỏi voucher.list)
   raw.vouchers = raw.vouchers.filter(function (p) { return p.trangThai === 'HOAN_TAT'; });
   var tuK = {}, lp = livePxx(); (raw.cabinets || []).forEach(function (c) { if (c.trangThai !== 'HUY') tuK[c.key] = 1; if (c.soPXX && !lp[c.soPXX]) c.soPXX = ''; });
   raw.serials = raw.serials.filter(function (x) { return x.trangThai === 'TRONG_KHO' || x.trangThai === 'HANG_LOI' || (x.trangThai === 'DA_BAN' && tuK[x.key]); });   // để chọn serial khi xuất + tủ đã giao (theo dõi bảo hành)
   var last = {}; raw.templates.forEach(function (t) { if (!last[t.maMau] || t.phienBan > last[t.maMau].phienBan) last[t.maMau] = t; });
   raw.templates = Object.keys(last).sort().map(function (k) { return last[k]; });   // chỉ phiên bản mẫu mới nhất
   raw.config = { ngayKhoaSo: cfg('ngayKhoaSo'), ngayKhoaMax: cfg('ngayKhoaMax'), maCongTy: congTy() };
-  return { version: ver, data: QPerm.filterForRole(u.vaiTro, u.email, raw), warnings: u.vaiTro === 'QUAN_TRI' ? warnings : [], today: today(), me: { email: u.email, vaiTro: u.vaiTro, hoTen: u.hoTen } };
+  return { version: ver, vouchersCut: cut, data: QPerm.filterForRole(u.vaiTro, u.email, raw), warnings: u.vaiTro === 'QUAN_TRI' ? warnings : [], today: today(), me: { email: u.email, vaiTro: u.vaiTro, hoTen: u.hoTen } };
 }
 function schemaErrors(force) {
   var c = CacheService.getScriptCache();
@@ -356,7 +360,11 @@ function findRequest(rq, id) {
   }
   return null;
 }
-function bumpVersion() { var p = props(); p.setProperty('dataVersion', String(Number(p.getProperty('dataVersion') || 1) + 1)); }
+function bumpVersion() { var p = props(), v = String(Number(p.getProperty('dataVersion') || 1) + 1); p.setProperty('dataVersion', v); CacheService.getScriptCache().put('dataVersion', v, 21600); }
+/** Phiên bản dữ liệu: bộ đệm trước (bumpVersion ghi cả hai), hụt thì đọc ScriptProperties. */
+function dataVer() { var c = CacheService.getScriptCache(), v = c.get('dataVersion'); if (!v) { v = props().getProperty('dataVersion') || '1'; c.put('dataVersion', v, 21600); } return Number(v); }
+/** Khoá ký phiên: giữ trong bộ đệm 6 giờ để mỗi lệnh không phải đọc ScriptProperties. */
+function sessKey() { var c = CacheService.getScriptCache(), k = c.get('sessKey'); if (!k) { k = props().getProperty('SESSION_KEY'); if (k) c.put('sessKey', k, 21600); } return k; }
 function nextId(key) { var p = props(), v = Number(p.getProperty('seq:' + key) || 0) + 1; p.setProperty('seq:' + key, String(v)); return v; }
 
 /** Tìm 1 dòng theo khoá (cột đầu) bằng TextFinder. Trả {row, obj} hoặc null. */

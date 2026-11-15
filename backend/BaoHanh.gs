@@ -72,7 +72,8 @@ function installAdd(u, req, logs) {
   if (v.loai === 'DI_DOI' && v.ngay < last) throw fail('VALIDATION', 'Ngày di dời không trước lần ghi cuối (' + last + ')', { ngay: 'Từ ' + last });
   if (v.maKH && !readTable('KhachHang').rows.some(function (z) { return z.maKH === v.maKH; })) throw fail('VALIDATION', 'Khách hàng ' + v.maKH + ' chưa có', { maKH: 'Chọn khách có sẵn' });
   if (v.maCongTrinh && !readTable('CongTrinh').rows.some(function (z) { return z.maCongTrinh === v.maCongTrinh; })) throw fail('VALIDATION', 'Công trình ' + v.maCongTrinh + ' chưa có', { maCongTrinh: 'Chọn công trình có sẵn' });
-  custProj(v.maKH, v.maCongTrinh);
+  var cur0 = hist.slice().sort(function (a, b) { return a.thoiGian < b.thoiGian ? -1 : 1; }).pop();
+  if (v.loai === 'BAN_GIAO' || !cur0 || cur0.maKH !== v.maKH || cur0.maCongTrinh !== v.maCongTrinh) custProj(v.maKH, v.maCongTrinh);   // di dời giữ nguyên khách/công trình cũ thì không chặn
   var id = 'LD' + pad(nextId('LAPDAT'), 6);
   appendBlock('LapDat', [{ id: id, serial: r.sr.serial, key: r.sr.key, maHang: r.sr.maHang, loai: v.loai, ngay: v.ngay, maKH: v.maKH, maCongTrinh: v.maCongTrinh, diaChi: v.diaChi, tenTaiCT: v.tenTaiCT,
     viDo: v.viDo, kinhDo: v.kinhDo, thangBH: v.loai === 'BAN_GIAO' && v.thangBH !== '' ? String(v.thangBH) : '', soBBBG: v.soBBBG, ghiChu: v.ghiChu, nguoiGhi: u.email, thoiGian: nowIso(), requestId: String(req.requestId),
@@ -176,7 +177,7 @@ function bhReplace(u, req, logs) {
     var sv = QSerial.apply(QSerial.index(readTable('Serial').rows), { loai: 'NHAP_HANG_LOI', kho: loi.maKho, lines: ctxL.lines }, { items: items, choLapDat: true });   // kiểm trước khi ghi phiếu đầu
     if (!sv.ok) throw fail(sv.code, engineMsg(sv), sv.errors);
   }
-  var rx = px ? { soPhieu: px.soPhieu, tinhLai: 0 } : commitVoucher(u, req, logs, voucherPrep(u, { requestId: req.requestId, voucher: { loai: 'XUAT_BH', ngay: ngay, kho: kho.maKho, maKH: vt.maKH || lsx.maKH || '', maCongTrinh: vt.maCongTrinh || lsx.maCongTrinh || '',
+  var rx = px ? { soPhieu: px.soPhieu, tinhLai: 0 } : commitVoucher(u, req, logs, voucherPrep(u, { requestId: req.requestId, voucher: { loai: 'XUAT_BH', ngay: ngay, kho: kho.maKho, maKH: (vt.maKH ? vt : lsx).maKH || '', maCongTrinh: (vt.maKH ? vt : lsx).maCongTrinh || '',   /* cặp khách–công trình lấy cùng 1 nguồn */
     lyDo: 'Bảo hành ' + t.soPBH + ' — tủ ' + cab.serial + (mien ? '' : ' (thiện chí: ' + tc + ')'), soCTGoc: t.soPBH, ngayCTGoc: t.ngay, lines: outL } }, true));
   var rl = pl ? { soPhieu: pl.soPhieu } : ctxL ? commitVoucher(u, req, logs, ctxL) : null;
   // linh kiện mới: lắp vào tủ (DA_LAP + serialCha); cũ: gỡ khỏi tủ (chỉ khi còn trỏ đúng tủ này)
