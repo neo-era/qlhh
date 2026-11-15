@@ -26,7 +26,7 @@ var QSchema=(function(){
     // dòng kho '154' = dở dang của lệnh SX (maHang = số lệnh); dòng '#DONG' = dấu nhận dạng (băm) mọi dòng phiếu đến ngày khoá — sửa tay dòng phiếu kỳ khoá là phát hiện
     SoDuKhoaSo:{cols:['ngayKhoa','maHang','kho','soLuong','giaTri','thoiGian','ghiChu'],num:['soLuong','giaTri'],text:['ngayKhoa','maHang','kho','ghiChu']},
     // lịch sử khoá / lùi / mở khoá sổ: ghi TRƯỚC khi đổi ngày khoá (dấu vết kiểm toán kể cả khi lệnh chết giữa chừng)
-    LichSuKhoaSo:{cols:['thoiGian','email','loai','ngayCu','ngayMoi','lyDo','soDuLech','requestId'],num:['soDuLech'],text:['loai','ngayCu','ngayMoi','requestId']},
+    LichSuKhoaSo:{cols:['thoiGian','email','loai','ngayCu','ngayMoi','lyDo','soDuLech','requestId','bam'],num:['soDuLech'],text:['loai','ngayCu','ngayMoi','requestId','bam']},
     // sản xuất tủ (SX-1). Mẫu tủ: mỗi phiên bản 1 dòng, định mức + mục kiểm tra lưu JSON (bất biến sau khi ghi)
     MauSanPham:{key:'id',cols:['id','maMau','phienBan','maHang','ten','kichThuoc','moTa','vatLieu','ketCau','filePLC','thongSoDien','ghiChuDM','thangBH','bom','kcs','trangThai','nguoiTao','thoiGian','requestId'],num:['phienBan','thangBH'],text:['id','maMau','maHang','kichThuoc','requestId']},
     LenhSX:{key:'soLSX',cols:['soLSX','ngay','maMau','phienBan','maHang','soLuong','maKH','maCongTrinh','canCuCheTao','kho','trangThai','ghiChu','nguoiTao','thoiGian','lyDoHuy','requestId'],num:['phienBan','soLuong'],text:['soLSX','ngay','maMau','maHang','maKH','maCongTrinh','kho','requestId']},

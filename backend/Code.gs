@@ -191,7 +191,6 @@ var TABLES = { items: 'HangHoa', groups: 'NhomHang', suppliers: 'NhaCungCap', pr
    - ghi xong cả bảng (TonKho, HangHoa) → đặt luôn bản mới vào bộ đệm (write-through) để lệnh sau khỏi đọc lại;
    - sheet bị sửa tay ngoài app: bộ đệm sống tối đa 10 phút; "Tính lại tồn" luôn đọc thẳng sheet (FRESH). */
 var MEMO = {}, PROF = [], DIRTY = {}, WT = {}, VERS = null, FRESH = false, WROTE = false, VERIFIED = {};
-var ROWW = ['HangHoa', 'TonKho', 'LenhSX', 'ChiPhiLSX', 'HoSoTu', 'LapDat', 'PhieuBaoHanh', 'CauHinh'];   // bảng trong bộ đệm có ghi theo số dòng
 var CACHE_T = ['HangHoa', 'NhomHang', 'NhaCungCap', 'BangGia', 'Kho', 'QuyDoiDVT', 'KhachHang', 'CongTrinh', 'TonKho', 'CauHinh', 'MauSanPham', 'LenhSX', 'ChiPhiLSX', 'HoSoTu', 'LapDat', 'PhieuBaoHanh'];
 function mark(l) { PROF.push([l, Date.now()]); }
 function newVer() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
@@ -255,8 +254,9 @@ function keyCols(n) { return QSchema.SHEETS[n].key ? 1 : 2; }
 function kv(v) { return v instanceof Date ? new Date(v.getTime() + 7 * 3600e3).toISOString().slice(0, 10) : String(v === undefined || v === null ? '' : v).trim().replace(/^'(?=[=+\-@])/, ''); }
 function guardTable(n) {
   if (!cachedT(n) || VERIFIED[n] || !MEMO[n]) return;
-  var s = sheet(n), last = s.getLastRow(), k = keyCols(n), cols = QSchema.SHEETS[n].cols, at = {};
-  var vals = last >= 2 ? s.getRange(2, 1, last - 1, k).getValues() : []; mark('guard ' + n);
+  var s = sheet(n), k = keyCols(n), cols = QSchema.SHEETS[n].cols, at = {};
+  var vals = s.getRange(k === 1 ? 'A2:A' : 'A2:B').getValues(); mark('guard ' + n);   // 1 lệnh gọi: cả cột khoá (kèm dòng trống cuối sheet)
+  while (vals.length && vals[vals.length - 1].every(function (x) { return x === '' || x === null; })) vals.pop();
   MEMO[n].rows.forEach(function (r) { at[r._row] = r; });
   for (var i = 0; i < vals.length; i++) {
     var row = i + 2, r = at[row], key = vals[i].map(kv).join('|');
@@ -267,8 +267,9 @@ function guardTable(n) {
   if (Object.keys(at).length) return stale(n);
   VERIFIED[n] = true;
 }
-/** Đối chiếu MỌI bảng ghi-theo-dòng đã lấy từ bộ đệm trong lệnh này — gọi TRƯỚC lần cấp số / lần ghi đầu tiên → lệch thì chưa ghi gì, không nhảy số. */
-function guardAll() { for (var i = 0; i < ROWW.length; i++) if (MEMO[ROWW[i]] && !VERIFIED[ROWW[i]]) guardTable(ROWW[i]); }
+/** Đối chiếu TRƯỚC lần cấp số / lần ghi đầu tiên các bảng mà lệnh sẽ ghi theo số dòng → lệch thì chưa ghi gì, không nhảy số.
+ *  (Bảng khác vẫn được đối chiếu lúc ghi theo dòng — putRow / putMany / writeTon / updateCost.) */
+function guardEarly(names) { names.forEach(function (n) { if (cachedT(n) && !VERIFIED[n]) { readTable(n); guardTable(n); } }); }
 function stale(n) { DIRTY[n] = newVer(); WT[n] = false; delete MEMO[n]; throw fail('STALE', 'Sheet ' + n + ' vừa được sửa trực tiếp trên Google Sheet — máy chủ đọc lại, thử lại', null); }
 function syncPull(u, req) {
   var ver = Number(props().getProperty('dataVersion') || 1);   // đọc version TRƯỚC dữ liệu
@@ -355,7 +356,7 @@ function findRequest(rq, id) {
   return null;
 }
 function bumpVersion() { var p = props(); p.setProperty('dataVersion', String(Number(p.getProperty('dataVersion') || 1) + 1)); }
-function nextId(key) { guardAll(); var p = props(), v = Number(p.getProperty('seq:' + key) || 0) + 1; p.setProperty('seq:' + key, String(v)); return v; }
+function nextId(key) { var p = props(), v = Number(p.getProperty('seq:' + key) || 0) + 1; p.setProperty('seq:' + key, String(v)); return v; }
 
 /** Tìm 1 dòng theo khoá (cột đầu) bằng TextFinder. Trả {row, obj} hoặc null. */
 function findByKey(n, key) {
@@ -367,7 +368,7 @@ function findByKey(n, key) {
   o._row = cell.getRow(); return o;
 }
 function putRow(n, obj, row) {
-  guardAll(); if (row) guardTable(n);
+  if (row) guardTable(n);
   dirty(n);
   var s = sheet(n), vals = QSchema.toRow(n, obj);
   if (row) s.getRange(row, 1, 1, vals.length).setValues([vals]); else s.appendRow(vals);

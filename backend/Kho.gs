@@ -82,7 +82,7 @@ function engineMsg(r) {
 // ---------- ghi phiếu (dùng chung tạo & đảo) ----------
 var CT_COL = QSchema.SHEETS.ChiTietPhieu.cols.indexOf('giaTriKho') + 1, CL_COL = QSchema.SHEETS.ChiTietPhieu.cols.indexOf('chenhLechGV') + 1;
 function appendBlock(n, objs) {
-  if (!objs.length) return; guardAll();
+  if (!objs.length) return;
   var s = sheet(n), cols = QSchema.SHEETS[n].cols;
   if (objs.length === 1) s.appendRow(QSchema.toRow(n, objs[0]));   // 1 dòng: 1 lệnh gọi (không cần getLastRow)
   else s.getRange(s.getLastRow() + 1, 1, objs.length, cols.length).setValues(objs.map(function (o) { return QSchema.toRow(n, o); }));
@@ -110,7 +110,7 @@ function refreshTotals(sos) {
   var sum = {}, ps = sheet('Phieu'), cols = QSchema.SHEETS.Phieu.cols, n = 0;
   readTable('ChiTietPhieu').rows.forEach(function (l) { if (want && !want[l.soPhieu]) return; (sum[l.soPhieu] = sum[l.soPhieu] || []).push(l); });
   readTable('Phieu').rows.forEach(function (h) {
-    if (want && !want[h.soPhieu]) return; var L = sum[h.soPhieu]; if (!L) return;
+    if (want && !want[h.soPhieu]) return; var L = sum[h.soPhieu]; if (!L || h.trangThai !== 'HOAN_TAT') return;   // đầu phiếu bỏ số giữ tổng 0
     var priced = QStock.TYPES[h.loai] && QStock.TYPES[h.loai].cost === 'PRICE';
     var t = L.reduce(function (a, l) { return a + (priced ? Number(l.thanhTien) || 0 : (Number(l.giaTriKho) || 0) + (Number(l.chenhLechGV) || 0)); }, 0);
     if (t !== Number(h.tongTien)) { var x = strip(h); x.tongTien = t; ps.getRange(h._row, 1, 1, cols.length).setValues([QSchema.toRow('Phieu', x)]); n++; }
@@ -153,7 +153,13 @@ function revertSerials(so) {
 function cleanupOrphans(logs, full) {
   var pend = pendingList();
   if (!pend.length && !full) { mark('orphans none'); return; }
-  pend.forEach(function (so) {
+  pend.forEach(function (so) { try { cleanOne(so, logs); } catch (e) {   // 1 dấu dọn lỗi không được chặn mọi lệnh ghi khác
+      if (e && e.qlhh && e.qlhh.code === 'STALE') throw e;
+      logs.push({ action: 'voucher.orphanLoi', doiTuong: 'Phieu', id: so, truoc: null, sau: { loi: String(e && (e.qlhh ? e.qlhh.error : e.message) || e).slice(0, 300) } }); } });
+  cleanupFull(logs, full);
+}
+function cleanOne(so, logs) {
+  {
     var info = pendingInfo(so);
     if (info.loai === 'CHI_PHI') {   // ghi chi phí lệnh SX dở: đã tính lại giá thành nhưng chưa có dòng chi phí → tính lại về như cũ
       if (!readTable('ChiPhiLSX').rows.some(function (c) { return c.requestId === info.rid; })) { var mx = lsxMas(info.soLSX); if (mx.length) rebuildFor(mx);
@@ -172,7 +178,9 @@ function cleanupOrphans(logs, full) {
     if (mas.length) rebuildFor(uniq(mas));   // dòng phiếu không có đầu phiếu bị bỏ qua khi tính → TonKho, giá vốn về đúng
     clearPending(so);
     logs.push({ action: 'voucher.orphan', doiTuong: 'Phieu', id: so, truoc: { trangThai: h ? h.trangThai : 'CHUA_GHI_DAU_PHIEU' }, sau: { trangThai: 'LOI_GHI' } });
-  });
+  }
+}
+function cleanupFull(logs, full) {
   if (full) {   // bộ đệm "đang ghi" mất: dòng phiếu / lịch sử serial / hồ sơ tủ không có đầu phiếu = phiếu ghi dở → trả serial, huỷ hồ sơ tủ
     var hd = {}; readTable('Phieu').rows.forEach(function (p) { hd[p.soPhieu] = 1; });
     var orf = uniq(readTable('ChiTietPhieu').rows.map(function (l) { return l.soPhieu; }).concat(readTable('LichSuSerial').rows.map(function (l) { return l.soPhieu; }), readTable('HoSoTu').rows.filter(function (c) { return c.trangThai !== 'HUY'; }).map(function (c) { return c.soPhieuNhap; })).filter(function (so) { return so && !hd[so]; }));
@@ -329,6 +337,7 @@ function commitVoucher(u, req, logs, ctx, opt) {
     sr = QSerial.apply(QSerial.index(readTable('Serial').rows), cand, { items: items, khoLoi: o.khoLoi, vouchers: vctx, choLapDat: !!ctx.choLapDat });
     if (!sr.ok) throw fail(sr.code, engineMsg(sr), sr.errors);
   }
+  guardEarly(['TonKho', 'HangHoa'].concat(h.soLSX || lines.some(function (l) { return l.serials.length; }) ? ['HoSoTu', 'LenhSX'] : []));   // sửa tay Sheet → STALE trước khi cấp số
   // cấp số trong khoá: thứ tự toàn cục + số theo loại/năm
   var stt = nextId('stt'), pre = QStock.prefix(h.loai), yr = h.ngay.slice(0, 4), so = pre + '-' + yr + '-' + pad(nextId('PH:' + pre + ':' + yr), 5);
   var tong = 0;
@@ -377,6 +386,7 @@ function voucherReverse(u, req, logs) {
   var hist = readTable('LichSuSerial').rows.filter(function (x) { return x.soPhieu === gso; });
   var sr = QSerial.reverse(QSerial.index(readTable('Serial').rows), hist, '');
   if (!sr.ok) throw fail(sr.code, engineMsg(sr), sr.errors);
+  guardEarly(['TonKho', 'HangHoa', 'HoSoTu', 'LenhSX']);
   var stt = nextId('stt'), yr = ngay.slice(0, 4), so = 'DA-' + yr + '-' + pad(nextId('PH:DA:' + yr), 5), tong = 0;
   var lines = g.lines.map(function (l) { var v = r.result.lines['~MOI#' + l.dong] || 0; tong += v;
     return { soPhieu: so, dong: l.dong, maHang: l.maHang, dvt: l.dvt, soLuongCT: l.soLuongCT, heSo: l.heSo, soLuong: l.soLuong, donGia: l.donGia, thanhTien: l.thanhTien, giaTriKho: v, slSoSach: l.slSoSach, slThucTe: l.slThucTe, dongGoc: l.dong, serials: l.serials.length ? JSON.stringify(l.serials) : '', chenhLechGV: r.result.adj['~MOI#' + l.dong] || '' }; });
@@ -416,17 +426,19 @@ function balancesAt(d) {
     Object.keys(t.kho).forEach(function (k) { if (q3(t.kho[k])) m[ma + '|' + k] = { maHang: ma, kho: k, soLuong: q3(t.kho[k]), giaTri: '' }; }); });
   Object.keys(o.lsx || {}).forEach(function (so) { var b = QSX.balance(r.lsx[so], o.lsx[so], d); if (Math.round(b)) m[so + '|154'] = { maHang: so, kho: '154', soLuong: '', giaTri: Math.round(b) }; });
   var heads = readTable('Phieu').rows.filter(function (h) { return h.ngay && h.ngay <= d; }), hs = {}, parts = [];
-  heads.forEach(function (h) { hs[h.soPhieu] = 1; parts.push(['H', h.soPhieu, h.loai, h.ngay, h.kho, h.khoDen, h.trangThai, h.phieuGoc].join('|')); });
+  heads.forEach(function (h) { hs[h.soPhieu] = 1; parts.push(['H', h.soPhieu, h.stt, h.loai, h.ngay, h.kho, h.khoDen, h.trangThai, h.phieuGoc, h.hieuLuc, h.soLSX, h.maNCC, h.maKH, h.maCongTrinh, h.soCTGoc].join('|')); });
   readTable('ChiTietPhieu').rows.forEach(function (l) { if (hs[l.soPhieu]) parts.push(['L', l.soPhieu, l.dong, l.maHang, l.soLuong, l.donGia, l.thanhTien, l.giaTriKho, l.chenhLechGV, l.serials].join('|')); });
-  parts.sort(); var hh = 0, str = parts.join('\n'); for (var i = 0; i < str.length; i++) hh = (hh * 31 + str.charCodeAt(i)) >>> 0;
-  m['#DONG|#'] = { maHang: '#DONG', kho: '#', soLuong: parts.length, giaTri: '', ghiChu: hh.toString(36) };
+  parts.sort(); m['#DONG|#'] = { maHang: '#DONG', kho: '#', soLuong: parts.length, giaTri: '', ghiChu: sha(parts.join('\n')) };   // SHA-256
   return { bal: m, errors: r.errors.filter(function (e) { return !e.ngay || e.ngay <= d; }) };
 }
 /** Bộ số dư chốt CÒN HIỆU LỰC của ngày khoá x: bộ mới nhất, ghi sau lần lùi / mở khoá gần nhất về trước ngày x (sau lần đó dữ liệu ≤ x có thể đã được sửa hợp lệ). */
 function snapshotAt(x, raw) {
   var reopen = '';
-  readTable('LichSuKhoaSo').rows.forEach(function (e) { if ((e.loai === 'LUI' || e.loai === 'MO') && (!e.ngayMoi || e.ngayMoi < x) && String(e.thoiGian) > reopen) reopen = String(e.thoiGian); });
-  var rows = readTable('SoDuKhoaSo').rows.filter(function (r) { return r.ngayKhoa === x && (raw || String(r.thoiGian) > reopen); }); if (!rows.length) return null;
+  var snaps = readTable('SoDuKhoaSo').rows;
+  readTable('LichSuKhoaSo').rows.forEach(function (e) {   // chỉ lần lùi ĐÃ CÓ HIỆU LỰC (đã chốt lại tại ngày mới sau thời điểm lùi); lệnh lùi chết giữa chừng không tính
+    if (e.loai !== 'LUI' || !(e.ngayMoi < x) || String(e.thoiGian) <= reopen) return;
+    if (snaps.some(function (r) { return r.ngayKhoa === e.ngayMoi && String(r.thoiGian) >= String(e.thoiGian); })) reopen = String(e.thoiGian); });
+  var rows = snaps.filter(function (r) { return r.ngayKhoa === x && (raw || String(r.thoiGian) > reopen); }); if (!rows.length) return null;
   var last = rows.reduce(function (mx, r) { return String(r.thoiGian) > mx ? String(r.thoiGian) : mx; }, ''), out = {};
   rows.forEach(function (r) { if (String(r.thoiGian) === last && r.maHang) out[r.maHang + '|' + r.kho] = r; });
   return out;
@@ -466,6 +478,10 @@ function periodLock(u, req, logs) {
   if (loai === 'MO' && readTable('SoDuKhoaSo').rows.length) throw fail('VALIDATION', 'Đã có số dư chốt — không mở khoá toàn bộ; chọn ngày lùi khoá về (vd cuối kỳ cần sửa − 1 ngày)', { ngay: 'Chọn ngày' });
   if ((loai === 'MO' || loai === 'LUI') && lyDo.length < LYDO_MIN) throw fail('VALIDATION', (d ? 'Lùi ngày khoá sổ về ' + d : 'Mở khoá sổ') + ' (đang khoá đến ' + old + ') phải ghi lý do (ít nhất ' + LYDO_MIN + ' ký tự)', { lyDo: 'Ghi rõ lý do, ai yêu cầu' });
   var res = { ngayKhoaSo: d, soDuChot: 0, tinhLai: 0, daoGoc: [] }, lech = [];
+  if (loai === 'LUI' && !ev) {   // trước khi lùi: phần đến ngày khoá cũ phải khớp số chốt (không hợp thức hoá số sửa tay)
+    var lv = lockDiff(old);
+    if (lv.length) throw fail('PERIOD_LOCKED', 'Chưa lùi khoá được: kỳ đã khoá có ' + lv.length + ' số dư / dòng phiếu khác lúc chốt (sửa tay trên Google Sheet?). Đối chiếu và trả số về như cũ trước', lv.slice(0, 50));
+  }
   if (d) {
     cleanupOrphans(logs, true);
     if (loai === 'KHOA') {   // kỳ còn mở: dòng phiếu nào lệch số tính lại (lệnh dở dang…) thì sửa trước khi chốt → chứng từ kỳ khoá khớp số chốt
@@ -474,10 +490,16 @@ function periodLock(u, req, logs) {
     }
     var b = balancesAt(d);
     if (b.errors.length) { var e = b.errors[0]; throw fail('VALIDATION', 'Chưa chốt được: đến ngày ' + d + ' còn ' + b.errors.length + ' chỗ tồn/giá trị âm (vd mã ' + e.maHang + (e.soPhieu ? ', phiếu ' + e.soPhieu : '') + '). Lùi ngày khoá về trước chỗ âm (ghi lý do), sửa phiếu, rồi khoá lại', b.errors.slice(0, 20)); }
-    var prev = loai !== 'LUI' ? snapshotAt(d, true) : null; lech = prev ? balDiff(prev, b.bal) : [];
+    var prev = loai !== 'LUI' ? snapshotAt(d, true) : null; lech = prev ? balDiff(prev, b.bal).map(function (z) { z.ngayKhoa = d; return z; }) : [];
+    var bm = null;
+    if (loai === 'KHOA' && mx && mx > old && d > mx) {   // khoá vượt ngày khoá cao nhất trong lúc đang mở lại: giải trình chênh lệch so với số chốt cũ của ngày đó, chốt lại ngày đó
+      bm = balancesAt(mx); var pm = snapshotAt(mx, true);
+      if (pm) lech = lech.concat(balDiff(pm, bm.bal).map(function (z) { z.ngayKhoa = mx; return z; }));
+    }
     if (lech.length && lyDo.length < LYDO_MIN) throw fail('VALIDATION', 'Khoá lại ngày ' + d + ': ' + lech.length + ' số dư khác lần chốt trước — ghi lý do (ít nhất ' + LYDO_MIN + ' ký tự) để xác nhận', lech.slice(0, 50));
-    if (!ev) appendBlock('LichSuKhoaSo', [{ thoiGian: nowIso(), email: u.email, loai: loai, ngayCu: old, ngayMoi: d, lyDo: lyDo, soDuLech: lech.length, requestId: rid }]);
-    var t = nowIso(), rows = Object.keys(b.bal).sort().map(function (k) { var x = b.bal[k]; return { ngayKhoa: d, maHang: x.maHang, kho: x.kho, soLuong: x.soLuong, giaTri: x.giaTri, thoiGian: t, ghiChu: x.ghiChu || '' }; });
+    if (!ev) appendBlock('LichSuKhoaSo', [{ thoiGian: nowIso(), email: u.email, loai: loai, ngayCu: old, ngayMoi: d, lyDo: lyDo, soDuLech: lech.length, requestId: rid, bam: b.bal['#DONG|#'].ghiChu }]);
+    var t = nowIso(), mkRows = function (bb, dd) { return Object.keys(bb.bal).sort().map(function (k) { var x = bb.bal[k]; return { ngayKhoa: dd, maHang: x.maHang, kho: x.kho, soLuong: x.soLuong, giaTri: x.giaTri, thoiGian: t, ghiChu: x.ghiChu || '' }; }); };
+    var rows = (bm ? mkRows(bm, mx) : []).concat(mkRows(b, d));
     appendBlock('SoDuKhoaSo', rows); res.soDuChot = rows.length; res.daoGoc = daoGoc(d);
   } else if (!ev) appendBlock('LichSuKhoaSo', [{ thoiGian: nowIso(), email: u.email, loai: loai, ngayCu: old, ngayMoi: '', lyDo: lyDo, soDuLech: '', requestId: rid }]);
   if (d !== old) setCfg('ngayKhoaSo', d);
@@ -487,9 +509,9 @@ function periodLock(u, req, logs) {
   logs.push({ action: act[loai], doiTuong: 'CauHinh', id: 'ngayKhoaSo', truoc: { ngay: old }, sau: { ngay: d, lyDo: lyDo || undefined, soDuChot: res.soDuChot || undefined, lechLanTruoc: lech.length || undefined, tinhLai: res.tinhLai || undefined } });
   return res;
 }
-/** So số dư các ngày đã khoá gần nhất (tối đa 3 ngày, ≤ ngày khoá hiện hành) với bộ chốt còn hiệu lực. */
-function lockDiff(lock) {
-  var ds = uniq(readTable('SoDuKhoaSo').rows.map(function (r) { return r.ngayKhoa; }).filter(function (x) { return x && x <= lock; })).sort().reverse().slice(0, 3), out = [];
+/** So số dư các ngày đã khoá gần nhất (tối đa 12 ngày, ≤ ngày khoá hiện hành) với bộ chốt còn hiệu lực. */
+function lockDiff(lock, from) {   // from: chỉ các ngày > from (lùi khoá: phần vẫn còn khoá)
+  var ds = uniq(readTable('SoDuKhoaSo').rows.map(function (r) { return r.ngayKhoa; }).filter(function (x) { return x && x <= lock && (!from || x > from); })).sort().reverse().slice(0, 12), out = [];
   ds.forEach(function (x) { var sn = snapshotAt(x); if (!sn) return; balDiff(sn, balancesAt(x).bal).forEach(function (z) { z.ngayKhoa = x; out.push(z); }); });
   return out;
 }
@@ -519,7 +541,11 @@ function reportNxt(u, req) {
 // ---------- danh mục đợt ② ----------
 function simpleUpsert(n, kf, v, req, logs, act) {
   var cur = findByKey(n, v[kf]);
-  if (req.isNew && cur) throw fail('VALIDATION', 'Mã ' + v[kf] + ' đã có', mk(kf, 'Mã đã tồn tại'));
+  if (req.isNew && cur) {   // gửi lại sau khi đã ghi (cùng nội dung) → coi như xong; khác nội dung = trùng mã thật
+    var same = Object.keys(v).every(function (k) { return String(v[k] === undefined || v[k] === null ? '' : v[k]) === String(cur[k] === undefined || cur[k] === null ? '' : cur[k]); });
+    if (same) return mk(kf, v[kf]);
+    throw fail('VALIDATION', 'Mã ' + v[kf] + ' đã có', mk(kf, 'Mã đã tồn tại'));
+  }
   putRow(n, v, cur && cur._row);
   logs.push({ action: act, doiTuong: n, id: v[kf], truoc: cur ? strip(cur) : null, sau: v });
   return mk(kf, v[kf]);

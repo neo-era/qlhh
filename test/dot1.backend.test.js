@@ -331,3 +331,48 @@ test('V1 kế toán B5/B6: sửa tay chi phí lệnh dở dang hoặc dòng phi�
   const pn = a.sheets.ChiTietPhieu.d.find(z => z[0] === 'PN-2026-00001' && z[2] === 'VO'); pn[col('ChiTietPhieu', 'thanhTien')] = 1;
   r = W('stock.rebuild', {}); assert.equal(r.chanKyKhoa, true); assert.ok(r.lechSoDu.some(z => z.kho === 'Dòng phiếu'));
 });
+
+// ================= vòng 2 =================
+test('V2 tech B-2: chỉ sắp xếp tay HangHoa → không nhảy số phiếu, không đầu phiếu bỏ số', () => {
+  const x = plant(), { a, W } = x; x.buy('2026-11-01', 1); x.pull(); rev(a.sheets.HangHoa);
+  const r = W('voucher.create', { voucher: { loai: 'NHAP_MUA', ngay: '2026-11-12', kho: 'KHO', maNCC: 'NCC1', lines: [{ maHang: 'VO', soLuongCT: 1, gia: 100 }] } }, x.nv);
+  assert.equal(r.soPhieu, 'PN-2026-00002'); assert.ok(!a.sheets.Phieu.d.some(z => z[col('Phieu', 'trangThai')] === 'LOI_GHI'));
+});
+test('V2 tech B-1: đối chiếu cột khoá 1 lệnh gọi/bảng, không đối chiếu CauHinh khi lập phiếu thường', () => {
+  const x = plant(), { a, W } = x; x.buy('2026-11-01', 1); x.pull();
+  for (const k of Object.keys(a.reads)) delete a.reads[k];
+  W('voucher.create', { voucher: { loai: 'NHAP_MUA', ngay: '2026-11-12', kho: 'KHO', maNCC: 'NCC1', lines: [{ maHang: 'VO', soLuongCT: 1, gia: 100 }] } }, x.nv);
+  const g = Object.keys(a.reads).filter(k => k.endsWith('#col')).sort(); assert.deepEqual(g, ['HangHoa#col', 'TonKho#col']);
+});
+test('V2 kế toán B-1: sửa tay phiếu kỳ khoá rồi lùi khoá → chặn, không hợp thức hoá', () => {
+  const x = plant(), { a, W, P } = x; x.buy('2026-11-01', 1); W('period.lock', { ngay: '2026-11-08' });
+  a.sheets.ChiTietPhieu.d.find(z => z[0] === 'PN-2026-00001' && z[2] === 'VO')[col('ChiTietPhieu', 'thanhTien')] = 9200000;
+  const r = P('period.lock', { ngay: '2026-11-07', lyDo: 'Lùi khoá kiểm tra theo yêu cầu' }); assert.equal(r.ok, false); assert.equal(r.code, 'PERIOD_LOCKED');
+  assert.equal(a.raw.ngayKhoaSo || a.sheets.CauHinh.d.find(z => z[0] === 'ngayKhoaSo')[1], '2026-11-08');
+});
+test('V2 kế toán B-2: lệnh lùi khoá chết giữa chừng không làm mất hiệu lực số chốt', () => {
+  const x = plant(), { a, W } = x; x.buy('2026-11-01', 1); W('period.lock', { ngay: '2026-11-05' });
+  once(a.sheets.SoDuKhoaSo, 'getRange', r => typeof r === 'number');
+  assert.equal(x.P('period.lock', { ngay: '2026-11-03', lyDo: 'Lùi khoá để sửa phiếu nhập' }).ok, false);
+  assert.equal(a.sheets.CauHinh.d.find(z => z[0] === 'ngayKhoaSo')[1], '2026-11-05');
+  a.sheets.ChiTietPhieu.d.find(z => z[0] === 'PN-2026-00001' && z[2] === 'VO')[col('ChiTietPhieu', 'thanhTien')] = 1;
+  assert.equal(W('stock.rebuild', {}).chanKyKhoa, true, 'vẫn bảo vệ kỳ khoá');
+});
+test('V2 kế toán B-3: khoá vượt ngày khoá cao nhất sau khi mở lại → giải trình chênh lệch so với số chốt cũ', () => {
+  const x = plant(), { a, W, P } = x; x.buy('2026-11-01', 2);
+  W('period.lock', { ngay: '2026-11-05' }); W('period.lock', { ngay: '2026-11-08' });
+  W('period.lock', { ngay: '2026-11-03', lyDo: 'Mở lại để bổ sung phiếu xuất' });
+  W('voucher.create', { voucher: { loai: 'XUAT_BAN', ngay: '2026-11-07', kho: 'KHO', maKH: 'TN', maCongTrinh: 'PDG', lines: [{ maHang: 'DEN', soLuongCT: 1 }] } });
+  W('period.lock', { ngay: '2026-11-06' });
+  const r = P('period.lock', { ngay: '2026-11-10' }); assert.equal(r.ok, false, 'phải ghi lý do'); assert.ok(r.fields.some(z => z.ngayKhoa === '2026-11-08'));
+  W('period.lock', { ngay: '2026-11-10', lyDo: 'Bổ sung xuất 1 đèn ngày 07/11 theo hoá đơn' });
+  assert.ok(a.sheets.SoDuKhoaSo.d.some(z => z[0] === '2026-11-08' && z[5] > a.sheets.SoDuKhoaSo.d.find(y => y[0] === '2026-11-08')[5]), 'chốt lại ngày 08/11');
+  assert.equal(W('stock.rebuild', {}).chanKyKhoa, undefined);
+});
+test('V2 kế toán C3: sửa tay khách hàng của phiếu kỳ khoá → bị phát hiện', () => {
+  const x = plant(), { a, W } = x; x.buy('2026-11-01', 1);
+  W('voucher.create', { voucher: { loai: 'XUAT_BAN', ngay: '2026-11-02', kho: 'KHO', maKH: 'TN', maCongTrinh: 'PDG', lines: [{ maHang: 'DEN', soLuongCT: 1 }] } });
+  W('period.lock', { ngay: '2026-11-05' });
+  a.sheets.Phieu.d.find(z => z[2] === 'XUAT_BAN')[col('Phieu', 'maKH')] = 'KHAC';
+  assert.equal(W('stock.rebuild', {}).chanKyKhoa, true);
+});

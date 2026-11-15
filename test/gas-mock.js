@@ -22,7 +22,7 @@ function env(tokeninfo, ownerEmail = 'MaiVuLam2020@gmail.com', shared) {
       getDataRange() { const me = this; reads[n] = (reads[n] || 0) + 1; return { getValues: () => me.d.map(r => r.slice()) }; },
       getRange(r, c, nr, nc) {
         const me = this;
-        if (typeof r === 'string') { const [a, b] = r.split(':'); return { setNumberFormat: f => { for (let i = colIdx(a); i <= colIdx(b || a); i++) me.txt[i] = f === '@'; } }; }
+        if (typeof r === 'string') { const [a, b] = r.split(':'), c0 = colIdx(a), c1 = colIdx(b || a), r0 = Number(a.slice(1)) || 1; return { setNumberFormat: f => { for (let i = c0; i <= c1; i++) me.txt[i] = f === '@'; }, getValues: () => { reads[n + '#col'] = (reads[n + '#col'] || 0) + 1; return Array.from({ length: Math.max(0, me.d.length - r0 + 1) + 3 }, (_, i) => Array.from({ length: c1 - c0 + 1 }, (_, j) => { const row = me.d[r0 - 1 + i] || []; const v = row[c0 + j]; return v === undefined ? '' : v; })); } }; }
         nr = nr || 1; nc = nc || 1;
         return {
           getValues: () => Array.from({ length: nr }, (_, i) => Array.from({ length: nc }, (_, j) => { const row = me.d[r - 1 + i] || []; const v = row[c - 1 + j]; return v === undefined ? '' : v; })),
